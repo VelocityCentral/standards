@@ -53,113 +53,126 @@ procedure main
 endprocedure //main ------------------------------------------------------------
 
 screen rbtchproc-report-parameters
-//local x type number
 	allow entry
-	window @1,1 to @24,80
+	responsive
 	title ws-function-title
-	form-entry
 before
-	clear
-	box @1,1 to @19,80
-		title "Report Parameters"
-	box @20,1 to @23,80
-		title "Output Options"
-	set ws-start-group = min-value(ws-start-group)
 	set ws-end-group = max-value(ws-end-group)
 	set ws-start-stock-code = min-value(ws-start-stock-code)
 	set ws-end-stock-code = max-value(ws-end-stock-code)
 	set ws-start-whse = min-value(ws-start-whse)
 	set ws-end-whse = max-value(ws-end-whse)
 detail
-	accept ws-start-group @3,25
-		// add remove following lines as necessary
-		title 'Start Stock Group :'
-		optional
-		help "Start Stock Group"
-		uppercase
-		default ws-start-group
-	before-accept
-	end-before-accept
-	accept ws-end-group @4,25
-		// add remove following lines as necessary
-		title 'End Stock Group :'
-		optional
-		help "End Stock Group"
-		uppercase
-		fill with trailing '~'
-		default ws-end-group
-	before-accept
-		set ws-end-group = max-value(ws-end-group)
-		string ws-end-group replacing str-concat(ws-start-group) at 1
-	end-before-accept
-	accept ws-start-stock-code @5,25
-		// add remove following lines as necessary
-		title 'Start Stock Code :'
-		optional
-		help "Start Stock Code"
-		uppercase
-		default ws-start-stock-code
-	before-accept
-	end-before-accept
-	accept ws-end-stock-code @6,25
-		// add remove following lines as necessary
-		title 'End Stock Copde :'
-		optional
-		help "End Stock Copde"
-		uppercase
-		fill with trailing '~'
-		default ws-end-stock-code
-	before-accept
-		set ws-end-stock-code = max-value(ws-end-stock-code)
-		string ws-end-stock-code replacing str-concat(ws-start-stock-code) at 1
-	end-before-accept
-	accept ws-start-whse @7,25
-		// add remove following lines as necessary
-		title 'Start Warehouse :'
-		optional
-		help "Start Warehouse"
-		uppercase
-		default ws-start-whse
-	before-accept
-	end-before-accept
-	accept ws-end-whse @8,25
-		// add remove following lines as necessary
-		title 'End Warehouse :'
-		optional
-		help "End Warehouse"
-		uppercase
-		fill with trailing '~'
-		default ws-end-whse
-	before-accept
-		set ws-end-whse = max-value(ws-end-whse)
-		string ws-end-whse replacing str-concat(ws-start-whse) at 1
-	end-before-accept
-	check-box ws-update-min-stock		@12,25
-		values True False
-		title "Update Minimum Stock"
-		right-coordinate
-		default is FALSE
-	end-check-box 
-	check-box ws-update-max-stock		@13,25
-		values True False
-		title "Update Maximum Stock"
-		right-coordinate
-		default is FALSE
-	end-check-box 
-	radio-button ws-excel-flag
-		@21,18 NO title "No Export"
-		@21,27 "D" title "View Datagrid"
-		default "NO"
-		when not ws-update-min-stock and not ws-update-max-stock
-		help "N)o export D)isplay data as a datagrid"
-	on change
-		refresh ws-mail-recipients
-	endon
-	accept ws-mail-recipients @22,10 pic x(68)
-		title "Email:"
-		help "Enter space, comma or semi-colon separated list of email recipients"
-		when ws-excel-flag = NO
-		optional
+	screen-group // ---- Parameters ----------------------------
+		title "Parameters"  // The title is optional
+		field-group // ---- Group Range ----------------------------
+			title "Group Range"  // Title is optional
+			accept ws-start-group 
+				// add remove following lines as necessary
+				title 'From'
+				optional
+				help "Start Stock Group"
+				uppercase
+				default ws-start-group
+			before-accept
+				if screenmode = form-entry-defaults
+					set ws-start-group = min-value(ws-start-group)
+				endif
+			end-before-accept
+			accept ws-end-group 
+				// add remove following lines as necessary
+				title 'To'
+				optional
+				help "End Stock Group"
+				uppercase
+				fill with trailing '~'
+				default ws-end-group
+			before-accept
+				set ws-end-group = max-value(ws-end-group)
+				string ws-end-group replacing str-concat(ws-start-group) at 1
+			end-before-accept
+		end-field-group // ---- Group Range --------------------------------------
+		field-group // ---- Stock Code Range ----------------------------
+			title "Stock Code Range"  // Title is optional
+			accept ws-start-stock-code 
+				// add remove following lines as necessary
+				title 'From'
+				optional
+				help "Start Stock Code"
+				uppercase
+				default ws-start-stock-code
+			before-accept
+			end-before-accept
+			accept ws-end-stock-code 
+				// add remove following lines as necessary
+				title 'To'
+				optional
+				help "End Stock Copde"
+				uppercase
+				fill with trailing '~'
+				default ws-end-stock-code
+			before-accept
+				set ws-end-stock-code = max-value(ws-end-stock-code)
+				string ws-end-stock-code replacing str-concat(ws-start-stock-code) at 1
+			end-before-accept
+		end-field-group // ---- Stock Code Range --------------------------------------
+		field-group // ---- Warehouse Range ----------------------------
+			title "Warehouse Range"  // Title is optional
+			accept ws-start-whse 
+				// add remove following lines as necessary
+				title 'From'
+				optional
+				help "Start Warehouse"
+				uppercase
+				default ws-start-whse
+			before-accept
+			end-before-accept
+			accept ws-end-whse 
+				// add remove following lines as necessary
+				title 'To'
+				optional
+				help "End Warehouse"
+				uppercase
+				fill with trailing '~'
+				default ws-end-whse
+			before-accept
+				set ws-end-whse = max-value(ws-end-whse)
+				string ws-end-whse replacing str-concat(ws-start-whse) at 1
+			end-before-accept
+		end-field-group // ---- Warehouse Range --------------------------------------
+		check-box ws-update-min-stock		
+			values True False
+			title "Update Minimum Stock"
+			right-coordinate
+			default is FALSE
+		end-check-box 
+		check-box ws-update-max-stock		
+			values True False
+			title "Update Maximum Stock"
+			right-coordinate
+			default is FALSE
+		end-check-box 
+	end-screen-group // ---- Parameters --------------------------------------
+	screen-group // ---- Output Options ----------------------------
+		title "Output Options"  // The title is optional
+		field-group // ---- Export ----------------------------
+			title "Export"  // Title is optional
+			radio-button ws-excel-flag
+				NO title "No Export"
+				"D" title "View Datagrid"
+				default "NO"
+				when not ws-update-min-stock and not ws-update-max-stock
+				help "N)o export D)isplay data as a datagrid"
+			on change
+				refresh ws-mail-recipients
+			endon
+		end-field-group // ---- Export --------------------------------------
+		accept ws-mail-recipients pic x(68)
+			title "Email:"
+			help "Enter space, comma or semi-colon separated list of email recipients"
+			when ws-excel-flag = NO
+			optional
+	end-screen-group // ---- Output Options --------------------------------------
 	confirm auto
 	confirmed
 		if ws-excel-flag = "D"
