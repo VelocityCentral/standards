@@ -43,18 +43,14 @@ TODO:  Automatically updates back orders
 #include "../so/i50headso.spl"  
 
 link "clib/clib500"
+link "clib/clibvfile"
 
-// The following define is intended to be used to determine whether the order
-// is checked against the qty the customer has ordered or the qty the computer
-// THINKS we should ship.
-// At time of writing this is the ordered qty but as stock accuracy changes
-// the shipped qty could be used.
-
-#define QTY_TO_USE sol-ordered-qty
-//#defint QTY_TO_USE sol-shipped-qty
-
- 
 field
+	// configurations
+	ws-config-scan-like-stock-codes		type boolean
+	ws-config-allow-call-to-m5delfifo	type boolean
+	ws-config-qty-to-use				pic x  // O)rdered S)hipped
+	//
 	ws-function-title					type string
 	ws-start-datetime					type datetime
 	ws-end-datetime						type datetime
@@ -97,31 +93,9 @@ object mem-errors
 	end-record
 	key is m-bar-code
 
-mode md-select
-	prompt "Select"
 
-mode md-order
-	prompt "Order Enq"
-	help "Full Order Enquiry"
 
-mode md-validate
-	prompt "Validate"
 
-mode md-partial-validate
-	prompt "Partial"
-	help "Do not check for missing lines"
-
-mode md-update-shipped-qty
-	prompt "Update Shipped"
-	help "Update order with scanned qty's"
-
-mode md-despatch
-	prompt "Despatch"
-	help "Complete Despatch Process"
-
-mode md-exit
-	prompt "Exit"
-	help "Return to scan screen"
 
 procedure main
 local
@@ -136,6 +110,7 @@ local
 		parameters are sys-consolidation-division login-id() "ZVG" "T012"
 		returning ws-function-title 
 	do i8proglog-write-log
+	do load-configuration
 	I8GPARAM_NUM_ALPHA('-order',0,lf-so-order-no,lf-so-bo-suffix)
 	if lf-so-order-no != 0
 		get sales-order
@@ -157,12 +132,26 @@ local
 	else
 		do prompt-for-order
 	endif
+	do save-configuration
 end-procedure
 
 screen prompt-for-order
-	window
+local mode
+	lm-select
+		prompt "Select"
+	lm-order
+		prompt "Order Enq"
+		help "Full Order Enquiry"
+	lm-despatch
+		prompt "Despatch"
+		help "Complete Despatch Process"
+		mode-when ws-config-allow-call-to-m5delfifo
+	lm-config
+		prompt "Config"
+		help "Change configuration parameters for ALL users"
+	responsive
 		title ws-function-title
-	datagrid occurs 22
+	datagrid 
 	select *
 		from sales-order 
 		sales-order-status-desc 
@@ -172,48 +161,59 @@ screen prompt-for-order
 		and sosd-language = spaces
 		and accountcode = so-cust-code
 		order by so-order-no so-bo-suffix
-	allowed search md-select md-order //md-despatch
+	allowed search lm-select lm-order //lm-despatch
 detail
-	if screenmode = md-select
+	if screenmode = lm-select
 		do scan-order parameters are so-order-no so-bo-suffix
 	endif
-	if screenmode = md-order
+	if screenmode = lm-order
 		spl "so/m5ordenq" parameters are '-e' so-order-no so-bo-suffix
 	endif
-	if screenmode = md-despatch
+	if screenmode = lm-despatch
 		spl "so/m5delfifo" parameters are "-single" so-order-no so-bo-suffix
 	endif
-	accept so-order-no @1,1
-		title "Order"
-		when screenmode = search
-		show-value
-	accept so-bo-suffix @1,2
-		title "Order"
-		when screenmode = search
-		show-value
-	display sosd-description @1,3 pic x(20)
-		title "Status"
-	display so-order-date @1,4
-		title "Order Date"
-	display so-cust-code @1,5
-		title "Customer"
-	display shortname @1,6 pic x(40)
-		title "Cust Name"
-	display so-date-stamp @1,7
-		title "Date Received"
-	display so-time-stamp @1,8
-		title "Time Received"
+	if screenmode = lm-config
+		do maintain-configuration correct once
+	endif
+	screen-group // ---- Datagrid ----------------------------
+		accept so-order-no col 1
+			title "Order"
+			when screenmode = search
+			show-value
+		accept so-bo-suffix col 2
+			title "Order"
+			when screenmode = search
+			show-value
+		display sosd-description col 3 pic x(20)
+			title "Status"
+		display so-order-date col 4
+			title "Order Date"
+		display so-cust-code col 5
+			title "Customer"
+		display shortname col 6 pic x(40)
+			title "Cust Name"
+		display so-date-stamp col 7
+			title "Date Received"
+		display so-time-stamp col 8
+			title "Time Received"
+	end-screen-group // ---- Datagrid --------------------------------------
 end-screen
 
 screen scan-order
 parameters
 	lp-so-order-no						like so-order-no
 	lp-bo-suffix						like so-bo-suffix
-	window
-	title concat("Sales Order Scanning : " str(lp-so-order-no) lp-bo-suffix)
+local mode 
+	lm-validate
+		prompt "Validate"
+	lm-partial-validate
+		prompt "Partial"
+	help "Do not check for missing lines"
+	responsive
+		title concat("Sales Order Scanning : " str(lp-so-order-no) lp-bo-suffix)
 	select * from mem-order-lines
 	datagrid occurs 20
-	allowed search entry correct remove md-validate md-partial-validate
+	allowed search entry correct remove 
 local
 	lf-seq								type number
 	lf-message							pic x(100) type string
@@ -229,14 +229,14 @@ before
 		exit 1
 	endon
 detail
-	if screenmode = md-validate
+	if screenmode = lm-validate
 		do validate-lines parameters lp-so-order-no lp-bo-suffix TRUE
 			returning lf-order-update-occurred
 		if lf-order-update-occurred
 			exit
 		endif
 	end-if
-	if screenmode = md-partial-validate
+	if screenmode = lm-partial-validate
 		do validate-lines parameters lp-so-order-no lp-bo-suffix FALSE
 	end-if
 	if screenmode = entry
@@ -245,52 +245,50 @@ detail
 		end-select
 		set m-seq = lf-seq + 1
 	endif
-	accept m-seq @1,1 pic s(5)
-		title "Seq"
-		when screenmode = search
-		show-value
-	accept m-bar-code @1,2
-		title "Stock Code"
-		uppercase
-	validations
-		do validate-stock-code parameters are m-bar-code
-			returning m-stock-code m-qty m-weight lf-message
-		if exit-status != 0
-			message-box lf-message
-				title is ws-function-title
-				message-buttons  MSG_BOX_CANCEL
-				icon MSG_BOX_STOP
-				bell
-			re-enter m-bar-code
-		endif
-		if m-qty = 0
-			set m-qty = 1
-		endif
-		if screenmode = entry
-			if lf-last-stock-code != m-stock-code and lf-last-stock-code != spaces
-				do validate-one-stock-code parameters lf-last-stock-code
-					lp-so-order-no lp-bo-suffix
-				if exit-status != 0
-					re-enter m-bar-code
-				endif
+	screen-group // ---- Items ----------------------------
+		accept m-seq col 1 pic s(5)
+			title "Seq"
+			when screenmode = search
+			show-value
+		accept m-bar-code col 2
+			title "Stock Code"
+			uppercase
+		validations
+			do validate-stock-code parameters are m-bar-code
+				returning m-stock-code m-qty m-weight lf-message
+			if exit-status != 0
+				message-box lf-message
+					title is ws-function-title
+					message-buttons  MSG_BOX_CANCEL
+					icon MSG_BOX_STOP
+					bell
+				re-enter m-bar-code
 			endif
-			do validate-stock-on-order parameters are m-stock-code
-				lp-so-order-no lp-bo-suffix
-		endif
-	end-validations
-	display m-stock-code @1,4
-		title "Code"
-	accept m-qty @1,5
-		title "Qty"
-		default m-qty
-		when screenmode = correct
-		show-value
-//	display m-extended-qty @1,6
-//		title "Outer"
-	display m-weight @1,7
-		title "Weight"
-//	display m-status @1,8
-//		title "Status"
+			if m-qty = 0
+				set m-qty = 1
+			endif
+			if screenmode = entry
+				if lf-last-stock-code != m-stock-code and lf-last-stock-code != spaces
+					do validate-one-stock-code parameters lf-last-stock-code
+						lp-so-order-no lp-bo-suffix
+					if exit-status != 0
+						re-enter m-bar-code
+					endif
+				endif
+				do validate-stock-on-order parameters are m-stock-code
+					lp-so-order-no lp-bo-suffix
+			endif
+		end-validations
+		display m-stock-code col 3
+			title "Code"
+		accept m-qty col 4
+			title "Qty"
+			default m-qty
+			when screenmode = correct
+			show-value
+		display m-weight col 5
+			title "Weight"
+	end-screen-group // ---- Items --------------------------------------
 	confirm auto
 	before 
 		if screenmode = entry
@@ -398,7 +396,7 @@ local
 	close mem-errors and remove
 	open mem-errors temporary
 	set lf-error-count = 0
-	select stock-code, lf-tot-qty = sum(QTY_TO_USE)
+	select stock-code, lf-tot-qty = sum(if-then-else(ws-config-qty-to-use = "O",sol-ordered-qty,sol-shipped-qty))
 		from sales-order-line
 		where so-order-no = :lp-order-no
 		and so-bo-suffix = :lp-bo-suffix
@@ -420,7 +418,7 @@ local
 				str-concat("Stock Code:" 
 					stock-code 
 					" incorrect qty scanned (sb" 
-					concat(str(lf-tot-qty) " not " str(m-qty))
+					concat(" " str(lf-tot-qty) " not " str(m-qty))
 					")"
 					)
 				set lf-error-count += 1
@@ -440,12 +438,21 @@ local
 		if lf-count = 0
 			do add-error parameters are 0
 				str-concat("Stock Code: " m-bar-code " has been scanned but is not on the order")
+			set lf-error-count += 1
 		endif
 	end-select
-	do display-errors parameters are lp-order-no lp-bo-suffix
-		returning lr-order-update-occurred
-	if lr-order-update-occurred
-		exit
+	if lf-error-count = 0
+		message-box 
+			"There are no errors.  This order can be shipped in full."
+			title is ws-function-title
+			message-buttons  MSG_BOX_OK
+			icon MSG_BOX_INFORMATION
+	else
+		do display-errors parameters are lp-order-no lp-bo-suffix
+			returning lr-order-update-occurred
+		if lr-order-update-occurred
+			exit
+		endif
 	endif
 end-procedure
 
@@ -473,11 +480,19 @@ returning
 	lr-order-update-occurred			type boolean
 local
 	lf-tot-weight								type number
-window
+local mode 
+	lm-exit
+		prompt "Exit"
+		help "Return to scan screen"
+	lm-update-shipped-qty
+		prompt "Update Shipped"
+		help "Update order with scanned qty's"
+//
+	window
 	title "Errors on this order"
 	select * from mem-errors
 	datagrid occurs 20
-	allowed search md-exit md-update-shipped-qty
+	allowed search 
 before
 	set lr-order-update-occurred = FALSE
 	select lf-tot-weight = sum(m-weight)
@@ -488,10 +503,10 @@ before
 		str(lf-tot-weight)
 		) @1,5
 detail
-	if screenmode = md-exit
+	if screenmode = lm-exit
 		exit
 	endif
-	if screenmode = md-update-shipped-qty
+	if screenmode = lm-update-shipped-qty
 		do update-order parameters lp-order-no lp-bo-suffix
 		message-box "Order update complete."
 			title is ws-function-title
@@ -608,26 +623,28 @@ local
 	save mem-order-lines
 	do scan-qty parameters are lp-stock-code
 		returning lf-scan-count
-	select lf-qty = sum(QTY_TO_USE)
+	select lf-qty = sum(if-then-else(ws-config-qty-to-use = "O",sol-ordered-qty,sol-shipped-qty))
 		from sales-order-line
 		where so-order-no = :lp-order-no
 		and so-bo-suffix = :lp-bo-suffix
 		and sol-line-type = "SN"
 		and stock-code = :lp-stock-code
 	end-select
-	if lf-scan-count != lf-qty
-		message-box param-text("<<P1>><<BR>><<p2>><<BR>><<P3>><<BR>><<P4>>"
-			,"You have not scannned the correct qty"
-			,concat("Stock Code:",ltrim(lp-stock-code), " Order:", str(lp-order-no), lp-bo-suffix)
-			,concat("Scanned/Shipped:  " str(lf-scan-count) "/" str(lf-qty)),
-			,"Select OK to continue with this new item or Cancel to change this scan")
-			title is ws-function-title
-			message-buttons  MSG_BOX_OK_CANCEL
-			icon MSG_BOX_WARNING
-				bell
-		if message-status() = MSG_BOX_CANCEL
-			restore mem-order-lines
-			exit 1
+	if ws-config-scan-like-stock-codes
+		if lf-scan-count != lf-qty
+			message-box param-text("<<P1>><<BR>><<p2>><<BR>><<P3>><<BR>><<P4>>"
+				,"You have not scannned the correct qty"
+				,concat("Stock Code:",ltrim(lp-stock-code), " Order:", str(lp-order-no), lp-bo-suffix)
+				,concat("Scanned/Shipped:  " str(lf-scan-count) "/" str(lf-qty)),
+				,"Select OK to continue with this new item or Cancel to change this scan")
+				title is ws-function-title
+				message-buttons  MSG_BOX_OK_CANCEL
+				icon MSG_BOX_WARNING
+					bell
+			if message-status() = MSG_BOX_CANCEL
+				restore mem-order-lines
+				exit 1
+			endif
 		endif
 	endif
 	restore mem-order-lines
@@ -663,7 +680,7 @@ parameters
 local
 	lf-tot-qty							type number
 	//
-	select lf-tot-qty = sum(QTY_TO_USE)
+	select lf-tot-qty = sum(if-then-else(ws-config-qty-to-use = "O",sol-ordered-qty,sol-shipped-qty))
 		from sales-order-line
 		where so-order-no = :lp-order-no
 		and so-bo-suffix = :lp-bo-suffix
@@ -703,10 +720,6 @@ parameters
 	lp-suc-unit-conversion				like suc-unit-conversion
 returning
 	lr-weight							like suc-weight
-//	acknowledge concat("lp-stk-pack-qty:" str(lp-stk-pack-qty))
-//	acknowledge concat("lp-stk-pack-weight:" str(lp-stk-pack-weight))
-//	acknowledge concat("lp-suc-weight:" str(lp-suc-weight))
-//	acknowledge concat("lp-suc-unit-conversion:" str(lp-suc-unit-conversion))
 	if lp-suc-weight != 0
 		set lr-weight = lp-suc-weight
 	else
@@ -830,11 +843,6 @@ local
 		if dr-part-shipment-allowed = NO
 			set sol-backorder-qty = 0
 		endif
-//		acknowledge stock-code
-//		acknowledge sol-line-seq
-//		acknowledge sol-ordered-qty
-//		acknowledge sol-shipped-qty
-//		acknowledge sol-backorder-qty
 		do calc-line-amounts
 		update sales-order-line
 		on error
@@ -1051,3 +1059,88 @@ parameters
 		'ZVG'
 		'T012'
 end-procedure
+
+screen maintain-configuration
+	responsive
+		title "Configuration Options"
+		window-position 5
+detail
+	screen-group // ---- Options ----------------------------
+		title "Options"  // The title is optional
+		check-box ws-config-scan-like-stock-codes
+			values True False
+			title "Warn if stock code changes before all required items are scanned"
+			default is ws-config-scan-like-stock-codes
+			help "A Warning is displayed if the user scans a different stock code before completing scan of previous stock code"
+		end-check-box 
+		check-box ws-config-allow-call-to-m5delfifo
+			values True False
+			title "Allow call to despatch process at order selection"
+			default is ws-config-allow-call-to-m5delfifo
+			help "Allow program to call despatch process from main screen"
+		end-check-box 
+		field-group // ---- Qty to use ----------------------------
+			title "Qty to use"  // Title is optional
+				radio-button ws-config-qty-to-use
+					"O" title  "Ordered Qty"
+					"S" title  "Shipped Qty"
+					default ws-config-qty-to-use
+				end-radio-button 
+		end-field-group // ---- Qty to use --------------------------------------
+	end-screen-group // ---- Options --------------------------------------
+end-screen
+
+procedure save-configuration
+local
+	lx-doc								type xml-handle
+	lx-root								type xml-handle
+	lf-xml-filename						pic x(256) type string
+	do get-xml-filename returning lf-xml-filename
+	set lx-doc = xml-new-document("1.0","configuration")
+	set lx-root = xml-get-root-node(lx-doc)
+	if xml-add-child-node-text(lx-root,"ws-config-scan-like-stock-codes",spaces,
+		if-then-else(ws-config-scan-like-stock-codes,"TRUE","FALSE")) endif
+	if xml-add-child-node-text(lx-root,"ws-config-allow-call-to-m5delfifo",spaces,
+		if-then-else(ws-config-allow-call-to-m5delfifo,"TRUE","FALSE")) endif
+	if xml-add-child-node-text(lx-root,"ws-config-qty-to-use",spaces,ws-config-qty-to-use) endif
+	if xml-save-as-file(lx-doc,lf-xml-filename,spaces,2) endif
+//
+end-procedure // save-configuration ----------------------------------------
+
+procedure get-xml-filename
+returning
+	lr-xml								pic x(256) type string
+local
+	lf-config-path						pic x(256) type string
+	lf-unc								pic x(20) type string
+	lf-path								pic x(256) type string
+	lf-filename							pic x(100) type string
+	lf-ext								pic x(20) type string
+	do clibvfile-full-path-to-op7
+		returning lf-config-path
+	do clibvfile-get-parts parameters lf-config-path
+		returning lf-unc lf-path lf-filename lf-ext
+	set lr-xml = str-concat(lf-path "/" lf-filename ".xml")
+end-procedure // get-xml-filename ----------------------------------------
+
+procedure load-configuration
+local
+	lf-xml-filename						pic x(256) type string
+	lx-doc								type xml-handle
+	lx-root								type xml-handle
+	//
+	do get-xml-filename
+		returning lf-xml-filename
+	set lx-doc =  xml-parse-file(lf-xml-filename)
+	set lx-root = xml-get-root-node(lx-doc)
+	if xml-node-text(xml-get-child-by-name(lx-doc,"ws-config-scan-like-stock-codes",spaces)) = "TRUE"
+		set ws-config-scan-like-stock-codes	= TRUE
+	endif
+	if xml-node-text(xml-get-child-by-name(lx-doc,"ws-config-allow-call-to-m5delfifo",spaces)) = "TRUE"
+		set ws-config-allow-call-to-m5delfifo = TRUE
+	endif
+	set ws-config-qty-to-use = xml-node-text(xml-get-child-by-name(lx-doc,"ws-config-qty-to-use",spaces))
+	if ws-config-qty-to-use not in ( "O" "S" )
+		set ws-config-qty-to-use = "S"
+	endif
+end-procedure // load-configuration ----------------------------------------
