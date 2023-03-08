@@ -1,0 +1,18 @@
+select 
+
+t1.gl_accountcode,
+t0.currency_code,
+t0.currency_rate,
+sum(case when t1.tr_record_status = '1' then t0.currency_amount else 0 end) 
+Archive,
+sum(case when t1.tr_record_status <> '1' then t0.currency_amount else 0 end) 
+Current,
+sum(t0.currency_amount) total
+
+from gl_trans_currency t0
+left outer join gl_trans t1 on t0.gltc_batch_ref = t1.gl_batch_ref
+	and t0.gltc_trans_no = t1.gl_trans_no
+
+	
+group by 1,2,3
+order by 1,2,3

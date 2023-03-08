@@ -1,0 +1,230 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : 
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2014
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: clib/clibvreprice.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 20May14  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+
+/*
+
+	This documentation is in RST format.  To view this as a nice pdf goto
+	https://overbits.herokuapp.com/rsteditor/ and paste this content.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|           |           |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+
+	Alternatively
+
+	 =========== =========== ======================================================== 
+	  Direction   Data Type   Description                                             
+	 =========== =========== ======================================================== 
+	 =========== =========== ======================================================== 
+
+============
+clibvreprice
+============
+
+Single Routine to reprice a sales order line and update the order header.
+
+Note that Auto Transaction is implemented.
+
+clibvreprice-reprice-sol 
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+Reprice the order line.  If an error occurs then the procedure will exit with a non-zero
+exit status.  This should be checked in the calling program.
+
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |Number     |Sales Order Number                                      |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |String 2   |Back Order Suffix                                       |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |Number     |Sales Order Line number                                 |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |String 256 |The text of any error message                           |
+	+-----------+-----------+--------------------------------------------------------+
+
+*/
+
+ 
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+#include "../so/i50headso.spl"
+#include "../include/i5linecalc.spl"
+#include "../include/i5solicost.spl"
+
+link 'clib/clibtrace'
+ 
+procedure library-init
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+end-procedure
+
+procedure clibvreprice-reprice-sol export
+	auto-transaction
+parameters
+	lp-order-no							like so-order-no
+	lp-bo-suffix						like so-bo-suffix
+	lp-sol-line-seq						like sol-line-seq
+returning
+	lr-message							pic x(256) type string
+local
+	lf-found-price						type boolean
+	lf-price-ex-tax						like sol-item-price
+	lf-price-inc-tax					like sol-item-price
+	lf-disc								like sol-disc-rate
+	lf-price-rule						pic xx
+	lf-price-desc						pic x(40)
+	lf-ok								type boolean
+//
+	get sales-order
+		lock
+		on index so-order-no so-bo-suffix
+		key is lp-order-no lp-bo-suffix
+	on error
+		if file-status = ELOCKED
+			set lr-message = "Unable to lock order"
+		else
+			set lr-message = "Invalid Order"
+		endif
+		exit 1
+	endon
+	get sales-order-line
+		lock
+		on index so-order-no so-bo-suffix sol-line-seq
+		key is lp-order-no lp-bo-suffix lp-sol-line-seq
+	on error
+		if file-status = ELOCKED
+			set lr-message = "Unable to lock order line"
+		else
+			set lr-message = "Invalid Order line"
+		endif
+		exit 1
+	endon
+	get deb-master 
+		on index accountcode
+		key is so-cust-code
+	on error
+		set lr-message = "Invalid Customer" 
+		exit 1
+	endon
+	if sol-line-type = "SN"
+		get stock-master 
+			on index stock-code
+			key is stock-code
+		on error
+			set lr-message = "Invalid item" 
+			exit 1
+		endon
+		if stk-stock-status not in { "I" "L" "Z" }
+			get stock-warehouse-detail 
+				on index stock-code whse-code
+				key is stock-code so-whse-code
+			on error
+				set lr-message = "Invalid Stock warehouse detail" 
+				exit 1
+			endon
+		endif
+	else
+		initialise stock-master
+		initialise stock-warehouse-detail
+	endif
+	//
+	do clibtrace-get-price-full-details
+		parameters are
+			sales-order.*
+			sales-order-line.*
+			deb-master.*
+			stock-master.*
+			stock-warehouse-detail.*
+			FALSE
+		returning
+			lf-found-price
+			lf-price-ex-tax
+			lf-price-inc-tax
+			lf-disc
+			lf-price-rule
+			lf-price-desc
+	set sol-item-price = lf-price-ex-tax
+	set sol-disc-rate = lf-disc
+	do update-order
+		returning lf-ok lr-message
+	if not lf-ok
+		exit 1
+	endif
+	//
+	exit 0
+end-procedure
+
+procedure update-order
+returning
+	lr-ok						type boolean
+	lr-message					pic x(256) type string
+	set lr-ok = TRUE
+// assumes currency on sales order and sales order line
+	if sol-line-type = "SN"
+		do i5solicost-get-cost
+	endif
+	I5LINECALC_SO_LINE_CALC(	so-price-code,
+		SPACES,
+		sol-item-price,
+		sol-ordered-qty,		
+		sol-stk-unit-desc,
+		sol-price-uom,
+		sol-disc-rate,
+		SPACES,
+		sol-item-wholesale-price,
+		sol-line-amount,
+		sol-ordered-disc-amt,
+		sol-ordered-sales-tax-amt)
+	I5LINECALC_SO_LINE_CALC(	so-price-code,
+		SPACES,
+		sol-item-price,
+		sol-shipped-qty,		
+		sol-stk-unit-desc,
+		sol-price-uom,
+		sol-disc-rate,
+		SPACES,
+		sol-item-wholesale-price,
+		sol-shipped-amount,
+		sol-shipped-discount-amt,
+		sol-shipped-sales-tax-amt)
+	do clib406-calc-line-cost
+			parameters
+				sol-item-cost
+				sol-ordered-qty
+				sol-shipped-qty
+				sol-line-type
+				sol-stk-unit-conversion
+				sol-stk-unit-desc
+				stk-price-per
+			returning
+				sol-ordered-line-cost
+				sol-line-cost
+	set sol-date-stamp = today()
+	set sol-time-stamp = tod()
+	update sales-order-line
+	on error
+		set lr-ok = FALSE
+		set lr-message = concat("Failed to update line:" error-description(file-status))
+	endon
+	do i50headso-calc-total-amounts-update
+end-procedure

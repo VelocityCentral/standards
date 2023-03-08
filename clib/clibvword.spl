@@ -1,0 +1,1503 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program :Clib for Word functions
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2010
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: clibvword.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 15Jan10	MDR Log 43	Adjustments
+// 19Jan10  stf 		Written
+// 10Dec14	stf			modifications for utilise proposals
+////////////////////////////////////////////////////////////////////////////////
+/*
+
+	This documentation is in RST format.  To view this as a nice pdf goto
+	https://overbits.herokuapp.com/rsteditor/ or rst.ninjs.org and paste this content.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|           |           |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+
+	Alternatively
+
+	 =========== =========== ======================================================== 
+	  Direction   Data Type   Description                                             
+	 =========== =========== ======================================================== 
+	 =========== =========== ======================================================== 
+
+=========
+clibvword
+=========
+
+Clib to handle interacting with microsoft word via ole.
+
+Essentially this library is based on having word templates that include bookmarks.  
+The key function in the library is the replacement of a known bookmark with some value.
+A Maximum of 100 bookmarks per document is supported.
+
+Errors are reported via exit-status != 0.  Use -get-last-error for error text.
+
+File Handling
+~~~~~~~~~~~~~
+
+clibvword-open-template 
+-----------------------
+
+Start word with the nominated template.  This is most likely to be the first call.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 512 |Path to dot, dotx file                                  |
+	|           |           |                                                        |
+	|           |           |Spaces will open a blank document using the normal      |
+	|           |           |template                                                |
+	|           |           |                                                        |
+	|           |           |if no path specified then must be in the standard       |
+	|           |           |Word template folder.                                   |
+	|           |           |                                                        |
+	|           |           |All paths must be windows paths not unix paths          |
+	|           |           |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvword-verify-template 
+-------------------------
+
+Called after open-template to ensure that expected bookmarks exist
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 20  |Array of bookmarks                                      |
+	|           |occurs 100 |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |Boolean    |True if bookmark nominated in input array exists        |
+	|           |occurs 100 |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvword-saveas 
+----------------
+
+Save the complete word document with specfied file name.
+
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 512 |Full Path to file to save                               |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |Boolean    |True if saved successfully                              |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |String 512 |Error message                                           |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvword-print 
+---------------
+
+Print the current document (using word defaults)
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   Out     |Boolean    |True if saved successfully                              |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |String 512 |Error message                                           |
+	+-----------+-----------+--------------------------------------------------------+
+
+Bookmark Processing
+~~~~~~~~~~~~~~~~~~~
+
+clibvword-insert-at-bookmark 
+----------------------------
+
+
+Inserts the given text immediately after the bookmark
+Note that the bookmark MUST not contain any text.  It must be just a position in the 
+document.  (It is possible to select text in word and give the selected text a 
+bookmark - see replace bookmark)
+
+At the end of this process, the bookmark remains unchanged and the passed text 
+follows the bookmark.
+
+.. Note:: The replace-bookmark is recommended instead of this routine
+
+|
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 40  |Bookmark Name                                           |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |String 256 |The value to insert the value                           |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |Boolean    |True if Successful                                      |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |String 512 |Error message                                           |
+	+-----------+-----------+--------------------------------------------------------+
+
+
+clibvword-replace-bookmark 
+--------------------------
+
+Use this function to replace the text at the bookmark with the specified
+value.
+
+At the end of this process the inserted text will be within the bookmark
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 40  |Bookmark Name                                           |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |String 256 |The value to insert the value                           |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |Boolean    |True if Successful                                      |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |String 512 |Error message                                           |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvword-insert-bookmark 
+-------------------------
+
+Add a bookmark at the current selection point.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 40  |Bookmark Name                                           |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |Boolean    |True if Successful                                      |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |String 512 |Error message                                           |
+	+-----------+-----------+--------------------------------------------------------+
+
+
+clibvword-process-bookmarks 
+---------------------------
+
+Process a range of bookmarks at once.  (This is quicker than processing 
+bookmarks one at a time.)
+
+.. Note::  This process uses the replace-bookmark method.
+
+|
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 20  |Array of bookmarks                                      |
+	|           |occurs 100 |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |String 100 |Array of values to replace content at bookmark          |
+	|           |occurs 100 |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |Boolean    |True if Successful                                      |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |String 512 |Error message                                           |
+	+-----------+-----------+--------------------------------------------------------+
+
+Chart Handling 
+~~~~~~~~~~~~~~
+
+clibvword-process-chart 
+-----------------------
+
+Inserts a chart
+
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 20  |X Axis Values                                           |
+	|           |Occurs 12  |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |Number     |Series 1                                                |
+	|           |Occurs 12  |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |Number     |Series 2                                                |
+	|           |Occurs 12  |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |Number     |Series 3                                                |
+	|           |Occurs 12  |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |Boolean    |True if Successful                                      |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |String 512 |Error message                                           |
+	+-----------+-----------+--------------------------------------------------------+
+
+Table Handling 
+~~~~~~~~~~~~~~
+
+clibvword-insert-table 
+----------------------
+
+Inserts a new table at the specified bookmark
+
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |string 20  |Bookmark to locate table                                |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |number     |Column Count                                            |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |number     |CODE:                                                   |
+	|           |           |                                                        |
+	|           |           |- 1) No different header row                            |
+	|           |           |- 2) Single header row with different shading           |
+	|           |           |- 3) Dobule hader row                                   |
+	|           |           |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |number     |Shading Colour for headings                             |
+	|           |           |                                                        |
+	|           |           |Should be one of wdColor as documented in include       |
+	|           |           |oleword2003.                                            |
+	|           |           |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |number     |Border Style                                            |
+	|           |           |                                                        |
+	|           |           |Should be one of wdLineStyle as documented in           |
+	|           |           |incluide/oleword2003                                    |
+	|           |           |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |Boolean    |True if Successful                                      |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |String 512 |Error message                                           |
+	+-----------+-----------+--------------------------------------------------------+
+
+
+clibvword-position-table-start 
+------------------------------
+
+Add first value to table at bookmark.
+
+Use table-cell-move-next or table-cell-move-down to navigate in table.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |string 20  |Bookmark to locate table                                |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |String 100 |Value to place in first cell of table                   |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |Boolean    |True if Successful                                      |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |String 512 |Error message                                           |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvword-table-cell-write-color 
+--------------------------------
+
+Inserts text at the insertion point using the specfied FOREGROUND COLOUR
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 100 |Value to place in first cell of table                   |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |number     |Foreground Colour setting                               |
+	|           |           |                                                        |
+	|           |           |Should be one of wdColor as documented in include       |
+	|           |           |oleword2003.                                            |
+	|           |           |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |Boolean    |True if Successful                                      |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |String 512 |Error message                                           |
+	+-----------+-----------+--------------------------------------------------------+
+
+
+clibvword-table-cell-write-style 
+--------------------------------
+
+Inserts text at the insertion with the specifed colour, background pattern and paragraph
+alignment
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 100 |Value to place in first cell of table                   |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |number     |Foreground Colour setting                               |
+	|           |           |                                                        |
+	|           |           |Should be one of wdColor as documented in include       |
+	|           |           |oleword2003.                                            |
+	|           |           |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |number     |Background Colour  Setting                              |
+	|           |           |                                                        |
+	|           |           |Should be one of wdColor as documented in include       |
+	|           |           |oleword2003.                                            |
+	|           |           |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |number     |Foreground Colour setting                               |
+	|           |           |                                                        |
+	|           |           |Should be one of wdParagraphAlignment as documented in  |
+	|           |           |include oleword2003.                                    |
+	|           |           |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |Boolean    |True if Successful                                      |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |String 512 |Error message                                           |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvword-table-cell-write 
+--------------------------
+
+Equivalent to insert-text
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 100 |Value to place in first cell of table                   |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |Boolean    |True if Successful                                      |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |String 512 |Error message                                           |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvword-table-cell-move-next 
+------------------------------
+
+Move left in a table.  No parameters.  A Move left at the end of the table will insert
+a new row.
+
+clibvword-table-cell-move-down 
+------------------------------
+
+Move Down in a table.  No Parameters.  A move down at the end of the table will NOT
+insert a new row.  It will simply navigate to the next line.
+
+Image Handling 
+~~~~~~~~~~~~~~
+
+clibvword-insert-image 
+----------------------
+
+Inserts an image
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 40  |Bookmark name                                           |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |String 512 |Windows path to image                                   |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |Number     |X offset                                                |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |Number     |Y offset                                                |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |Boolean    |True if Successful                                      |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |String 512 |Error message                                           |
+	+-----------+-----------+--------------------------------------------------------+
+
+Miscellaneous
+~~~~~~~~~~~~~
+
+clibvword-get-version 
+---------------------
+
+Returns the version of word that is running
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   Out     |String 10  |Version of MS Word that is running                      |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |Boolean    |True if Successful                                      |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |String 512 |Error message                                           |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvword-release-objects 
+-------------------------
+
+Releases all OLE objects.  Should be run at end of the process.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   Out     |Boolean    |True if Successful                                      |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |String 512 |Error message                                           |
+	+-----------+-----------+--------------------------------------------------------+
+
+
+clibvword-close-doc 
+-------------------
+
+Closes the Document.  Any save should be executed first.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   Out     |Boolean    |True if Successful                                      |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |String 512 |Error message                                           |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvword-insert-text 
+---------------------
+
+Inserts the specified text at the insertion point.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 40  |Text to be inserted                                     |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |String 512 |Error message                                           |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvword-insert-line-break 
+---------------------------
+
+Inserts a line break.  No Return codes.
+
+*/
+
+
+#include "../include/i8proglogparam.spl"
+#include "../include/oleWord2003.spl"
+
+#define WORDAPP "Word.Application"
+#define BOOKMARKQTY 100
+#define MAXBKMKSIZE 40
+#define MAXFLDSIZE 100
+
+field
+	ws-wd-obj								type ole-interface  // current reference to object
+	ws-datasheet							type ole-interface
+	ws-word-ver	   							pic x(10)
+	ws-dummy-ret 							pic 9(9)
+	ws-table								type ole-interface
+	ws-last-error							pic x(1024) type string
+
+procedure library-init
+	do i8proglogparam-write-log parameters are "clibvword"
+	do instantiate-word
+end-procedure
+
+procedure main
+	do instantiate-word
+	do testcases
+end-procedure
+
+procedure instantiate-word
+//constructor
+	set ws-word-ver = "0"
+	//instantiate word objects here
+	set ws-wd-obj = ole-get-active-object (WORDAPP) 
+	if ws-wd-obj <= 0
+		set ws-wd-obj = ole-create-instance (WORDAPP,CLSCTX_LOCAL_SERVER)
+		if ws-wd-obj <= 0
+			set ws-last-error = "Could not create word instance"
+			exit 1
+		end
+	end
+	if ole-put-property(ws-wd-obj,"Application.Visible", true)
+	endif
+	//set global version variable here
+	if not ole-get-property (ws-wd-obj, "Application.Version", ws-word-ver)
+		set ws-last-error = "Could not set version property"
+		exit 1
+	endif
+end-procedure
+
+procedure clibvword-get-last-error export
+returning
+	lr-message							like ws-last-error
+	set lr-message = ws-last-error
+end-procedure
+
+procedure clibvword-get-version export
+returning
+	lr-wd-ver							like ws-word-ver
+	set lr-wd-ver = ws-word-ver
+	if num(ws-word-ver) = 0
+		set ws-last-error = "Version not set"
+		exit 1
+	endif
+end-procedure
+
+procedure clibvword-saveas export
+parameters
+	lp-filename							pic x(512) type string
+	//standard word object status check	
+	if ws-wd-obj <= 0
+		do instantiate-word 
+	endif
+	if exit-status != 0
+		exit 1
+	endif
+	//end standard word object status check
+	if not ole-call-method(ws-wd-obj,"ActiveDocument.SaveAs",ws-dummy-ret,strconcat(lp-filename))
+		set ws-last-error = "Not Saved "
+		exit 1
+	endif
+end-procedure
+
+procedure clibvword-print export
+	//standard word object status check	
+	if ws-wd-obj <= 0
+		do instantiate-word 
+	endif
+	if exit-status != 0
+		exit 1
+	endif
+	//end standard word object status check
+end-procedure
+
+procedure clibvword-release-objects export
+	IF not OLE-CALL-METHOD(ws-wd-obj, "Application.Quit", ws-dummy-ret,wdDoNotSaveChanges)
+		set ws-last-error = "Unable to quit Word application"
+		exit 1
+  	ENDIF
+	if ole-release(ws-wd-obj)
+	endif
+end-procedure
+
+procedure clibvword-insert-at-bookmark export
+parameters are
+	lp-bookmark-name					pic x(MAXBKMKSIZE)
+	lp-value							pic x(256) type string
+local
+	lo-range-id						type ole-interface
+	lo-bookmarkrange				type ole-interface
+	lo-bookmarks					type ole-interface
+	lf-ret							pic x(512)
+	if ws-wd-obj <= 0
+		do instantiate-word 
+	endif
+	if exit-status != 0
+		set ws-last-error = "Cannot instantiate"
+		exit 1
+	endif
+		if ole-get-property(ws-wd-obj, "ActiveDocument.Bookmarks",lo-bookmarks)
+		if ole-call-method(lo-bookmarks, "Item",lo-range-id,lp-bookmark-name)
+			if ole-get-property(lo-range-id,'Range',lo-bookmarkrange)
+				if lp-value <> spaces 
+					if ole-call-method(lo-bookmarkrange,'InsertAfter',lf-ret,lp-value)
+						if ole-call-method(lo-bookmarks,"Add",ws-dummy-ret,lp-bookmark-name,lo-bookmarkrange)
+						endif
+					else
+						set ws-last-error = str-concat("cannot insert text", str(OLE-STATUS()))
+						exit 1
+					endif
+				else
+					//if no text passed just insert a paragraph break
+					if ole-call-method(lo-bookmarkrange,'InsertParagraphBefore',lf-ret)
+					endif
+				endif
+			else
+				set ws-last-error =  "Cannot get range"
+				exit 1
+			endif
+		else
+			set ws-last-error =  str-concat("Cannot get bookmark",lp-bookmark-name)
+			exit 1
+		endif
+	else
+		set ws-last-error =  "Cannot get bookmarks"
+		exit 1
+	endif			
+end-procedure
+
+procedure clibvword-replace-bookmark export
+parameters are
+	lp-bookmark-name					pic x(MAXBKMKSIZE)
+	lp-value							pic x(256) type string
+local
+	lo-range-id						type ole-interface
+	lo-bookmarkrange				type ole-interface
+	lo-bookmarks					type ole-interface
+	lf-ret							pic x(512)
+	if ws-wd-obj <= 0
+		do instantiate-word 
+	endif
+	if exit-status != 0
+		set ws-last-error =  "Cannot instantiate"
+		exit 1
+	endif
+	if ole-get-property(ws-wd-obj, "ActiveDocument.Bookmarks",lo-bookmarks)
+		if ole-call-method(lo-bookmarks, "Item",lo-range-id,lp-bookmark-name)
+			if ole-get-property(lo-range-id,'Range',lo-bookmarkrange)
+				if ole-put-property(lo-bookmarkrange,'Text',lp-value)
+					if ole-call-method(lo-bookmarks,"Add",ws-dummy-ret,lp-bookmark-name,lo-bookmarkrange)
+					endif
+				else
+					set ws-last-error =  str-concat("cannot insert text", str(OLE-STATUS()))
+					exit 1
+				endif
+			else
+				set ws-last-error =  "Cannot get range"
+				exit 1
+			endif
+		else
+			set ws-last-error =  str-concat("Cannot get bookmark",lp-bookmark-name)
+			exit 1
+		endif
+	else
+		set ws-last-error =  "Cannot get bookmarks"
+		exit 1
+	endif			
+end-procedure
+
+procedure clibvword-insert-bookmark export
+parameters are
+	lp-bookmark-name					pic x(MAXBKMKSIZE)
+local
+	lo-range-id						type ole-interface
+	lo-bookmarkrange				type ole-interface
+	lo-bookmarks					type ole-interface
+	lf-ret							pic x(512)
+	if ws-wd-obj <= 0
+		do instantiate-word 
+	endif
+	if exit-status != 0
+		set ws-last-error = "Cannot instantiate"
+		exit 1
+	endif
+	if ole-get-property(ws-wd-obj, "ActiveDocument.Bookmarks",lo-bookmarks)
+		if ole-call-method(lo-bookmarks,"Add",ws-dummy-ret,lp-bookmark-name)
+		endif
+	else
+		set ws-last-error =  "Cannot get bookmarks"
+		exit 1
+	endif			
+end-procedure
+
+procedure clibvword-insert-image export
+parameters are
+	lp-bookmark-name					pic x(MAXBKMKSIZE)
+	lp-image-name						pic x(512) type string
+	lp-offset-x							type number
+	lp-offset-y							type number
+local
+	lo-range-id						type ole-interface
+	lo-bookmarkrange				type ole-interface
+	lf-shapes-id        			TYPE OLE-INTERFACE
+	lo-bookmarks					type ole-interface
+	//  Initialise ws-last-error so we can have one exit at the end
+	set ws-last-error = spaces
+	//standard word object status check	
+	if ws-wd-obj <= 0
+		do instantiate-word 
+	endif
+	if exit-status != 0
+		exit 1
+	endif
+	//end standard word object status check
+	// find image bookmark
+	if ole-get-property(ws-wd-obj, "ActiveDocument.Bookmarks",lo-bookmarks)
+		if ole-call-method(lo-bookmarks, "Item",lo-range-id,lp-bookmark-name)
+			if ole-get-property(lo-range-id,'Range',lo-bookmarkrange)
+				if ole-call-method(lo-bookmarkrange,"Select",ws-dummy-ret)
+				endif
+				if ole-call-method(ws-wd-obj,"ActiveDocument.Shapes.AddPicture",lf-shapes-id,lp-image-name, wdLinkNone, 1)
+					if ole-put-property(lf-shapes-id,'WrapFormat.Type',wdWrapNone)
+					else
+						set ws-last-error =  str-concat("cannot set image wrap:", str(OLE-STATUS()))
+					endif
+					if ole-put-property(lf-shapes-id,'RelativeHorizontalPosition',4)
+					else
+						set ws-last-error =  str-concat("cannot set image RelativeHorizontalPosition:", str(OLE-STATUS()))
+					endif
+					if ole-put-property(lf-shapes-id,'RelativeVerticalPosition',wdRelativeVerticalPositionParagraph)
+					else
+						set ws-last-error =  str-concat("cannot set image RelativeVerticalPosition:", str(OLE-STATUS()))
+					endif
+					if ole-put-property(lf-shapes-id,'top',lp-offset-y)
+					else
+						set ws-last-error =  str-concat("cannot set image top:", str(OLE-STATUS()))
+					endif
+					if ole-put-property(lf-shapes-id,'Left',lp-offset-x)
+					else
+						set ws-last-error =  str-concat("cannot set image Left:", str(OLE-STATUS()))
+					endif
+				else
+					set ws-last-error =  str-concat("cannot insert image:", lp-image-name, ":" , str(OLE-STATUS()))
+				endif
+				if ole-call-method(lo-bookmarks,"Add",ws-dummy-ret,lp-bookmark-name,lo-bookmarkrange)
+				endif
+			else
+				set ws-last-error =  str-concat("cannot get bookmark:", str(OLE-STATUS()))
+			endif
+			if ole-call-method(lo-bookmarkrange,"Select",ws-dummy-ret)
+			endif
+		else
+			set ws-last-error =  str-concat("cannot find bookmark", str(OLE-STATUS()))
+		endif 
+		if ole-release(lo-range-id)
+		endif
+		if ole-release(lo-bookmarkrange)
+		endif
+		if ole-release(lo-bookmarks)
+		endif
+		if ole-release(lf-shapes-id)
+		endif
+		if ws-last-error != spaces
+			exit 1
+		endif
+	endif
+end-procedure
+
+procedure clibvword-insert-table export
+parameters are
+	lp-bookmark-name					pic x(MAXBKMKSIZE)
+	lp-columns							type number
+	lp-rows								type number
+	//pass 2 rows for normal table with single header row shaded differently
+	//to table. pass 1 row for table with no different header. pass 3 for
+	//double row header.
+	lp-shade-colour						type number
+	//shade colour is applied to header rows.
+	lp-border-type						type number
+local
+	lo-range-id						type ole-interface
+	lo-bookmarkrange				type ole-interface
+	lo-tablerow						type ole-interface
+	lo-bookmarks					type ole-interface
+	lo-border								type ole-interface	
+	if ws-wd-obj <= 0
+		do instantiate-word 
+	endif
+	if exit-status != 0
+		exit 1
+	endif
+	//  Initialise ws-last-error so we can have one exit at the end
+	set ws-last-error = spaces
+	if ole-get-property(ws-wd-obj, "ActiveDocument.Bookmarks",lo-bookmarks)
+		if ole-call-method(lo-bookmarks, "Item",lo-range-id,lp-bookmark-name)
+			if ole-get-property(lo-range-id,'Range',lo-bookmarkrange)
+				if  ole-call-method(ws-wd-obj, 'ActiveDocument.Tables.Add',ws-table,lo-bookmarkrange,lp-rows,lp-columns)
+					if ole-call-method(ws-table,'Rows.Item',lo-tablerow,1)
+						if ole-call-method(ws-table,'Borders.Item',lo-border,wdBorderHorizontal)
+							if ole-put-property(lo-border,'LineStyle',lp-border-type)
+							else
+								set ws-last-error = str-concat("cannot set border:", str(ole-status()))
+							endif
+						else
+								set ws-last-error = str-concat("cannot select border:", str(ole-status()))
+						endif
+						if ole-call-method(ws-table,'Borders.Item',lo-border,wdBorderBottom)
+							if ole-put-property(lo-border,'LineStyle',lp-border-type)
+							else
+								set ws-last-error = str-concat("cannot set border:", str(ole-status()))
+							endif
+						else
+								set ws-last-error = str-concat("cannot select border:", str(ole-status()))
+						endif
+						if ole-put-property(lo-tablerow,'Shading.BackgroundPatternColor',lp-shade-colour)
+						else
+							set ws-last-error = str-concat("cannot set background:", str(ole-status()))
+						endif
+					else
+						set ws-last-error = str-concat("cannot get row:", str(ole-status()))
+					endif
+					if lp-rows > 2
+						//if table is inserted with 3 rows then second row
+						//also shaded for header
+						if ole-call-method(ws-table,'Rows.Item',lo-tablerow,2)	
+							if ole-put-property(lo-tablerow,'Shading.BackgroundPatternColor',lp-shade-colour)
+							else
+								set ws-last-error = str-concat("cannot set background:", str(ole-status()))
+							endif
+						else
+							set ws-last-error = str-concat("cannot get row:", str(ole-status()))
+						endif
+					endif
+				else
+					set ws-last-error =  "Cannot add table"
+				endif
+			else
+				set ws-last-error =  "Cannot get range"
+			endif
+		else
+			set ws-last-error =  str-concat("Cannot get bookmark",lp-bookmark-name)
+		endif
+	else
+		set ws-last-error =  "Cannot get bookmarks"
+	endif			
+	if ws-last-error != spaces
+		// Not ws-last-error initialised at top of routine
+		exit 1
+	endif
+end-procedure
+
+procedure clibvword-position-table-start export
+parameters are
+	lp-bookmark-name					pic x(MAXBKMKSIZE)
+	//sf new parameter to pass value of first cell
+	lp-startvalue						pic x(100) type string
+local
+	lo-bookmarks				type ole-interface
+	lo-range-id					type ole-interface
+	lo-bookmarkrange			type ole-interface
+	lf-bookmark-name			type string
+	lf-i						type number
+	lf-bookmarks-count			type number
+	//standard word object status check	
+	if ws-wd-obj <= 0
+		do instantiate-word 
+	endif
+	if exit-status != 0
+		exit 1
+	endif
+	// initialise ws-last-error
+	set ws-last-error = spaces
+	//end standard word object status check
+	// loop and find table start
+	if ole-get-property(ws-wd-obj, "ActiveDocument.Bookmarks",lo-bookmarks)
+		if ole-get-property(lo-bookmarks,"Count",lf-bookmarks-count)
+			for lf-i = lf-bookmarks-count down to 1
+				if ole-call-method(lo-bookmarks, "Item",lo-range-id,lf-i)
+					if ole-get-property(lo-range-id, "Name",lf-bookmark-name)
+						//sf retain selection after creating bookmark
+						if (lowercase(lf-bookmark-name) = lowercase(lp-bookmark-name))
+							//sf Insert text in first cell and recreate bookmark
+							if ole-get-property(lo-range-id,'Range',lo-bookmarkrange)	
+								if ole-put-property(lo-bookmarkrange,'Text',lp-startvalue)
+									if ole-call-method(lo-bookmarks,"Add",ws-dummy-ret,lp-bookmark-name,lo-bookmarkrange)
+									endif
+								endif
+							endif
+							if ole-call-method(lo-bookmarkrange,"Select",ws-dummy-ret)
+							endif
+/*
+//							standard utilise font colour. may wish to replace
+							if ole-put-property(ws-wd-obj,'selection.Font.Color',16777215)
+							else
+								message "cannot set font color", OLE-STATUS()
+							endif
+*/
+						endif 
+					endif 
+					if ole-release(lo-range-id)
+					endif
+				endif 
+			endfor 
+		endif 
+		if ole-release(lo-bookmarks)
+		endif
+	endif
+end-procedure
+
+procedure clibvword-table-cell-write-color export
+parameters are
+	lp-text								pic x(MAXFLDSIZE)
+	lp-color							type number
+	if ole-put-property(ws-wd-obj,'selection.Font.Color',lp-color)
+	else
+		set ws-last-error = str-concat("cannot set font color:", str(ole-status()))
+		exit 1
+	endif
+	do insert-text parameter lp-text  
+	if exit-status != 0
+		exit 1
+	endif
+end-procedure
+
+procedure clibvword-table-cell-write-style export
+parameters are
+	lp-text								pic x(MAXFLDSIZE)
+	lp-color							type number
+	lp-shade							type number
+	lp-align							type number
+//
+	if ole-put-property(ws-wd-obj,'selection.Font.Color',lp-color)
+	else
+		set ws-last-error = str-concat("cannot set font color:", str(ole-status()))
+		exit 1
+	endif
+	if ole-put-property(ws-wd-obj,'selection.ParagraphFormat.Alignment',lp-align)
+	else
+		set ws-last-error = str-concat("cannot set text align:", str(ole-status()))
+		exit 1
+	endif
+	if ole-put-property(ws-wd-obj,'selection.Shading.BackgroundPatternColor',lp-shade)
+	else
+		set ws-last-error = str-concat("cannot set cell shade:", str(ole-status()))
+		exit 1
+	endif
+	do insert-text parameter lp-text  
+	if exit-status != 0
+		exit 1
+	endif
+end-procedure
+
+procedure clibvword-table-cell-write export
+parameters are
+	lp-text								pic x(MAXFLDSIZE)
+	do insert-text parameter lp-text  
+	if exit-status != 0
+		exit 1
+	endif
+end-procedure
+
+procedure clibvword-table-cell-move-next export 
+// no parameters
+	if ole-call-method(ws-wd-obj,"selection.MoveRight",ws-dummy-ret,wdCell,1)
+		set ws-last-error = "Unable to execute move right"
+		exit 1
+	endif
+end-procedure
+
+procedure clibvword-table-cell-move-down export 
+// no parameters
+	if ole-call-method(ws-wd-obj,"selection.MoveDown",ws-dummy-ret,wdLine,1)
+		set ws-last-error = "Unable to execute move down"
+		exit 1
+	endif
+end-procedure
+
+procedure clibvword-process-chart export
+parameters are
+	lp-chart-x-values						pic x(20) occurs 12
+	lp-chart-y-1							type number occurs 12
+	lp-chart-y-2							type number occurs 12
+	lp-chart-y-3							type number occurs 12
+local
+	lf-chartid						type numeric
+	lf-shapes-id        			TYPE OLE-INTERFACE
+	lf-object-id        			TYPE OLE-INTERFACE
+	lf-chart						type ole-interface
+	lf-chartdata					type ole-interface
+	lf-workbook						type ole-interface
+	tmp-index    					TYPE numeric 
+	tmp-type						type numeric
+	tmp-progid						type string
+	lf-x							type numeric
+	lf-row							type numeric
+	i            					PIC 999
+	//standard word object status check	
+	if ws-wd-obj <= 0
+		do instantiate-word 
+	endif
+	if exit-status != 0
+		exit 1
+	endif
+	//end standard word object status check
+	//this is the actual processing of the chart
+	//get chart object
+	if num(ws-word-ver) = 11
+	// Word 2003 version
+	set lf-chartid = 999
+	// Initialise ws-last-error
+	set ws-last-error = spaces
+	IF OLE-GET-PROPERTY(ws-wd-obj, "ActiveDocument.InlineShapes",lf-shapes-id)
+	    IF OLE-GET-PROPERTY(lf-shapes-id,"Count",i)
+	    	FOR tmp-index = i DOWN TO 0
+	        	IF OLE-CALL-METHOD(lf-shapes-id, "Item",lf-object-id,tmp-index)
+          			IF OLE-GET-PROPERTY(lf-object-id, "Type",tmp-type)
+            			IF (tmp-type = 1)
+							IF OLE-GET-PROPERTY(lf-object-id, "OLEFormat.ProgID",tmp-progid)
+								if( tmp-progid = "Excel.Chart.8")
+              						set lf-chartid = i
+									if not OLE-CALL-METHOD(lf-object-id,"Activate", ws-dummy-ret)
+										set ws-last-error =  "no activate"
+									endif
+										//instantiate objects for worksheet
+									if not OLE-GET-PROPERTY(lf-object-id,"OLEFormat.Object", lf-chart)
+									 	set ws-last-error = concat( "Could not get chart id - error ", str(OLE-STATUS()))
+									else
+										IF NOT OLE-GET-PROPERTY(lf-chart, "Worksheets",ws-datasheet,"Sheet1")
+											set ws-last-error = concat(  "Could not get datasheet item id - error ", str(OLE-STATUS()))
+										else							
+									//populate actual cells
+											for lf-x = 1 to 12
+												set lf-row = lf-x + 1
+												DO fill-a-cell PARAMETERS ARE concat("A",str(lf-row)), lp-chart-x-values[lf-x]
+												DO fill-a-cell PARAMETERS ARE concat("B",str(lf-row)), str(lp-chart-y-1[lf-x])
+												DO fill-a-cell PARAMETERS ARE concat("C",str(lf-row)), str(lp-chart-y-2[lf-x])
+												DO fill-a-cell PARAMETERS ARE concat("D",str(lf-row)), str(lp-chart-y-3[lf-x])
+											end-for
+										ENDIF
+									endif
+									//release objects for worksheet
+									IF OLE-RELEASE(lf-chart)
+									ENDIF
+									IF OLE-RELEASE(ws-datasheet)
+									ENDIF
+								ENDIF
+							ENDIF
+           				ENDIF 
+          			ENDIF 
+        		ENDIF 
+      		END-FOR 
+    	ENDIF 
+  	ENDIF
+	elseif num(ws-word-ver) = 12
+	// Word 2007 version	
+	set lf-chartid = 999
+	//create inline shapes collection
+	IF OLE-GET-PROPERTY(ws-wd-obj, "ActiveDocument.InlineShapes",lf-shapes-id)
+	    IF OLE-GET-PROPERTY(lf-shapes-id,"Count",i)
+	    	FOR tmp-index = i DOWN TO 0
+				//go through all inline shapes looking for chart (chart is type 12)
+	        	IF OLE-CALL-METHOD(lf-shapes-id, "Item",lf-object-id,tmp-index)
+          			IF OLE-GET-PROPERTY(lf-object-id, "Type",tmp-type)
+            			IF (tmp-type = 12)
+							//found chart in document
+              				set lf-chartid = i
+							//instantiate objects for worksheet
+							IF NOT OLE-GET-PROPERTY(lf-object-id, "Chart.ChartData",lf-chartdata)
+								set ws-last-error = str-concat("Could not get chartdata item id - error :", str(ole-status()))
+							ENDIF
+							IF NOT OLE-CALL-METHOD(lf-chartdata, "Activate",ws-dummy-ret)
+    							set ws-last-error = str-concat("Could not get chartdata - error :", str(ole-status()))
+ 							END
+							IF NOT OLE-GET-PROPERTY(lf-chartdata, "Workbook",lf-workbook)
+								set ws-last-error = str-concat("Could not get workbook item id - error :", str(ole-status()))
+							ENDIF
+							IF NOT OLE-GET-PROPERTY(lf-workbook, "Worksheets",ws-datasheet,"Sheet1")
+								set ws-last-error = str-concat("Could not get datasheet item id - error :", str(ole-status()))
+							ENDIF
+							//populate actual cells
+								for lf-x = 1 to 12
+									set lf-row = lf-x + 1
+									DO fill-a-cell PARAMETERS ARE concat("A",str(lf-row)), lp-chart-x-values[lf-x]
+									DO fill-a-cell PARAMETERS ARE concat("B",str(lf-row)), str(lp-chart-y-1[lf-x])
+									DO fill-a-cell PARAMETERS ARE concat("C",str(lf-row)), str(lp-chart-y-2[lf-x])
+									DO fill-a-cell PARAMETERS ARE concat("D",str(lf-row)), str(lp-chart-y-3[lf-x])
+								end-for
+							//release objects for worksheet
+							IF OLE-RELEASE(lf-chartdata)
+							ENDIF
+							IF OLE-RELEASE(lf-workbook)
+							ENDIF
+							IF OLE-RELEASE(ws-datasheet)
+							ENDIF
+           				ENDIF 
+          			ENDIF 
+        		ENDIF 
+      		END-FOR 
+    	ENDIF 
+  	ENDIF
+	endif
+	if ws-last-error != spaces
+		exit 1
+	endif
+	// STF
+end-procedure
+
+
+procedure clibvword-process-bookmarks export
+parameters
+	lp-bookmarknames						pic x(20) type string occurs BOOKMARKQTY
+	lp-bookmarkvalues						pic x(100) type string occurs BOOKMARKQTY
+local
+	lo-bookmarks				type ole-interface
+	lo-range-id					type ole-interface
+	lf-bookmark-name			type string
+	lf-i						type number
+	lf-i2						type number
+	lf-bookmarks-count			type number
+	lf-ok						type boolean
+	lf-real-qty					type number
+	//standard word object status check	
+	lo-bookmarkrange			type ole-interface
+	if ws-wd-obj <= 0
+		do instantiate-word 
+	endif
+	if exit-status != 0
+		exit 1
+	endif
+	//end standard word object status check
+	set lf-real-qty = BOOKMARKQTY
+	for lf-i2 = BOOKMARKQTY down to 1
+		if lp-bookmarknames[lf-i2] = SPACES
+			set lf-real-qty = lf-i2 - 1
+		endif
+	endfor
+	// stflf-real-qty
+	// loop and set values
+	if ole-get-property(ws-wd-obj, "ActiveDocument.Bookmarks",lo-bookmarks)
+		if ole-get-property(lo-bookmarks,"Count",lf-bookmarks-count)
+			for lf-i = lf-bookmarks-count down to 1
+				if ole-call-method(lo-bookmarks, "Item",lo-range-id,lf-i)
+					if ole-get-property(lo-range-id, "Name",lf-bookmark-name)
+						if ole-call-method(lo-range-id,"Select",ws-dummy-ret)
+							for lf-i2 = 1 to lf-real-qty
+								if (lowercase(lf-bookmark-name) = lowercase(lp-bookmarknames[lf-i2]))
+									// if lp-bookmarkvalues[lf-i2] <> SPACES
+										//do insert-text parameter lp-bookmarkvalues[lf-i2] returning lf-ok
+										if ole-get-property(lo-range-id,'Range',lo-bookmarkrange)
+											if lp-bookmarkvalues[lf-i2] <> SPACES
+												if ole-put-property(lo-bookmarkrange,'Text',lp-bookmarkvalues[lf-i2])
+													if ole-call-method(lo-bookmarks,"Add",ws-dummy-ret,lp-bookmarknames[lf-i2],lo-bookmarkrange)
+													endif
+												endif
+											else
+												if ole-put-property(lo-bookmarkrange,'Text',' ')
+													if ole-call-method(lo-bookmarks,"Add",ws-dummy-ret,lp-bookmarknames[lf-i2],lo-bookmarkrange)
+													endif
+												endif
+											endif
+										endif
+									//endif
+								endif
+							endfor
+						endif 
+					endif 
+					if ole-release(lo-range-id)
+					endif
+				endif 
+			endfor 
+		endif 
+		if ole-release(lo-bookmarks)
+		endif
+	endif
+end-procedure
+
+procedure clibvword-open-template export
+parameters
+	lp-templatename							pic x(512) type string
+local
+	lf-ext							type string
+	//standard word object status check	
+	if ws-wd-obj <= 0
+		do instantiate-word 
+	endif
+	if exit-status != 0
+		exit 1
+	endif
+	if not ole-call-method (ws-wd-obj,"Application.Documents.Add",ws-dummy-ret,lp-templatename)
+		set ws-last-error  = strconcat("cannot create document from template ",lp-templatename)
+		exit 1
+	endif
+end-procedure
+
+procedure clibvword-verify-template export
+parameters
+	lp-bookmarknames						pic x(20) type string occurs BOOKMARKQTY
+returning
+	lr-bookmarksok							type boolean occurs BOOKMARKQTY
+local
+	lo-bookmarks				type ole-interface
+	lo-range-id					type ole-interface
+	lf-bookmark-name			type string
+	lf-i						type number
+	lf-i2						type number
+	lf-bookmarks-count			type number
+	lf-ok						type boolean
+	lf-real-qty					type number
+	//standard word object status check	
+	if ws-wd-obj <= 0
+		do instantiate-word 
+		if exit-status != 0
+			exit 1
+		endif
+	endif
+	//end standard word object status check
+	set lf-real-qty = BOOKMARKQTY
+	for lf-i2 = BOOKMARKQTY down to 1
+		set lr-bookmarksok[lf-i2] = FALSE
+		if lp-bookmarknames[lf-i2] = SPACES
+			set lf-real-qty = lf-i2 - 1
+		endif
+	endfor
+	set lf-ok = TRUE
+	if ole-get-property(ws-wd-obj, "ActiveDocument.Bookmarks",lo-bookmarks)
+		if ole-get-property(lo-bookmarks,"Count",lf-bookmarks-count)
+			for lf-i = lf-bookmarks-count down to 1
+				if ole-call-method(lo-bookmarks, "Item",lo-range-id,lf-i)
+					if ole-get-property(lo-range-id, "Name",lf-bookmark-name)
+						if ole-call-method(lo-range-id,"Select",ws-dummy-ret)
+								for lf-i2 = 1 to lf-real-qty
+								if (lowercase(lf-bookmark-name) = lowercase(lp-bookmarknames[lf-i2]))
+									set lr-bookmarksok[lf-i2] = TRUE
+								endif
+							endfor
+						endif 
+					endif 
+					if ole-release(lo-range-id)
+					endif
+				endif 
+			endfor 
+		endif 
+		if ole-release(lo-bookmarks)
+		endif
+	endif
+	for lf-i2 = 1 to lf-real-qty
+		if lr-bookmarksok[lf-i2] = FALSE
+			set ws-last-error = "At least one missing bookmark"
+			exit 1
+		endif
+	endfor
+end-procedure
+
+procedure clibvword-insert-text export
+parameter 
+	lp-text type string
+	//
+	if not ole-call-method(ws-wd-obj,"Selection.TypeText",ws-dummy-ret,lp-text)
+		set ws-last-error = "Unable to insert text at selection point"
+		exit 1
+	endif
+endprocedure //insert-text ---------------------------------------------------
+
+procedure clibvword-insert-line-break export
+	do clibvword-insert-text
+		parameters are
+		concat(" ",chr(10))
+end-procedure
+
+procedure fill-a-cell
+//generic procedure for filling datasheet cells in embedded excel 2007 & 2003 sheets
+parameters
+	p-row-col							pic x(20)
+	p-text								pic x(80)
+local
+	range-id							type ole-interface
+	set ws-last-error = spaces
+  	if not ole-get-property(ws-datasheet, "range",range-id,p-row-col, p-row-col)
+	    set ws-last-error = "could not get range id"
+		exit 1
+	end
+  	if not ole-put-property(range-id, "value", p-text)
+    	set ws-last-error = "put-property value failed"
+  	end
+  	if not ole-release(range-id)
+  	endif
+	if ws-last-error != spaces
+		exit 1
+	endif
+endprocedure //fill-a-cell
+
+procedure insert-text 
+parameter 
+	lp-text type string
+	//	
+	if ole-call-method(ws-wd-obj,"Selection.TypeText",ws-dummy-ret,lp-text)
+		set ws-last-error = "Unable to add text at selection"
+		exit 1
+	endif
+endprocedure //insert-text ---------------------------------------------------
+
+procedure print-file
+parameters
+	lp-filename							pic x(512)
+	lp-printername						pic x(512)
+// stf new procedure start-------------------------------------------------------------
+	if ws-wd-obj <= 0
+		do instantiate-word 
+	endif
+	if exit-status != 0
+		exit 1
+	endif	
+	if not ole-call-method (ws-wd-obj,"application.documents.open",ws-dummy-ret,lp-filename)
+		set ws-last-error = strconcat("cannot open file: ",lp-filename)
+		exit 1
+	endif
+	if not ole-put-property(ws-wd-obj, "activeprinter",lp-printername)
+		set ws-last-error = strconcat("cannot set printer: ",lp-printername)
+		exit 1
+  	endif
+	if not ole-call-method(ws-wd-obj,"application.printout",ws-dummy-ret)
+		set ws-last-error = strconcat("cannot print: ",lp-printername)
+		exit 1
+	endif
+	if ole-call-method(ws-wd-obj, "application.quit", ws-dummy-ret,wdDoNotSaveChanges)
+  	endif
+	if ole-release(ws-wd-obj)
+	endif
+end-procedure
+
+procedure clibvword-close-doc export
+	if ws-wd-obj <= 0
+		do instantiate-word 
+	endif
+	if exit-status != 0
+		exit 1
+	endif
+	//end standard word object status check
+	if not ole-call-method(ws-wd-obj,"ActiveDocument.Fileclose",ws-dummy-ret,1)
+		set ws-last-error  = "Not closed "
+		exit 1
+	endif
+end-procedure
+
+//--------------------------------------------------------------------------------
+//   Test Cases
+//   These are dependant on a word dotx in $CUS/clib called clibvword_test.dotx
+//--------------------------------------------------------------------------------
+//
+menu testcases
+	window no-hide
+detail
+	option "Open blank documetn " @1,1
+		do testcase1
+	option "Open and populate from stock master" @3,1
+		do testcase2
+	option "Table processing" @5,1
+		do testcase3
+end-menu
+
+procedure testcase1
+local
+	lf-ok								type boolean
+	lf-message							pic x(256) type string
+	lf-version							pic x(10)
+	i 									type number
+	//
+	// check version
+	do clibvword-get-version returning lf-version 
+	if exit-status != 0
+		message if-then-else(lf-message = space, "No message returned on error (A)", lf-message)
+		exit
+	else
+		message "Version" lf-version
+	endif
+	//
+	// open blank
+	do clibvword-open-template parameters are
+		spaces
+	if not exit-status != 0
+		message if-then-else(lf-message = space, "No message returned on error (A)", lf-message)
+		exit
+	endif
+	message "opened ok"
+	do clibvword-insert-text parameters are "Here is some text"
+	if exit-status != 0
+		message "Could not insert text"
+		exit
+	endif
+endprocedure
+//VGLVIM:ERROR  Field name expected - '-'
+
+procedure testcase2
+local
+	lf-message							pic x(256) type string
+	lf-bookmarks						type string pic x(20) occurs 100
+	lf-bookmarksok						type boolean occurs 100
+	lf-version							pic x(10)
+	i 									type number
+	//
+	set lf-bookmarks[1] = "stock_code"
+	set lf-bookmarks[2] = "stock_group"
+	set lf-bookmarks[3] = "stk_description"
+	set lf-bookmarks[4] = "stk_abc_class"
+	set lf-bookmarks[5] = "stk_stock_status"
+	set lf-bookmarks[6] = "a_missing_one"
+	// open template
+	do clibvword-open-template parameters are
+//		str-concat(get-env("CUS"),"/std/clib/clibvword_test.dotx")
+		"\\mydemo\std\clib\clibvword_test.dotx"
+//		"clibvword_test.dotx"
+	if exit-status != 0
+		message if-then-else(lf-message = space, "No message returned on error (A)", lf-message)
+		exit
+	endif
+	message "opened ok"
+	// Verify
+	do clibvword-verify-template parameters are lf-bookmarks
+		returning lf-bookmarksok
+	if exit-status != 0 
+		// there should be an error
+		message if-then-else(lf-message = space, "No message returned on error (B)", lf-message)
+	endif
+	message "verified ok"
+	for i = 1 to 5
+		if not lf-bookmarksok[i] 
+			message "missing bookmark " lf-bookmarksok[i]
+			exit
+		endif
+	endfor
+	if lf-bookmarksok[6]
+		message "Warning missing bookmark 6 is reported as being there"
+	endif 
+	//
+	get stock-master
+		on index stock-code
+		key is "EQ100"
+	on error
+	endon
+	//
+	do clibvword-insert-at-bookmark	parameters "stock_code" stock-code
+	if exit-status != 0
+		do clibvword-get-last-error returning lf-message
+		message lf-message
+	endif
+	do clibvword-insert-at-bookmark	parameters "stk_description" stk-description
+	if exit-status != 0
+		do clibvword-get-last-error returning lf-message
+		message lf-message
+	endif
+	do clibvword-insert-at-bookmark	parameters "noddy" stock-code
+	if exit-status = 0
+		message "WARNING Invalid bookmark returned ok"
+	endif
+	do clibvword-insert-at-bookmark	parameters "stk_description_replace" stk-description
+	if exit-status != 0
+		do clibvword-get-last-error returning lf-message
+		message lf-message
+		exit
+	endif
+	do clibvword-replace-bookmark	parameters "stock_group" stock-group
+	if exit-status != 0
+		do clibvword-get-last-error returning lf-message
+		message lf-message
+	endif
+	pause
+	do clibvword-replace-bookmark	parameters "stk_abc_class_replace" stk-abc-class
+	if exit-status != 0
+		do clibvword-get-last-error returning lf-message
+		message lf-message
+	endif
+	pause
+	do clibvword-release-objects
+end-procedure
+
+procedure testcase3
+local
+	lf-message							pic x(256) type string
+	i 									type number
+	//
+	// open template
+	do clibvword-open-template parameters are
+		"\\mydemo\std\clib\clibvword_test.dotx"
+	if exit-status != 0
+		message if-then-else(lf-message = space, "No message returned on error (A)", lf-message)
+		exit
+	endif
+	message "opened ok"
+	do clibvword-insert-table parameters 
+		"table1" 3 2 wdColorYellow wdLineStyleDashDot
+	if exit-status != 0
+		do clibvword-get-last-error returning lf-message
+		message if-then-else(lf-message = space, "No message returned on error (B)", lf-message)
+	endif
+	do clibvword-position-table-start parameters "table1" "Code"
+	if exit-status != 0
+		do clibvword-get-last-error returning lf-message
+		message if-then-else(lf-message = space, "No message returned on error (C)", lf-message)
+	endif
+	do clibvword-table-cell-move-next
+	do clibvword-insert-text parameters "Description"
+	do clibvword-table-cell-move-next
+	do clibvword-insert-text parameters "Group"
+	select *
+		from stock-master
+		where stock-code like 'EQ%'
+	detail
+		do clibvword-table-cell-move-next
+		do clibvword-insert-text parameters stock-code
+		do clibvword-table-cell-move-next
+		do clibvword-table-cell-write-color parameters stk-description wdColorGreen
+		do clibvword-table-cell-move-next
+		do clibvword-table-cell-write-style parameters stock-group wdColorGreen wdColorYellow wdAlignParagraphRight
+	end-select
+	pause
+end-procedure
+

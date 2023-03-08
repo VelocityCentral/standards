@@ -1,0 +1,1302 @@
+#ifndef COMMON
+#define COMMON
+#define PROGRAM_NAME "Apollo Report Writer"
+#include "apollodef.spl"
+#include "apdictdef.spl"
+link 'apollodi/clibdisql'
+link 'clib/clibdict'
+
+#define CANSELECT 1
+#define CANDROP 2
+#define CANCREATE 4
+// registry preferences
+#define PREF_HIVE \
+	str-concat('HKEY_CURRENT_USER/Software/Pronto/Velocity/Apollo/',operating-system(),"/", \
+		if-then-else(get-env("HOSTNAME") = spaces,"UNKNOWN",get-env("HOSTNAME")),"/")
+#define PREF_XMLFOLDER 'xmlfolder'
+#define PREF_RPTFOLDER 'rptfolder'
+#define PREF_SKELETON 'skeleton'
+#define PREF_XML_NAME str-concat(get-env("HOME"),"/.apollo.xml") 
+
+/*
+ The following defines are used with flags set in powers of two and stored
+ in a single numeric field.
+*/
+#define ISSET(A,B) AAND(A,B)
+#define SETON(A,B) set A = AOR(A,B) // = if-then-else(ISSET(A,B),A + B,A) 
+#define SETOFF(A,B) set A = if-then-else(ISSET(A,B),A - B,A)
+
+#define MAX_PRINT_POS_PER_FIELD 40
+
+
+
+field
+	ws-integer-places		type number
+	ws-decimal-places		type number
+	ws-signed				type number
+	ws-picstring			pic x(20) type string
+	ws-current-dictionary	pic x(100) type string
+	//
+	// Preferences
+	ws-pref-xmlfolder		pic x(1024) type string
+	ws-pref-rptfolder		pic x(1024) type string
+	ws-pref-skeleton		pic x(50) type string
+	ws-dist-dict-used		type boolean
+	
+
+object mem-locations
+	type is memory
+	record is 
+		ml-seq				pic 9(5) // also priority
+		ml-location			pic x(512) type string
+		ml-status			pic x(100) type string
+		ml-action 			type number
+	end-record
+	key is ml-seq unique
+
+object cus-dict-object like dict-object
+object cus-dict-field like dict-field
+object cus-dict-record like dict-record
+object cus-dict-keys like dict-keys
+object cus-dict-documentation like dict-documentation
+object dist-dict-object like dict-object
+object dist-dict-field like dict-field
+object dist-dict-record like dict-record
+object dist-dict-keys like dict-keys
+object dist-dict-documentation like dict-documentation
+
+object all-dict-object
+	type is memory
+	record is
+		obj-dict		pic x
+		obj-name
+		obj-id
+		obj-old-id
+		obj-doc
+		obj-sec
+		obj-file
+		obj-version
+		obj-type
+		obj-sep
+		obj-flags
+		obj-audit
+		obj-app-lock
+		obj-num-flds
+		obj-date-time
+		obj-user
+	end-record
+	key is obj-id
+	key is obj-name
+
+object one-dict-rec 
+	type is memory
+	record is
+		rec-fld-seq
+		fld-name
+		fld-id
+		fld-old-id
+		fld-like-id
+		fld-type
+		fld-tot-size
+		fld-decs
+		fld-signed
+		fld-pres-size
+		fld-pres-decs
+		fld-max-size
+		fld-max-decs
+		fld-sec
+		fld-occurs
+		fld-doc
+		fld-col-name
+		fld-flags
+		fld-audit
+		fld-form-title
+		fld-col-title
+		fld-help-line
+		fld-date-time
+		fld-user
+	end-record
+	key is rec-fld-seq fld-name
+	key is fld-name
+				
+
+object rfcopy like reportfil
+
+object common-text-file
+	type is text
+	record
+		ctf-text						pic x(1024) type string
+	end-record
+
+procedure open-empty-files
+// use this to just open a set of blank files
+	do open-dictionary
+	open reportdef temporary
+	open reportfil temporary
+	open reportsel temporary
+	open reportcal temporary
+	open reportsql temporary
+	open reporttxt temporary
+end-procedure
+
+procedure remove-all-records
+	//
+	select * from reportdef for update
+	detail
+		delete reportdef on error endon
+	end-select
+	//
+	select * from reportfil for update
+	detail
+		delete reportfil on error endon
+	end-select
+	//
+	select * from reportsel for update
+	detail
+		delete reportsel on error endon
+	end-select
+	//
+	select * from reportcal for update
+	detail
+		delete reportcal on error endon
+	end-select
+	//
+	select * from reportsql for update
+	detail
+		delete reportsql on error endon
+	end-select
+	//
+	select * from reporttxt for update
+	detail
+		delete reporttxt on error endon
+	end-select
+	//
+end-procedure
+
+procedure determine-xml-filename
+parameters
+	lp-name									like ap-name
+returning
+	lr-xml-filename							pic x(1024) type string
+	// this is really just a stub at this point.  Later on it will be made
+	// more intelligne so there are some options about where to store the xml
+	// files.
+	set lr-xml-filename = str-concat(ws-pref-xmlfolder,"/",lp-name,".xml")
+end-procedure
+
+procedure save-as-xml
+parameters
+	lp-report					like ap-name
+	lp-file						pic x(1024) type string
+local
+	lf-doc						type xml-handle
+	lf-root						type xml-handle
+	lf-report					type xml-handle
+	lf-table					type xml-handle
+	lf-record					type xml-handle
+	lf-array					type xml-handle
+	lf-array-element			type xml-handle
+	i							type number
+//
+	set lf-doc = xml-new-document(spaces,"Reports")
+	set lf-root = xml-get-root-node(lf-doc)
+	set lf-report =  xml-add-child-node(lf-root,"report",spaces) 
+	if xml-add-node-attribute(lf-report,"name",spaces,ap-name) endif
+	//
+	set lf-table = xml-add-child-node(lf-report,"reportdef",spaces)
+	get reportdef
+		on index ap-name
+		key is ap-name
+	on error endon
+	if xml-add-child-node-text(lf-table,"ap-desc",spaces,ap-desc) endif
+	if xml-add-child-node-text(lf-table,"ap-spl-name",spaces,ap-spl-name) endif
+	if xml-add-child-node-text(lf-table,"ap-primary",spaces,ap-primary) endif
+	if xml-add-child-node-text(lf-table,"ap-monitor",spaces,ap-monitor) endif
+	if xml-add-child-node-text(lf-table,"ap-skeleton",spaces,ap-skeleton) endif
+	if xml-add-child-node-text(lf-table,"ap-full-pgm",spaces,ap-full-pgm) endif
+	if xml-add-child-node-text(lf-table,"ap-xml",spaces,ap-xml) endif
+	if xml-add-child-node-text(lf-table,"ap-module",spaces,ap-module) endif
+	if xml-add-child-node-text(lf-table,"ap-function",spaces,ap-function) endif
+	if xml-add-child-node-text(lf-table,"ap-excel",spaces,ap-excel) endif
+	if xml-add-child-node-text(lf-table,"ap-build-file",spaces,ap-build-file) endif
+	if xml-add-child-node-text(lf-table,"ap-di-project",spaces,ap-di-project) endif
+	if xml-free-node-handle(lf-table) endif
+	// reportfil
+	set lf-table = xml-add-child-node(lf-report,"reportfil",spaces)
+	select * from reportfil
+		where ap-name = lp-report
+	detail
+		set lf-record = xml-add-child-node(lf-table,"record",spaces)
+		// keys
+		if xml-add-node-attribute(lf-record,"ap-obj-name",spaces,ap-obj-name) endif
+		if xml-add-node-attribute(lf-record,"ap-fld-name",spaces,ap-fld-name) endif
+		// fields
+		if xml-add-child-node-text(lf-record,"ap-array-offset",spaces,str(ap-array-offset)) endif
+		if xml-add-child-node-text(lf-record,"ap-fld-source",spaces,ap-fld-source) endif
+		if xml-add-child-node-text(lf-record,"ap-sort-seq",spaces,str(ap-sort-seq)) endif
+		if xml-add-child-node-text(lf-record,"ap-total-flg",spaces,ap-total-flg) endif
+		if xml-add-child-node-text(lf-record,"ap-group",spaces,str(ap-group)) endif
+		if xml-add-child-node-text(lf-record,"ap-col",spaces,str(ap-col)) endif
+		if xml-add-child-node-text(lf-record,"ap-print-pos",spaces,str(ap-print-pos)) endif
+		if xml-add-child-node-text(lf-record,"ap-print-pic",spaces,ap-print-pic) endif
+		set lf-array = xml-add-child-node(lf-record,"ap-col-head",spaces)
+		for i = 1 to occurence(ap-col-head)
+			if ap-col-head[i] <> spaces 
+				set lf-array-element = xml-add-child-node(lf-array,"element",spaces)
+				if xml-modify-node-attribute(lf-array-element,"offset",spaces,str(i)) endif
+				if xml-modify-node-text(lf-array-element,ap-col-head[i]) endif
+				if xml-free-node-handle(lf-array-element) endif
+//				if xml-add-child-node-text(lf-array,"offset",spaces,str(i)) endif
+//				if xml-add-child-node-text(lf-array,"offset",spaces,ap-col-head[i]) endif
+			endif
+		endfor
+		if xml-free-node-handle(lf-array) endif
+//		if xml-add-child-node-text(lf-record,"ap-col-head",spaces,ap-col-head) endif
+		if xml-add-child-node-text(lf-record,"ap-prompt",spaces,ap-prompt) endif
+		if xml-add-child-node-text(lf-record,"ap-help",spaces,ap-help) endif
+		if xml-add-child-node-text(lf-record,"ap-suppress-dup",spaces,ap-suppress-dup) endif
+		if xml-add-child-node-text(lf-record,"ap-xml-hide",spaces,ap-xml-hide) endif
+		if xml-add-child-node-text(lf-record,"ap-dict",spaces,ap-dict) endif
+		if xml-add-child-node-text(lf-record,"ap-print-line",spaces,str(ap-print-line)) endif
+		if xml-add-child-node-text(lf-record,"ap-sqlstmt-seq",spaces,str(ap-sqlstmt-seq)) endif
+		if xml-add-child-node-text(lf-record,"ap-suppress-prt",spaces,ap-suppress-prt) endif
+		if xml-free-node-handle(lf-record) endif
+	endselect
+	if xml-free-node-handle(lf-table) endif
+	// end of reportfil
+	//
+	// reportsel
+	set lf-table = xml-add-child-node(lf-report,"reportsel",spaces)
+	select * from reportsel
+		where ap-name = lp-report
+	detail
+		set lf-record = xml-add-child-node(lf-table,"record",spaces)
+		// keys
+		if xml-add-node-attribute(lf-record,"ap-sel-seq",spaces,str(ap-sel-seq)) endif
+		if xml-add-node-attribute(lf-record,"ap-fld-name",spaces,ap-fld-name) endif
+		// fields
+		if xml-add-child-node-text(lf-record,"ap-operator",spaces,ap-operator) endif
+		if xml-add-child-node-text(lf-record,"ap-default",spaces,ap-default) endif
+		if xml-add-child-node-text(lf-record,"ap-sel-prompt",spaces,ap-sel-prompt) endif
+		if xml-add-child-node-text(lf-record,"ap-ws-fld-name",spaces,ap-ws-fld-name) endif
+		if xml-add-child-node-text(lf-record,"ap-sel-pic",spaces,ap-sel-pic) endif
+		if xml-free-node-handle(lf-record) endif
+	endselect
+	if xml-free-node-handle(lf-table) endif
+	// end of reportsel
+	//
+	// reportcal
+	set lf-table = xml-add-child-node(lf-report,"reportcal",spaces)
+	select * from reportcal
+		where ap-name = lp-report
+	detail
+		set lf-record = xml-add-child-node(lf-table,"record",spaces)
+		// keys
+		if xml-add-node-attribute(lf-record,"ap-calc-fld-name",spaces,ap-calc-fld-name) endif
+		if xml-add-node-attribute(lf-record,"ap-type",spaces,ap-type) endif
+		if xml-add-node-attribute(lf-record,"ap-level",spaces,str(ap-level)) endif
+		// fields
+		if xml-add-child-node-text(lf-record,"ap-expression",spaces,ap-expression) endif
+		if xml-add-child-node-text(lf-record,"ap-calc-pic",spaces,ap-calc-pic) endif
+		if xml-add-child-node-text(lf-record,"ap-calc-fld-title",spaces,ap-calc-fld-title) endif
+		if xml-free-node-handle(lf-record) endif
+	endselect
+	if xml-free-node-handle(lf-table) endif
+	// end of reportcal
+	//
+	// reportsql
+	set lf-table = xml-add-child-node(lf-report,"reportsql",spaces)
+	select * from reportsql
+		where ap-name = lp-report
+	detail
+		set lf-record = xml-add-child-node(lf-table,"record",spaces)
+		// keys
+		if xml-add-node-attribute(lf-record,"ap-sql-seq",spaces,str(ap-sql-seq)) endif
+		// fields
+		if xml-add-child-node-text(lf-record,"ap-sql-text",spaces,ap-sql-text) endif
+		if xml-free-node-handle(lf-record) endif
+	endselect
+	if xml-free-node-handle(lf-table) endif
+	// end of reportsql
+	//
+	// reporttxt
+	set lf-table = xml-add-child-node(lf-report,"reporttxt",spaces)
+	select * from reporttxt
+		where ap-name = lp-report
+	detail
+		set lf-record = xml-add-child-node(lf-table,"record",spaces)
+		// keys
+		if xml-add-node-attribute(lf-record,"ap-txt-type",spaces,ap-txt-type) endif
+		if xml-add-node-attribute(lf-record,"ap-txt-seq",spaces,str(ap-txt-seq)) endif
+		// fields
+		if xml-add-child-node-text(lf-record,"ap-txt-line",spaces,ap-txt-line) endif
+		if xml-free-node-handle(lf-record) endif
+	endselect
+	if xml-free-node-handle(lf-table) endif
+	// end of reporttxt
+	//
+	if xml-free-node-handle(lf-report) endif
+	if xml-free-node-handle(lf-root) endif
+	if not xml-save-as-file(lf-doc,lp-file,spaces,2)
+		message "There was an error saving the xml file"
+	endif
+	if xml-free-node-handle(lf-doc) endif
+	if xml-close-document(lf-doc) endif
+//	message "xml save complete"
+end-procedure
+
+
+
+procedure load-from-xml
+parameters are
+	lp-filename					pic x(1024) type string
+returning
+	lr-name						like ap-name
+	lr-ok						type boolean
+	lr-message					pic x(1024) type string
+local
+	lf-doc						type xml-handle
+	lf-root						type xml-handle
+	lf-report					type xml-handle
+	lf-table					type xml-handle
+	lf-record					type xml-handle
+	lf-array					type xml-handle
+	lf-array-element			type xml-handle
+	lf-error					type boolean
+	i							type number
+//
+	set lr-ok = TRUE
+	set lf-error = false
+	if not file-exists(lp-filename,false)
+		set lr-ok = FALSE
+		set lr-message = str-concat(lp-filename," does not exist")
+		exit
+	endif
+	set lf-doc = xml-parse-file(lp-filename)
+	if not lf-doc  
+		acknowledge "Unable to parse xml file"
+		exit
+	endif
+	set lf-root = xml-get-root-node(lf-doc)
+	if not lf-root
+		message "Unable to get handle on root node"
+		exit
+	endif
+	set lf-report = xml-get-child-by-name(lf-root,"report",spaces)
+	if not lf-report
+		message "Cannot find report node"
+		exit
+	endif
+	set lr-name = xml-get-node-attribute(lf-report,"name")
+	if lr-name = spaces
+		message "No report name defined"
+		exit
+	endif
+	//
+	// remove all the data from the memory files
+	//
+	do remove-all-records
+	//
+	// deal with reportdef
+	//
+	set lf-table = xml-get-child-by-name(lf-report,"reportdef",spaces)
+	initialise reportdef
+	set ap-name = lr-name
+	set ap-desc = xml-node-text(xml-get-child-by-name(lf-table,"ap-desc",spaces))
+	set ap-spl-name = xml-node-text(xml-get-child-by-name(lf-table,"ap-spl-name",spaces))
+	set ap-primary = xml-node-text(xml-get-child-by-name(lf-table,"ap-primary",spaces))
+	set ap-monitor = xml-node-text(xml-get-child-by-name(lf-table,"ap-monitor",spaces))
+	set ap-skeleton = xml-node-text(xml-get-child-by-name(lf-table,"ap-skeleton",spaces))
+	set ap-full-pgm = xml-node-text(xml-get-child-by-name(lf-table,"ap-full-pgm",spaces))
+	set ap-xml = xml-node-text(xml-get-child-by-name(lf-table,"ap-xml",spaces))
+	set ap-module = xml-node-text(xml-get-child-by-name(lf-table,"ap-module",spaces))
+	set ap-function = xml-node-text(xml-get-child-by-name(lf-table,"ap-function",spaces))
+	set ap-excel = xml-node-text(xml-get-child-by-name(lf-table,"ap-excel",spaces))
+	set ap-build-file = xml-node-text(xml-get-child-by-name(lf-table,"ap-build-file",spaces))
+	set ap-desc = xml-node-text(xml-get-child-by-name(lf-table,"ap-desc",spaces))
+	set ap-di-project = xml-node-text(xml-get-child-by-name(lf-table,"ap-di-project",spaces))
+	insert reportdef
+	on error
+		set lf-error = true
+		set lr-message = error-description(file-status())
+	endon
+	// reportfil
+	set lf-table = xml-get-child-by-name(lf-report,"reportfil",spaces)
+	if lf-table
+		set lf-record = xml-get-first-child-node(lf-table)
+		while lf-record
+			initialise reportfil
+			set ap-name = lr-name
+			// get keys
+			set ap-obj-name = xml-get-node-attribute(lf-record,"ap-obj-name")
+			set ap-fld-name = xml-get-node-attribute(lf-record,"ap-fld-name")
+			// get non-key fields
+			set ap-array-offset = num(xml-node-text(xml-get-child-by-name(lf-record,"ap-array-offset",spaces)))
+			set ap-fld-source = xml-node-text(xml-get-child-by-name(lf-record,"ap-fld-source",spaces))
+			set ap-sort-seq = num(xml-node-text(xml-get-child-by-name(lf-record,"ap-sort-seq",spaces)))
+			set ap-total-flg = xml-node-text(xml-get-child-by-name(lf-record,"ap-total-flg",spaces))
+			set ap-group = num(xml-node-text(xml-get-child-by-name(lf-record,"ap-group",spaces)))
+			set ap-col = num(xml-node-text(xml-get-child-by-name(lf-record,"ap-col",spaces)))
+			set ap-print-pos = num(xml-node-text(xml-get-child-by-name(lf-record,"ap-print-pos",spaces)))
+			set ap-print-pic = xml-node-text(xml-get-child-by-name(lf-record,"ap-print-pic",spaces))
+//			set ap-col-head = xml-node-text(xml-get-child-by-name(lf-record,"ap-col-head",spaces))
+			set lf-array = xml-get-child-by-name(lf-record,"ap-col-head",spaces)
+			if lf-array
+				set lf-array-element  = xml-get-first-child-node(lf-array)
+				while lf-array-element
+					set i = num(xml-get-node-attribute(lf-array-element,"offset")) 
+					if i < 1 or i > occurence(ap-col-head)
+						set lf-error = true
+						set lr-message = concat("array offset was " str(i))
+					else
+						set ap-col-head[i] = xml-node-text(lf-array-element)
+					endif
+					set lf-array-element = xml-get-next-node(lf-array-element)
+				end-while
+				if xml-free-node-handle(lf-array) endif
+			endif
+			set ap-prompt = xml-node-text(xml-get-child-by-name(lf-record,"ap-prompt",spaces))
+			set ap-help = xml-node-text(xml-get-child-by-name(lf-record,"ap-help",spaces))
+			set ap-suppress-dup = xml-node-text(xml-get-child-by-name(lf-record,"ap-suppress-dup",spaces))
+			set ap-xml-hide = xml-node-text(xml-get-child-by-name(lf-record,"ap-xml-hide",spaces))
+			set ap-dict = xml-node-text(xml-get-child-by-name(lf-record,"ap-dict",spaces))
+			set ap-print-line = num(xml-node-text(xml-get-child-by-name(lf-record,"ap-print-line",spaces)))
+			set ap-sqlstmt-seq = num(xml-node-text(xml-get-child-by-name(lf-record,"ap-sqlstmt-seq",spaces)))
+			set ap-suppress-prt = xml-node-text(xml-get-child-by-name(lf-record,"ap-suppress-prt",spaces))
+			insert reportfil
+			on error
+				set lf-error = true
+				set lr-message = error-description(file-status())
+			endon
+			// get next record
+			set lf-record = xml-get-next-node(lf-record)
+		end-while
+	endif
+	// reportsel
+	set lf-table = xml-get-child-by-name(lf-report,"reportsel",spaces)
+	if lf-table
+		set lf-record = xml-get-first-child-node(lf-table)
+		while lf-record
+			initialise reportsel
+			set ap-name = lr-name
+			// get keys
+			set ap-sel-seq = num(xml-get-node-attribute(lf-record,"ap-sel-seq"))
+			set ap-fld-name = xml-get-node-attribute(lf-record,"ap-fld-name")
+			// get non-key fields
+			set ap-operator = xml-node-text(xml-get-child-by-name(lf-record,"ap-operator",spaces))
+			set ap-default = xml-node-text(xml-get-child-by-name(lf-record,"ap-default",spaces))
+			set ap-sel-prompt = xml-node-text(xml-get-child-by-name(lf-record,"ap-sel-prompt",spaces))
+			set ap-ws-fld-name = xml-node-text(xml-get-child-by-name(lf-record,"ap-ws-fld-name",spaces))
+			set ap-sel-pic = xml-node-text(xml-get-child-by-name(lf-record,"ap-sel-pic",spaces))
+			insert reportsel
+			on error
+				set lf-error = true
+				set lr-message = error-description(file-status())
+			endon
+			// get next record
+			set lf-record = xml-get-next-node(lf-record)
+		end-while
+	endif
+	// reportcal
+	set lf-table = xml-get-child-by-name(lf-report,"reportcal",spaces)
+	if lf-table
+		set lf-record = xml-get-first-child-node(lf-table)
+		while lf-record
+			initialise reportcal
+			set ap-name = lr-name
+			// get keys
+			set ap-calc-fld-name = xml-get-node-attribute(lf-record,"ap-calc-fld-name")
+			set ap-type = xml-get-node-attribute(lf-record,"ap-type")
+			set ap-level = num(xml-get-node-attribute(lf-record,"ap-level"))
+			// get non-key fields
+			set ap-expression = xml-node-text(xml-get-child-by-name(lf-record,"ap-expression",spaces))
+			set ap-calc-pic = xml-node-text(xml-get-child-by-name(lf-record,"ap-calc-pic",spaces))
+			set ap-calc-fld-title = xml-node-text(xml-get-child-by-name(lf-record,"ap-calc-fld-title",spaces))
+			insert reportcal
+			on error
+				set lf-error = true
+				set lr-message = error-description(file-status())
+			endon
+			// get next record
+			set lf-record = xml-get-next-node(lf-record)
+		end-while
+	endif
+	// reportsql
+	set lf-table = xml-get-child-by-name(lf-report,"reportsql",spaces)
+	if lf-table
+		set lf-record = xml-get-first-child-node(lf-table)
+		while lf-record
+			initialise reportsql
+			set ap-name = lr-name
+			// get keys
+			set ap-sql-seq = num(xml-get-node-attribute(lf-record,"ap-sql-seq"))
+			// get non-key fields
+			set ap-sql-text = xml-node-text(xml-get-child-by-name(lf-record,"ap-sql-text",spaces))
+			insert reportsql
+			on error
+				set lf-error = true
+				set lr-message = error-description(file-status())
+			endon
+			// get next record
+			set lf-record = xml-get-next-node(lf-record)
+		end-while
+	endif
+	// reporttxt
+	set lf-table = xml-get-child-by-name(lf-report,"reporttxt",spaces)
+	if lf-table
+		set lf-record = xml-get-first-child-node(lf-table)
+		while lf-record
+			initialise reporttxt
+			set ap-name = lr-name
+			// get keys
+			set ap-txt-type = xml-get-node-attribute(lf-record,"ap-txt-type")
+			set ap-txt-seq = num(xml-get-node-attribute(lf-record,"ap-txt-seq"))
+			// get non-key fields
+			set ap-txt-line = xml-node-text(xml-get-child-by-name(lf-record,"ap-txt-line",spaces))
+			insert reporttxt
+			on error
+				set lf-error = true
+				set lr-message = error-description(file-status())
+			endon
+			// get next record
+			set lf-record = xml-get-next-node(lf-record)
+		end-while
+	endif
+	if xml-free-node-handle(lf-array-element) endif
+	if xml-free-node-handle(lf-array) endif
+	if xml-free-node-handle(lf-record) endif
+	if xml-free-node-handle(lf-table) endif
+	if xml-free-node-handle(lf-report) endif
+	if xml-free-node-handle(lf-root) endif
+	if xml-free-node-handle(lf-doc) endif
+	if xml-close-document(lf-doc) endif
+	if lf-error
+		message-box param-text("<<P1>><<BR>><<p2>>"
+			,"Unable to Load XML File"
+			,lr-message)
+			title is "XML Load"
+			message-buttons MSG_BOX_CANCEL
+			icon MSG_BOX_STOP
+		set lr-ok = FALSE
+	endif
+	open rfcopy file is filename(reportfil)
+end-procedure
+
+procedure open-dictionary
+local
+	lf-file-name						pic x(256) type string
+	lf-dict								pic x
+	do clibdict-get-dict-name-with-suffix
+		parameters are get-env("PRODICT")
+		returning lf-file-name
+	open dict-object
+		file is str-concat(lf-file-name,"o")
+	open dict-field
+		file is str-concat(lf-file-name,"f")
+	open dict-record
+		file is str-concat(lf-file-name,"r")
+	open dict-keys
+		file is str-concat(lf-file-name,"k")
+	open dict-documentation
+		file is str-concat(lf-file-name,"d")
+	if get-env("PROUSRDICT") <> spaces
+		do clibdict-get-dict-name-with-suffix
+			parameters are get-env("PROUSRDICT")
+			returning lf-file-name
+		open cus-dict-object
+			file is str-concat(lf-file-name,"o")
+		open cus-dict-field
+			file is str-concat(lf-file-name,"f")
+		open cus-dict-record
+			file is str-concat(lf-file-name,"r")
+		open cus-dict-keys
+			file is str-concat(lf-file-name,"k")
+		open cus-dict-documentation
+			file is str-concat(lf-file-name,"d")
+	endif
+	set ws-dist-dict-used = FALSE
+	if get-env("PRODISTDICT") <> spaces
+		set ws-dist-dict-used = TRUE
+		do clibdict-get-dict-name-with-suffix
+			parameters are get-env("PRODISTDICT")
+			returning lf-file-name
+		open dist-dict-object
+			file is str-concat(lf-file-name,"o")
+		open dist-dict-field
+			file is str-concat(lf-file-name,"f")
+		open dist-dict-record
+			file is str-concat(lf-file-name,"r")
+		open dist-dict-keys
+			file is str-concat(lf-file-name,"k")
+		open dist-dict-documentation
+			file is str-concat(lf-file-name,"d")
+	endif
+	open all-dict-object
+		temporary
+	select *, obj-dict = "B" //obj-name
+		from dict-object
+	union all
+	select * , obj-dict = "C" //obj-name
+		from cus-dict-object
+	detail
+		insert all-dict-object
+		on error endon
+	end-select
+	if ws-dist-dict-used
+		select *, obj-dict = "D"
+			from dist-dict-object
+		detail
+			insert all-dict-object
+			on error endon
+		end-select
+	endif
+	open one-dict-rec
+		temporary
+end-procedure
+
+procedure picture-string
+parameters are 
+	l-field								like ap-fld-name
+returning 
+	picclause							pic x(20) type string
+	no-print-pos						type number // number of print positions used.
+local
+	// must have currency on report-fil
+	x						type number
+	lf-ok					type boolean
+	lf-dict					pic x
+	do get-dict-field parameters are l-field spaces
+		returning lf-ok lf-dict
+	if fld-pres-size <> 0
+		set fld-tot-size = fld-pres-size
+	endif
+	if fld-pres-decs <> 0
+		set fld-decs = fld-pres-decs
+	endif
+	set ws-integer-places = fld-tot-size - fld-decs //aand(rshift(fld-desc,5),31)
+	set ws-decimal-places = fld-decs // aand(fld-desc,31)
+	set ws-signed = if-then-else(fld-signed = 'Y',1,0) // aand(fld-desc,1024)
+	if ap-print-pic != spaces
+		set picclause = ap-print-pic
+	else
+		switch fld-type
+		case "A" "V"
+			set ws-integer-places = fld-tot-size
+			set ws-decimal-places = 0
+			if fld-tot-size  <= MAX_PRINT_POS_PER_FIELD
+			set picclause = concat("x(",str(fld-tot-size),")")
+			set no-print-pos = fld-tot-size
+			else
+				set picclause = concat("x(",str(MAX_PRINT_POS_PER_FIELD),")")
+				set no-print-pos = MAX_PRINT_POS_PER_FIELD
+			endif
+		case "L" "J"
+			set ws-integer-places = 18
+			set ws-decimal-places = 0
+			set picclause = "dd-mmm-yy hh:mm:ss"
+			set no-print-pos = 18
+		case "D"
+			set ws-integer-places = 10
+			set ws-decimal-places = 0
+			set picclause = "dd-mmm-yy"
+			set no-print-pos = 9
+		else
+			set no-print-pos = 0
+			if ws-signed 
+				set picclause = "-"
+				set no-print-pos += 1
+			endif
+			if ws-signed 
+				set picclause = concat(picclause,"s(",str(ws-integer-places),")")
+			else
+				set picclause = concat(picclause,"z(",str(ws-integer-places),")")
+			endif
+			set no-print-pos += ws-integer-places
+			if ws-decimal-places > 0
+				set no-print-pos += 1 // for the decimal point
+				set picclause = concat(picclause,".")
+				set no-print-pos += ws-decimal-places // for the no of decimals
+				for x = 1 to ws-decimal-places
+					set picclause = concat(picclause,"9")
+				endfor
+			endif
+		end-switch
+	endif
+end-procedure
+
+procedure populate-one-dict-rec
+// this procedure is necessary because we need to know at runtime whether a
+// distributor dictionary is present or not
+parameters
+	lp-obj-name				like obj-name
+//
+	select * from one-dict-rec
+		for update
+	detail
+		delete one-dict-rec
+		on error
+		endon
+	end-select
+//
+// now add the new ones.
+//
+	get all-dict-object
+		on index obj-name
+		key is lp-obj-name
+	on error
+		exit
+	endon
+	switch obj-dict
+	case 'B'
+		select * 
+			from dict-record
+			where obj-id = :obj-id
+		detail
+			get dict-field
+				on index fld-id
+				key is fld-id
+			on error
+			else
+				insert one-dict-rec
+				on error
+				endon
+			endon
+		endselect
+	case 'C'
+		select * 
+			from cus-dict-record
+			where obj-id = :obj-id
+		detail
+			get cus-dict-field
+				on index fld-id
+				key is fld-id
+			on error
+			else
+				insert one-dict-rec
+				on error
+				endon
+			endon
+		endselect
+	case 'D'
+		select * 
+			from dist-dict-record
+			where obj-id = :obj-id
+		detail
+			get dist-dict-field
+				on index fld-id
+				key is fld-id
+			on error
+			else
+				insert one-dict-rec
+				on error
+				endon
+			endon
+		endselect
+	end-switch
+end-procedure
+
+procedure get-dict-field
+parameters are
+	lp-fld					like fld-name
+	lp-source				like ap-fld-source
+returning
+	lr-ok					type boolean
+	lr-dict					pic x
+	set lr-ok = TRUE
+	if ws-dist-dict-used
+		get dist-dict-field
+			on index fld-name
+			key is lp-fld
+		on error
+			set lr-ok = FALSE
+		else
+			set lr-dict = "D"
+			set lr-ok = TRUE
+		endon
+	endif
+	if not lr-ok
+		get cus-dict-field
+			on index fld-name
+			key is lp-fld
+		on error
+			set lr-ok = FALSE
+		else
+			set lr-dict = "C"
+			set lr-ok = TRUE
+		endon
+	endif
+	if not lr-ok
+		get dict-field
+			on index fld-name
+			key is lp-fld
+		on error
+			set lr-ok = FALSE
+		else
+			set lr-dict = "B"
+			set lr-ok = TRUE
+		endon
+	endif
+end-procedure
+
+procedure get-dict-obj-field
+parameters are
+	lp-obj					like obj-name
+	lp-fld					like fld-name
+	lp-source				like ap-fld-source
+returning
+	lr-ok					type boolean
+	lr-dict					pic x
+	//
+	// find which dictionary contains the object first
+	//
+	set lr-dict = spaces
+	if ws-dist-dict-used
+		get dist-dict-object
+			on index obj-name
+			key is lp-obj
+		on error
+		else
+			set lr-dict = "D"
+		endon
+	endif
+	if lr-dict = spaces
+		get cus-dict-object
+			on index obj-name
+			key is lp-obj
+		on error
+		else
+			set lr-dict = "C"
+		endon
+	endif
+	if lr-dict = spaces
+		get dict-object
+			on index obj-name
+			key is lp-obj
+		on error
+		else
+			set lr-dict = "B"
+		endon
+	endif
+	// 
+	// now look for the field
+	//
+	set lr-ok = TRUE
+	switch lr-dict
+	case "D"
+		get dist-dict-field
+			on index fld-name
+			key is lp-fld
+		on error
+			set lr-ok = FALSE
+		else
+			set lr-ok = TRUE
+		endon
+	case "C"
+		get cus-dict-field
+			on index fld-name
+			key is lp-fld
+		on error
+			set lr-ok = FALSE
+		else
+			set lr-ok = TRUE
+		endon
+	case "B"
+		get dict-field
+			on index fld-name
+			key is lp-fld
+		on error
+			set lr-ok = FALSE
+		else
+			set lr-ok = TRUE
+		endon
+	endswitch
+end-procedure
+
+procedure get-dict-object
+parameters are
+	lp-obj-name				like obj-name
+returning
+	lr-ok					type boolean
+	lr-dict					pic x
+	set lr-ok = TRUE
+	if ws-dist-dict-used
+		get dist-dict-object
+			on index obj-name
+			key is lp-obj-name
+		on error
+			set lr-ok = FALSE
+		else
+			set lr-dict = "D"
+			set lr-ok = TRUE
+		endon
+	endif
+	if not lr-ok
+		get cus-dict-object
+			on index obj-name
+			key is lp-obj-name
+		on error
+			set lr-ok = FALSE
+		else
+			set lr-dict = "C"
+			set lr-ok = TRUE
+		endon
+	endif
+	if not lr-ok
+		get dict-object
+			on index obj-name
+			key is lp-obj-name
+		on error
+			set lr-ok = FALSE
+		else
+			set lr-dict = "B"
+			set lr-ok = TRUE
+		endon
+	endif
+end-procedure
+
+procedure get-fld-col-head
+parameters
+	lp-fld-name					like fld-name
+	lp-source					like ap-fld-source
+returning
+	lr-doc-line					like doc-line
+local
+	lf-dict						like ap-fld-source
+	lf-ok						type boolean
+	i							type number
+//
+// Assumes currency on reportfil
+//
+	for i = 1 to occurence(ap-col-head)
+		string lr-doc-line appending concat(' ',ap-col-head[i])
+		set lr-doc-line = ltrim(lr-doc-line)
+	endfor
+	if lr-doc-line <> spaces
+		exit
+	endif
+// if nothing defined on the report then use the dictionary
+	do get-dict-field
+		parameter are lp-fld-name spaces returning lf-ok lf-dict
+	if not lf-ok 
+		exit
+	endif
+	switch lp-source
+	case ' '
+		if lf-dict <> spaces // otherwise we will go into a tailspin
+			do get-fld-col-head
+				parameters lp-fld-name lf-dict
+				returning lr-doc-line
+			exit
+		endif
+	case "B"
+		get dict-documentation
+			on index doc-id-type doc-id doc-type doc-line-no
+			key is 'F' fld-id 4 0
+		on error
+			exit
+		else
+			set lr-doc-line = doc-line
+		endon
+	case "C"
+		get cus-dict-documentation
+			on index doc-id-type doc-id doc-type doc-line-no
+			key is 'F' fld-id 4 0
+		on error
+			exit
+		else
+			set lr-doc-line = doc-line
+		endon
+	case "D"
+		get dist-dict-documentation
+			on index doc-id-type doc-id doc-type doc-line-no
+			key is 'F' fld-id 4 0
+		on error
+			exit
+		else
+			set lr-doc-line = doc-line
+		endon
+	end-switch
+end-procedure
+
+procedure swap-character
+parameters l-in			pic x(100) type string
+	l-in-char			pic x
+	l-out-char			pic x
+returning l-out				pic x(100) type string
+local
+	i						type number
+	for i = 1 to str-len(l-in)
+		if substring(l-in,i,i) = l-in-char
+			string l-out appending l-out-char
+		else
+			string l-out appending substring(l-in,i,i)
+		endif
+	end-for
+end-procedure
+
+
+procedure get-fld-type-from-pic
+parameters
+	lp-pic					pic x(20) type string
+returning
+	lr-fld-type				pic x
+	if pattern(lp-pic,"date")
+	or pattern(lp-pic,"mm")
+		set lr-fld-type = "D"
+	elseif pattern(lp-pic, "x") or pattern(lp-pic,"string")
+		set lr-fld-type = "A"
+	else
+		set lr-fld-type = "N"
+	endif
+end-procedure
+
+
+procedure para-check-flag
+parameters
+	lp-flag								type string
+	lp-not-defined						type boolean
+returning 
+	lr-boolean							type boolean
+local
+	i									type number
+	set lr-boolean = lp-not-defined
+	for i =  1 to param-cnt()
+		if get-param(i) = lp-flag
+			if lp-not-defined
+				set lr-boolean = false
+			else
+				set lr-boolean = true
+			endif
+			exit
+		endif
+	endfor
+end-procedure
+
+procedure para-check-value
+parameters
+	lp-flag								type string
+returning 
+	lr-str1								type string pic x(1024)
+	lr-str2								type string pic x(1024)
+local
+	i									type number
+	for i = 1 to param-cnt()
+		if get-param(i) = lp-flag
+			set lr-str1 = get-param(i + 1)
+			set lr-str2 = get-param(i + 2)
+			exit
+		endif
+	endfor
+end-procedure
+
+procedure get-apollo-dir
+// returns the apollo dir from the beginning of the path to the end
+// immediately before the name of the program that is running.
+returning
+	lr-dir							pic x(100) type string
+local
+	i								type number
+	set lr-dir = get-param(0)
+	for i = str-len(lr-dir) down to 1 
+		if substring(lr-dir,i,i) = "/"
+		or substring(lr-dir,i,i) = "\"
+			break
+		endif
+	endfor
+	string lr-dir deleting i to str-len(lr-dir)
+	//
+	// if this not from the root add $CUS:
+	if substring(lr-dir,1,1) <> "/" 
+	and substring(lr-dir,1,1) <> "\"
+	and substring(lr-dir,2,2) <> ":"
+		set lr-dir = strconcat(get-env("CUS"),"/",lr-dir)
+	endif
+end-procedure
+
+procedure split-col-head
+parameters
+	lp-line								like doc-line
+returning
+	lr-col								like ap-col-head
+local
+	i									type number
+	lf-offset							type number
+//
+	set i = 1
+	set lf-offset = 1
+	for i = 1 to str-len(lp-line)
+		if substring(lp-line,i,i) = spaces
+			set lf-offset += 1
+		else
+			string lr-col[lf-offset] appending substring(lp-line,i,i)
+		endif
+		if lf-offset > 3 
+			exit
+		endif
+	end-for
+end-procedure
+
+procedure standardise-folder-name
+// the procedure is designed to take a folder name and make them "std" so that
+// they have forward slashes irrespective of where they are and also to remove
+// drive identifiers if not on windows
+parameters
+	lp-in-folder					pic x(1024) type string
+returning 
+	lr-out-folder					pic x(1024) type string
+	set lr-out-folder = lp-in-folder
+	if operating-system <> "WINDOWS"
+		if substring(lr-out-folder,2,2) = ":"
+			string lr-out-folder deleting 1 to 2
+		endif
+	endif
+	do swap-character parameters are lr-out-folder "\" "/" returning lr-out-folder
+	if pattern(lr-out-folder,"/$")
+		string lr-out-folder deleting str-len(lr-out-folder) 
+	endif
+end-procedure
+
+procedure set-preferences
+parameters
+	lp-xml-folder						pic x(1024) type string
+	lp-rpt-folder						pic x(1024) type string
+	lp-skeleton							pic x(50) type string
+local
+	lf-doc								type xml-handle
+	lf-root								type xml-handle
+	lf-use-registry						type boolean
+	//
+	set lf-use-registry = false
+	//
+	// Preference is to store in xml in the users home directory
+	//
+	set lf-doc = xml-new-document(spaces,'apollo_preferences')
+	set lf-root = xml-get-root-node(lf-doc)
+	if not xml-add-child-node-text(lf-root,PREF_XMLFOLDER,spaces,lp-xml-folder)
+		set lf-use-registry = True
+	endif
+	if not xml-add-child-node-text(lf-root,PREF_RPTFOLDER,spaces,lp-rpt-folder)
+		set lf-use-registry = True
+	endif
+	if not xml-add-child-node-text(lf-root,PREF_SKELETON,spaces,lp-skeleton)
+		set lf-use-registry = True
+	endif
+	if not xml-save-as-file(lf-doc,PREF_XML_NAME,spaces,2)
+		set lf-use-registry = TRUE
+	endif
+	if lf-use-registry
+		//
+		do standardise-folder-name parameters are lp-xml-folder returning lp-xml-folder
+		if set-registry-value(strconcat(PREF_HIVE, PREF_XMLFOLDER),lp-xml-folder)
+		endif
+		do standardise-folder-name parameters are lp-rpt-folder returning lp-rpt-folder
+		if set-registry-value(strconcat(PREF_HIVE, PREF_RPTFOLDER),lp-rpt-folder)
+		endif
+		if set-registry-value(strconcat(PREF_HIVE, PREF_SKELETON),lp-skeleton)
+		endif
+	endif
+end-procedure
+
+procedure get-preferences
+returning
+	lr-xml-folder						pic x(1024) type string
+	lr-rpt-folder						pic x(1024) type string
+	lr-skeleton							pic x(50) type string
+local
+	lf-doc								type xml-handle
+	lf-root								type xml-handle
+	lf-use-registry						type boolean
+	//
+	set lf-use-registry = false
+	if file-exists(PREF_XML_NAME,FALSE)
+		set lf-doc = xml-parse-file(PREF_XML_NAME)
+		if lf-doc = 0
+			set lf-use-registry = TRUE
+		else
+			set lf-root = xml-get-root-node(lf-doc)
+			if lf-doc = 0
+				set lf-use-registry = TRUE
+			else
+				set lr-xml-folder =
+					xml-node-text(xml-get-child-by-name(lf-root,PREF_XMLFOLDER,spaces))
+				set lr-rpt-folder =
+					xml-node-text(xml-get-child-by-name(lf-root,PREF_RPTFOLDER,spaces))
+				set lr-skeleton =
+					xml-node-text(xml-get-child-by-name(lf-root,PREF_SKELETON,spaces))
+			endif
+		endif
+	else
+		set lf-use-registry = TRUE
+	endif
+	if lf-use-registry
+		set lr-xml-folder =  get-registry-value(strconcat(PREF_HIVE, PREF_XMLFOLDER))
+		set lr-rpt-folder =  get-registry-value(strconcat(PREF_HIVE, PREF_RPTFOLDER))
+		set lr-skeleton =  get-registry-value(strconcat(PREF_HIVE, PREF_SKELETON))
+	endif
+end-procedure
+
+procedure get-global-preferences
+	do get-preferences
+		returning ws-pref-xmlfolder ws-pref-rptfolder ws-pref-skeleton
+end-procedure
+
+procedure set-global-preferences
+	do set-preferences
+		parameters are ws-pref-xmlfolder ws-pref-rptfolder ws-pref-skeleton
+end-procedure
+
+procedure load-compile-errors
+parameters
+	lp-name								like ap-name
+	lp-full-pgm-name					pic x(1024) type string
+	// must be full path to spl file including spl extension
+returning
+	lr-errors-exist						type boolean
+local
+	lf-err-file							pic x(1024) type string
+//
+	set lf-err-file = concat(substring(lp-full-pgm-name,1,str-len(lp-full-pgm-name) - 3),"err")
+	//
+	select * from reporttxt
+		where ap-txt-type = "COMPILE"
+		and ap-name = :ap-name
+		for-update
+	detail
+		delete reporttxt
+		on error
+		endon
+	end-select
+	if not file-exists(lf-err-file,false)
+		set lr-errors-exist = FALSE
+		exit
+	endif
+	set lr-errors-exist = TRUE
+	open common-text-file
+		file is lf-err-file
+	on error
+		initialise reporttxt
+		set ap-name = lp-name
+		set ap-txt-type = "COMPILE"
+		set ap-txt-seq = 1
+		set ap-txt-line = str-concat("Unable to open text file:" error-description(file-status()))
+		insert reporttxt 
+		on error
+		endon
+	else
+		set ap-name =  lp-name
+		set ap-txt-type = "COMPILE"
+		set ap-txt-seq = 1
+		select * from common-text-file
+		detail
+			initialise reporttxt
+				leaving ap-name ap-txt-type ap-txt-seq
+			set ap-txt-line = ctf-text
+			insert reporttxt
+			on error
+			endon
+			set ap-txt-seq += 1
+		end-select
+	endon
+end-procedure
+
+#endif

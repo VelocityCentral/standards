@@ -1,0 +1,24 @@
+
+/* This query lists all the module and function codes
+   That the user does not have access to in the company 
+   selected */
+
+select
+t0.smf_module, 
+t0.smf_function, 
+t0.smf_description,
+t0.related_dict_ver, 
+t0.to_related_dict,
+t1.bms_version_no
+from 
+sysinfo:system_modules_functions t0,
+sat:system_control t1
+--from sysinfo:security_users_access_detail
+where (t0.to_related_dict = 0 or t0.to_related_dict > t1.bms_version_no)
+and not exists (select * 
+	from sysinfo:security_users_access_detail s0
+	where s0.suad_comp_code in (select sys_comp_code from sysinfo:system_companies)
+	and s0.suad_module = t0.smf_module
+	and s0.suad_function = t0.smf_function
+	and s0.suad_user = 'rayb'
+	and s0.control_flag = 'G')

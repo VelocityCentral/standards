@@ -1,0 +1,65 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : Maintain System Modules and Functions
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2021
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: nan/mntsysmodfunc.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 03Mar21  rjb         written 
+// Wrote this program because I wanted to change the description of two 
+// standard pronto functions - whse.m043 and whse.t044.  These only
+// apply to type two warehouses and it was difficult to tell from the
+// standard menu.
+// Getting correct mode in the standard maintenance program for pronto
+// standard functions is a right royal.
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/i8proglog.spl"
+ 
+procedure main
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8proglog-write-log
+	do maintain-mod-func
+end-procedure
+
+
+screen maintain-mod-func
+	allowed search entry remove correct 
+	primary system-modules-functions
+	data-grid occurs 22
+	window
+	title "Maintain Modules and Functions"
+detail
+	accept smf-module @2,2
+		title "smf-module"
+		when screenmode = search
+		show-value
+	accept smf-function @2,4
+		title "smf-function"
+		when screenmode = search
+		show-value
+	accept smf-description @2,6
+		title "smf-description"
+	accept smf-from-related-dict-ver @2,8
+		title "smf-from-related-dict-ver"
+	accept smf-to-related-dict-ver @2,10
+		title "smf-to-related-dict-ver"
+	display smf-type @2,12
+		title "smf-type"
+	display smf-command @2,14
+		title "smf-command"
+	display smf-parameters[1] @2,16
+		title "smf-parameters[1]"
+	confirm auto
+	end-confirm
+end-screen

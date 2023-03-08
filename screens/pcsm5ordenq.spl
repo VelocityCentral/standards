@@ -1,0 +1,224 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : 
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2023
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: screens/pcsm5ordenq.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 25Jan23  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+#include "../include/i5sostatii.spl"
+ 
+field
+	ws-function-title						type string
+
+procedure library-init
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+end-procedure
+
+#define NORMAL	"NormaL"
+#define BACK	"Back Order"
+#define TRANSFER "Transfer"
+#define CREDIT "Credit"
+#define OTHER "Other"
+#define QUOTE "Quote"
+#define CONSIGN "Consignment"
+#define HOLD "Held"
+#define WAIT "Waiting Mfg or Pur"
+
+procedure get-order-type user-trigger
+parameters
+	lp-order-status 						like so-order-status
+returning
+	lr-order-type							pic x(30) type string
+//
+	switch lp-order-status
+	case I5SO_BEING_ENTERED
+		set lr-order-type = NORMAL
+	case I5SO_PERIODIC_ORDER
+		set lr-order-type = OTHER
+	case I5SO_QUOTATION
+		set lr-order-type = QUOTE
+	case I5SO_RMA_REQUEST_FOR_CREDIT
+		set lr-order-type = CREDIT
+	case I5SO_PROFORMA_ORDER
+		set lr-order-type = OTHER
+	case I5SO_TRANSFER_HOLD_FOR_APPROVAL
+		set lr-order-type = TRANSFER
+	case I5SO_QUOTATION_ACCEPTED
+		set lr-order-type = QUOTE
+	case I5SO_REOCCURRING_INV
+		set lr-order-type = OTHER
+	case I5SO_MATRIX_BEING_ENTERED
+		set lr-order-type = NORMAL
+	case I5SO_RETURN_AUTHORIZATION
+		set lr-order-type = CREDIT
+	case I5SO_ENTERED
+		set lr-order-type = NORMAL
+	case I5SO_BACK_ORDER
+		set lr-order-type = BACK
+	case I5SO_CONSIGNMENT_ENTERED
+		set lr-order-type = CONSIGN
+	case I5SO_CNOTE_ENTERED
+		set lr-order-type = CREDIT
+	case I5SO_QUOTE_PRINTED
+		set lr-order-type = QUOTE
+	case I5SO_TRANSFER_ENTERED
+		set lr-order-type = TRANSFER
+	case I5SO_ENTERED_TO_BE_MANUFACTURED
+		set lr-order-type = WAIT
+	case I5SO_ENTERED_CREDIT_HOLD
+		set lr-order-type = CREDIT
+	case I5SO_FORWARD_ORDER
+		set lr-order-type = WAIT
+	case I5SO_TO_BE_MANUF_AND_PURCHASED
+		set lr-order-type = WAIT
+	case I5SO_ENTERED_ON_HOLD
+		set lr-order-type = HOLD
+	case I5SO_CONSIGNMENT_BACKORDER
+		set lr-order-type = BACK
+	case I5SO_CONTRACT_ORDER
+		set lr-order-type = OTHER
+	case I5SO_ENTERED_CNOTE_ON_HOLD
+		set lr-order-type = CREDIT
+	case I5SO_REQUISITION_ON_HOLD
+		set lr-order-type = OTHER
+	case I5SO_TRANSFER_ON_BACKORDER
+		set lr-order-type = BACK
+	case I5SO_TRANSFER_TO_BE_MANUFACTURED
+		set lr-order-type =  WAIT
+	case I5SO_ASSEMBLY_ON_HOLD
+		set lr-order-type = HOLD
+	case I5SO_FORWARD_TRANSFER
+		set lr-order-type = TRANSFER
+	case I5SO_RMA_APPROVED_FOR_PRINTING
+		set lr-order-type = CREDIT
+	case I5SO_RDY_FOR_PICKING
+		set lr-order-type = NORMAL
+	case I5SO_BACK_ORDER_RDY_FOR_PICKING
+		set lr-order-type = NORMAL
+	case I5SO_CONSIGNMENT_RDY_TO_PICK
+		set lr-order-type = CONSIGN
+	case I5SO_CNOTE_RDY_TO_PICK
+		set lr-order-type = CREDIT
+	case I5SO_RDY_TO_BE_PURCHASED
+		set lr-order-type = WAIT
+	case I5SO_RDY_TO_PICK_TRANSFER
+		set lr-order-type = TRANSFER
+	case I5SO_RDY_TO_RAISE_WORK_ORDER
+		set lr-order-type = WAIT
+	case I5SO_RDY_TO_PICK_ASSEMBLY
+		set lr-order-type = NORMAL
+	case I5SO_TRANSFER_TO_BE_PURCHASED
+		set lr-order-type = TRANSFER
+	case I5SO_RMA_IN_PROGRESS
+		set lr-order-type = CREDIT
+	case I5SO_PICKING_PRINTED
+		set lr-order-type = NORMAL
+	case I5SO_CONSIGNMENT_PICKING_PRINTED
+		set lr-order-type = CONSIGN
+	case I5SO_CNOTE_PICKING_PRINTED
+		set lr-order-type = CREDIT
+	case I5SO_BEING_PURCHASED
+		set lr-order-type = WAIT
+	case I5SO_TRANSFER_PICKING_PRINTED
+		set lr-order-type = TRANSFER
+	case I5SO_WORK_ORDER_RAISED
+		set lr-order-type = WAIT
+	case I5SO_ASSEMBLY_PICKING_PRINTED
+		set lr-order-type = NORMAL
+	case I5SO_TRANSFER_BEING_PURCHASED
+		set lr-order-type = TRANSFER
+	case I5SO_RMA_GOODS_RECEIVED
+		set lr-order-type = CREDIT
+	case I5SO_RDY_TO_ASSEMBLE
+		set lr-order-type = NORMAL
+	case I5SO_RMA_REQUEST_FOR_CREDIT_PRTD
+		set lr-order-type = CREDIT
+	case I5SO_PO_CONFIRMED
+		set lr-order-type = WAIT
+	case I5SO_TRANSFER_WO_RAISED
+		set lr-order-type = TRANSFER
+	case I5SO_WO_IN_PROGRESS
+		set lr-order-type = WAIT
+	case I5SO_ASSEMBLY_IN_PROGRESS
+		set lr-order-type = NORMAL
+	case I5SO_RMA_APPROVED
+		set lr-order-type = CREDIT
+	case I5SO_WAITING_FOR_DELIVERY
+		set lr-order-type = NORMAL
+	case I5SO_WARRANTY
+		set lr-order-type = CREDIT
+	case I5SO_TRANSFER_ASSEMBLY_IN_PROGRESS
+		set lr-order-type = TRANSFER
+	case I5SO_TRANSFER_RDY_TO_UPDATE
+		set lr-order-type = TRANSFER
+	case I5SO_RMA_REPAIRED
+		set lr-order-type = CREDIT
+	case I5SO_RMA_IN_REPAIR
+		set lr-order-type = CREDIT
+	case I5SO_RMA_RTN_TO_SUPPLIER
+		set lr-order-type = CREDIT
+	case I5SO_RDY_TO_PRINT_INVOICE
+		set lr-order-type = NORMAL
+	case I5SO_CONSIGNMENT_RDY_TO_PRINT
+		set lr-order-type = CONSIGN
+	case I5SO_CNOTE_RDY_TO_PRINT
+		set lr-order-type = CREDIT
+	case I5SO_TRANSFER_IN_PROGRESS
+		set lr-order-type = TRANSFER
+	case I5SO_RDY_TO_CODE
+		set lr-order-type = NORMAL
+	case I5SO_CNOTE_RDY_TO_CODE
+		set lr-order-type = CREDIT
+	case I5SO_CODED
+		set lr-order-type = NORMAL
+	case I5SO_CNOTE_CODED
+		set lr-order-type = CREDIT
+	case I5SO_RDY_TO_UPDATE
+		set lr-order-type = NORMAL
+	case I5SO_CONSIGNMENT_RDY_TO_UPDATE
+		set lr-order-type = CONSIGN
+	case I5SO_CNOTE_RDY_TO_UPDATE
+		set lr-order-type = CREDIT
+	case I5SO_NOT_USED
+		set lr-order-type = OTHER
+	case I5SO_GOODS_CONSIGNED
+		set lr-order-type = CONSIGN
+	case I5SO_ORDER_SUSPENDED
+		set lr-order-type = HOLD
+	case I5SO_UPDATED
+		set lr-order-type = NORMAL
+	case I5SO_TRANSFER_GOODS_RECEIVED
+		set lr-order-type = TRANSFER
+	case I5SO_GOODS_CONSIGNED_RETURNED
+		set lr-order-type = CONSIGN
+	case I5SO_QUOTE_SUPERSEDED
+		set lr-order-type = QUOTE
+	case I5SO_PLANNING_ORDER_FINISHED
+		set lr-order-type = OTHER
+	case I5SO_QUOTE_CREDIT_CHECK
+		set lr-order-type = QUOTE
+	case I5SO_QUOTE_IN_PROGRESS
+		set lr-order-type = QUOTE
+	case I5SO_DIVERTED
+		set lr-order-type = OTHER
+	case I5SO_QUOTE_LOST
+		set lr-order-type = QUOTE
+	case I5SO_CANCELLED
+		set lr-order-type = OTHER
+	end-switch
+end-procedure

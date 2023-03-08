@@ -1,0 +1,444 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program :  rebuild Quicklinks
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2018
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: quicklinks/addnewlinks.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 17Mar18  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+//
+/*
+
+For full documentation see clibvqlauto
+
+*/
+ 
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+#include "../include/i8gparam.spl"
+#include "../include/iwrtevntlog.spl"
+#include "../quicklinks/ivqlauto.spl"
+
+link 'clib/clibvqlauto'
+link 'clib/clibwrtevntlog'
+
+#define LOG(A) \
+	do clibwrtevntlog-write-log parameters are IWRTEVNTLOG_LEVEL_DEBUG 'APPS'   \
+		str-concat(substring(get-param(0),pattern(get-param(0),"[~/]*$"),str-len(get-param(0))) \
+		,"|",str(pid())) \
+		A
+#define KEYSARRAY  pic x(128) type string occurs 10
+
+field
+	ws-function-title					type string
+	ws-results							pic x(1024) type string
+	// Parameters
+	// -folder foldername
+	ws-folder							pic x(1024) type string
+	ws-recurse							type boolean
+	ws-initialise						type boolean
+	ws-debug							type boolean
+	ws-email							pic x(100) type string
+	ws-max-seq							like vql-id
+	ws-max-records						type number
+
+object csv-file
+	type is external
+	record is
+		cf-filename						pic x(1024) type string
+		cf-foldername					pic x(1024) type string
+	end-record
+
+object qlpaths-copy like quicklink-paths
+
+object html-file
+	type is text
+	record
+		html-file						pic x(1024) type string
+	end-record
+
+#define HTML(A) \
+	set html-file = A \
+	insert html-file \
+	on error endon
+
+procedure main
+returning
+	lr-result							pic x(1024) type string
+	lr-pid								pic x(10) type string
+	lf-start							type datetime
+	lf-end								type datetime
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	set lf-start = gmt()
+	do i8secabt-check-abort
+		parameters are sys-consolidation-division login-id() "ZQL" "T002"
+		returning ws-function-title 
+	I8GPARAM_ALPHA("-folder",spaces,ws-folder)
+	I8GPARAM_FLAG("-recurse",FALSE,ws-recurse)
+	I8GPARAM_FLAG("-initialise",FALSE,ws-initialise)
+	I8GPARAM_FLAG("-debug",FALSE,ws-debug)
+	I8GPARAM_ALPHA("-email",spaces,ws-email)
+	// Max records is only used with debug and controls the maximum number
+	// of records returned by each find command
+	I8GPARAM_NUM("-maxrecords",0,ws-max-records)
+	do i8proglog-write-log
+	if not batched() // either appservices or batch queue
+		if ws-folder = spaces and not ws-initialise
+			do get-parameters entry once
+			if exit-status != 0
+				exit
+			endif
+		endif
+	endif
+	select ws-max-seq = max(vql-id)
+		from quicklink-paths
+	end-select
+	if ws-debug
+		do clibvqlauto-set-logging-status parameters TRUE
+	endif
+	do run-this-pgm
+	set lr-pid = str(pid())
+	set lr-result = concat(lr-pid, "|", ws-results)
+	LOG(lr-result)
+	set lf-end = gmt()
+	if ws-email != spaces
+		// Process the log records
+		do send-html-email parameters are lf-start, lf-end
+	endif
+end-procedure
+
+screen get-parameters
+	window @1,1 to @8,80
+		window-position 5
+	title ws-function-title
+	form-entry
+detail
+	accept ws-folder @2,15 pic x(60)
+		title "Unix Folder"
+		help "If spaces then all folders specified in parameters will be processed"
+	check-box ws-recurse @3,15
+		values True False
+		title "Recurse Subdirectories"
+		default is FALSE
+		help "Check to recurse through all subdirectories"
+	end-check-box 
+	check-box ws-initialise @4,15
+		values True False
+		title "Initialise Quick-links tables"
+		default is FALSE
+		help "Remove all 'AF' links for the current company and clear workbench"
+	end-check-box 
+	check-box ws-debug @5,15
+		values True False
+		title "Debug Mode"
+		default is FALSE
+		help "Only process a limited number of records"
+	end-check-box 
+	accept ws-max-records @6,15 pic z(5)
+		title "Max records"
+		help "Pipe the results of find through head for this many records"
+		when ws-debug
+		default 500
+		no-warning
+	accept ws-email @7,15 pic x(30)
+		title "Email"
+		help "Email report to...."
+		default login-id
+	confirm auto
+	confirmed
+		if ws-initialise  and ws-folder != spaces
+			message-box param-text("<<P1>><<BR>><<p2>>"
+				,"Data Files will be initialised."
+				,"No folder processing is done in this mode!")
+				title is ws-function-title
+				message-buttons  MSG_BOX_OK
+				icon MSG_BOX_WARNING
+		endif
+		exit 0
+	not-confirmed
+		exit 1
+	end-confirm
+end-screen
+
+procedure run-this-pgm
+	if ws-initialise
+		// This is used when we you want to manually process a selection of
+		// folders
+		do initialise-files
+		set ws-results = "Files initialised"
+		exit 0
+	endif
+	if ws-folder = spaces
+		LOG("Quicklink Rebuild Started")
+		do initialise-files
+		do get-files 
+		if exit-status() != 0
+			exit
+		endif
+	else
+		do process-one-folder
+			parameters are ws-folder ws-recurse
+	endif
+end-procedure
+
+procedure process-one-folder
+parameters
+	lp-folder							pic x(1024) type string
+	lp-recurse							type boolean
+local
+	lf-file-count						type number
+	lf-results							pic x(1024) type string
+	LOG(concat("Processing : " lp-folder))
+	do find-files
+		parameters are lp-folder lp-recurse
+		returning lf-results
+	if exit-status() = 0
+		do process-files parameters are 0 returning lf-file-count
+	endif
+	if lf-results != spaces
+		LOG(lf-results)
+	endif
+	set ws-results = concat(str(lf-file-count) " files processed")
+	LOG(ws-results)
+end-procedure
+
+procedure get-files
+local
+	lf-file-count						type number
+	lf-total-files						type number
+	lf-results							pic x(1024) type string
+	select * from quicklink-paths
+		order by vql-id
+	detail
+		LOG(concat("Processing Starting: " vql-unix-path))
+		do find-files
+			parameters vql-unix-path TRUE 
+			returning lf-results
+		if exit-status() = 0
+			do process-files parameters are vql-id returning lf-file-count
+			set lf-total-files += lf-file-count
+			LOG(concat("Completed: " rtrim(vql-unix-path) " Files read: " str(lf-file-count) ))
+		endif
+		if lf-results != spaces
+			LOG(lf-results)
+		endif
+	end-select
+	set ws-results = concat(str(lf-total-files) " files processed")
+	LOG(ws-results)
+end-procedure
+
+procedure initialise-files
+local
+	lf-data-area							like ql-data-area
+	do get-data-area returning lf-data-area
+	LOG(concat("Quicklinks Initialised for " lf-data-area))
+	sql-delete quick-links
+	where ql-data-area = :lf-data-area
+		and ql-user-only-alpha4-1 = 'AF'
+	close quicklink-import
+	open quicklink-import truncate permanent
+end-procedure
+
+procedure find-files
+parameters
+	lp-folder						pic x(1024) type string
+	lp-recurse						type boolean
+returning 
+	lr-message						pic x(1024) type string
+local
+	lf-cmd							pic x(1024) type string
+	lf-filename						pic x(1024) type string
+	//
+	LOG(concat("Find:" lp-folder))
+	if file_exists(lp-folder,FALSE) != 2
+		set lr-message = concat("Folder " lp-folder " does not exist")
+		exit 1
+	endif
+	set lf-filename = concat("/tmp/folder_list" str(pid()) ".csv")
+	set lf-cmd = concat("find " lp-folder )
+	if not lp-recurse
+		string lf-cmd appending " -maxdepth 1 "
+	endif
+	string lf-cmd appending " ! -type d "
+	// for files created in the last day
+	// There is no real way to know when a file was CREATED.  the closest
+	// we get is when it changed.
+	// (-atime : file access -mtime : file contents changed -ctime : file
+	// inode changed e.g. chmod)
+	string lf-cmd appending concat(' -printf "%f|%h\n" ')
+	// make sure we get the errors in the output stream
+	if ws-debug
+		if ws-max-records = 0
+			string lf-cmd appending ' | head -500 '
+		else
+			string lf-cmd appending concat(' | head -' str(ws-max-records))
+		endif
+	endif
+	string lf-cmd appending concat(' > ' lf-filename)
+	string lf-cmd appending concat(' 2>&1 ')
+	LOG(lf-cmd)
+	command "sh"  parameters are "-c" lf-cmd
+	open csv-file
+		file is lf-filename
+	on error
+		set lr-message = concat("Unable to open file " lf-filename)
+		exit 1
+	endon
+end-procedure
+
+procedure process-files
+parameters
+	lp-seq							like vql-id
+returning
+	lr-counter						type number
+local
+	lf-process-file					type boolean
+	transaction begin
+	select * from csv-file
+	detail
+		if pattern(cf-filename,'Permission denied') != 0
+			LOG(str-concat('Permission Denied:' cf-filename))
+		else
+			set lf-process-file = TRUE
+			if lp-seq = ws-max-seq // != 0
+				// then we check if this folder has not been parsed
+				// by an earlier entry in the parameters file.
+				// This can happen when we want to use samba to secure subfolders
+				// but we want a catch-all at the end of the folder list to ensure
+				// we capture any other files that are not in specified
+				// sub-folders
+				// Processing these will cause every file previously processed to
+				// be recorded as an "already there" error
+				// This can only be processed when the full list of folders is
+				// being parsed.
+				save quicklink-paths
+				select * from qlpaths-copy
+					where vql-id < lp-seq
+				detail
+					if pattern(rtrim(cf-foldername), rtrim(vql-unix-path)) = 1
+						// this folder matches a path already processed
+						set lf-process-file = FALSE
+						break
+					endif
+				end-select
+				restore quicklink-paths
+			endif
+			if lf-process-file
+			set lr-counter += 1
+				if lr-counter % 10000 = 0
+					transaction commit
+					transaction begin
+				endif
+			do clibvqlauto-assign-object
+				parameters are cf-filename cf-foldername 
+			endif
+		endif
+	end-select
+	if transaction-active()
+		transaction commit
+	endif
+end-procedure
+
+procedure get-data-area
+returning 
+	lr-data-area					like ql-data-area
+	get system-companies
+		on index sys-comp-code
+		key is sys-consolidation-division
+	on error
+		exit
+	endon
+	do basename parameters are sys-comp-path
+		returning lr-data-area
+end-procedure
+
+procedure basename
+parameters are
+	lp-path										pic x(512) type string
+returning
+	lr-base										pic x(512) type string
+	lr-path										pic x(512) type string
+local
+	i								type number
+	for i = strlen(lp-path) down to 1
+		if substring(lp-path,i,i) in { '/' '\' }
+			break
+		endif
+	endfor
+	set lr-base = substring(lp-path,i + 1,str-len(lp-path))
+	set lr-path = substring(lp-path,1, i - 1 )
+end-procedure
+
+procedure send-html-email
+parameters
+	lp-start							type datetime
+	lp-end								type datetime
+local
+	lf-filename							pic x(1024) type string
+	lf-sel-code							like sel-code
+//
+//	build the table
+//
+	set lf-filename = str-concat("/tmp/vqlautorebuild",str(pid()),".html")
+	open html-file 
+		file is lf-filename
+		create truncate permanent
+	HTML('<html>')
+	HTML('<CENTER><B>Summary</B></CENTER>')
+	HTML('<table align=center border="1">')
+	HTML(str-concat('<tr><td>Company Name</TD><td>' company-name '</td></tr>'))
+	HTML(str-concat('<tr><td>Process Start</TD><td>' format-picture(lp-start,"dd-mmm-yy hh:mm:ss") '</td></tr>'))
+	HTML(str-concat('<tr><td>Process End</TD><td>' format-picture(lp-end,"dd-mmm-yy hh:mm:ss") '</td></tr>'))
+	HTML(str-concat('<tr><td>Elapsed Seconds</TD><td>' 
+		str(lp-end - lp-start) 
+		'</td></tr>'))
+	HTML(str-concat('<tr><td>Elapsed Minutes</TD><td>' 
+		str((lp-end - lp-start) / 60) 
+		'</td></tr>'))
+	HTML('</table>')
+	HTML('</BR></HR></BR>')
+	HTML('<CENTER><B>System Event Log Entries for this process</B></CENTER>')
+	HTML('</BR>')
+	HTML('<table align=center border="0" style="border: 2px solid;border-color:silver" cellpadding=5 cellspacing=0>')
+	HTML('<style type="text/css"> ')
+	HTML('th {border-bottom: 1px solid; border-color:silver; background-color:#FFFFE1; text-align:left}')
+	HTML('</style>')
+	HTML('<tr align=left><th>Time Stamp</th><th>Message</th></tr>')
+	set lf-sel-code = str-concat(substring(get-param(0),
+										pattern(get-param(0),"[~/]*$")
+										,str-len(get-param(0))) 
+								,"|"
+								,str(pid())
+								) 
+	select * from system-event-log 
+		where sel-type = 'APPS'
+		and sel-code = :lf-sel-code
+		order by sel-date-time sel-seq
+	detail
+		HTML('<TR>')
+		HTML(str-concat('<TD>' format-picture(sel-date-time, "dd-mmm-yy hh:mm:ss") "</td>"))
+		HTML(str-concat('<TD>' sel-text "</td>"))
+		HTML('</TR>')
+	end-select	
+	HTML('</table>')
+	HTML('</html>')
+	//
+	// Now send the email
+	//
+	if mail-start(concat("Quicklink Rebuild Completed (" node-name ")" ))
+		if mail-attach(lf-filename,"dummy",1,0,0) endif
+		if mail-send(ws-email,FALSE,FALSE) endif
+	endif
+	close html-file and remove
+end-procedure

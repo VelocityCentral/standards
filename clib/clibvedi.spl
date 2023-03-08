@@ -1,0 +1,2072 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : EDI Validation Routine
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2011
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: clib/clibvedi.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 15Jan18	rjb Log 120	Check open edis
+// 06Oct17	rjb Log 115	Placemakers and other changes
+// 02Feb15	mdr     	Rewrite clibvedi-checkso to include archive and
+// 						customer account
+// 12Jul13	rjb 86		710 Changes
+// 05May11  mdr         written 
+// 20Dec11  stf			GTIN handling through stock-unit-conversion
+// 09Jan12	stf			account finding through address id changed
+// 11Jan12	stf			quotations logged as errors and marked
+// 15Jan12	stf			discount rate applied to system price
+// 28May12	stf			Accept Quoatations for processing if not a quote in pronto
+////////////////////////////////////////////////////////////////////////////////
+/*
+
+	This documentation is in RST format.  To view this as a nice pdf goto
+	https://overbits.herokuapp.com/rsteditor/ or rst.ninjs.org and paste this content.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|           |           |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+
+	Alternatively
+
+	 =========== =========== ======================================================== 
+	  Direction   Data Type   Description                                             
+	 =========== =========== ======================================================== 
+	 =========== =========== ======================================================== 
+
+========
+clibvedi
+========
+
+	This clib is designed to be used in conjuction with the Velocity EDI workbench application.
+
+
+Required Tables
+~~~~~~~~~~~~~~~
+
+edi-error-codes
+---------------
+
+Table Description : EDI Error Codes
+
+Table Name:vedierrc0
+
+
+Indexes
+
+	+-----+------+----------------+----------+
+	|Index|Unique|Fields          |Descending|
+	+=====+======+================+==========+
+	|1    |YES   |v-edi-error-code|          |
+	+-----+------+----------------+----------+
+
+Field List
+
+	+-----------------------+---------------------+---------+-----+------+
+	|Field                  |Description          |Data Type|Pic  |Occurs|
+	+=======================+=====================+=========+=====+======+
+	|v-edi-error-code       |EDI Error Code       |Numeric  |9(4) |      |
+	+-----------------------+---------------------+---------+-----+------+
+	|v-edi-error-description|EDI Error Description|Alpha    |x(40)|      |
+	+-----------------------+---------------------+---------+-----+------+
+	|v-edi-error-type       |EDI Error Type       |Alpha    |x(1) |      |
+	+-----------------------+---------------------+---------+-----+------+
+
+
+edi-order-errors
+----------------
+
+Table Description: EDI Order Errors
+
+Table Name:vediorde0
+
+
+Indexes
+
+	+-----+------+--------------------+----------+
+	|Index|Unique|Fields              |Descending|
+	+=====+======+====================+==========+
+	|1    |YES   |v-edi-receipt-number|          |
+	+-----+------+--------------------+----------+
+	|     |      |v-edi-receipt-line  |          |
+	+-----+------+--------------------+----------+
+	|     |      |v-edi-e-error-line  |          |
+	+-----+------+--------------------+----------+
+
+Field List
+
+	+--------------------+------------------+---------+-----+------+
+	|Field               |Description       |Data Type|Pic  |Occurs|
+	+====================+==================+=========+=====+======+
+	|v-edi-receipt-number|EDI Receipt Number|Numeric  |9(12)|      |
+	+--------------------+------------------+---------+-----+------+
+	|v-edi-receipt-line  |EDI Receipt Line  |Numeric  |9(5) |      |
+	+--------------------+------------------+---------+-----+------+
+	|v-edi-e-error-line  |EDI Error Line    |Numeric  |9(5) |      |
+	+--------------------+------------------+---------+-----+------+
+	|v-edi-error-code    |EDI Error Code    |Numeric  |9(4) |      |
+	+--------------------+------------------+---------+-----+------+
+
+
+edi-order-headers
+-----------------
+
+Table Description : EDI Order Headers
+
+Table Name:vediordh1
+
+
+Indexes
+
+	+-----+------+--------------------+----------+
+	|Index|Unique|Fields              |Descending|
+	+=====+======+====================+==========+
+	|1    |YES   |v-edi-receipt-number|          |
+	+-----+------+--------------------+----------+
+	|2    |YES   |v-edi-h-status      |          |
+	+-----+------+--------------------+----------+
+	|     |      |v-edi-receipt-number|          |
+	+-----+------+--------------------+----------+
+
+Field List
+
+	+----------------------+-------------------+---------+-----------------+------+
+	|Field                 |Description        |Data Type|Pic              |Occurs|
+	+======================+===================+=========+=================+======+
+	|v-edi-receipt-number  |EDI Receipt Number |Numeric  |9(12)            |      |
+	+----------------------+-------------------+---------+-----------------+------+
+	|v-edi-h-accountcode   |EDI Accountcode    |Alpha    |x(10)            |      |
+	+----------------------+-------------------+---------+-----------------+------+
+	|v-edi-h-warehouse     |EDI Warehouse      |Alpha    |x(4)             |      |
+	+----------------------+-------------------+---------+-----------------+------+
+	|v-edi-h-warehouse-1   |EDI Warehouse 1    |Alpha    |x(4)             |      |
+	+----------------------+-------------------+---------+-----------------+------+
+	|v-edi-h-warehouse-2   |EDI Warehouse 2    |Alpha    |x(4)             |      |
+	+----------------------+-------------------+---------+-----------------+------+
+	|v-edi-h-warehouse-3   |EDI Warehouse 3    |Alpha    |x(4)             |      |
+	+----------------------+-------------------+---------+-----------------+------+
+	|v-edi-h-addr-supplied |EDI Addr Supplied  |Alpha    |x(1)             |      |
+	+----------------------+-------------------+---------+-----------------+------+
+	|v-edi-h-std-addr1     |EDI Std Addr1      |Alpha    |x(30)            |      |
+	+----------------------+-------------------+---------+-----------------+------+
+	|v-edi-h-std-addr2     |EDI Std Addr2      |Alpha    |x(30)            |      |
+	+----------------------+-------------------+---------+-----------------+------+
+	|v-edi-h-std-addr3     |EDI Std Addr3      |Alpha    |x(30)            |      |
+	+----------------------+-------------------+---------+-----------------+------+
+	|v-edi-h-std-addr4     |EDI Std Addr4      |Alpha    |x(30)            |      |
+	+----------------------+-------------------+---------+-----------------+------+
+	|v-edi-h-std-addr5     |EDI Std Addr5      |Alpha    |x(30)            |      |
+	+----------------------+-------------------+---------+-----------------+------+
+	|v-edi-h-phone-no      |EDI Phone No       |Alpha    |x(15)            |      |
+	+----------------------+-------------------+---------+-----------------+------+
+	|v-edi-h-fax-no        |EDI Fax No         |Alpha    |x(15)            |      |
+	+----------------------+-------------------+---------+-----------------+------+
+	|v-edi-h-postcode      |EDI Postcode       |Alpha    |x(10)            |      |
+	+----------------------+-------------------+---------+-----------------+------+
+	|v-edi-h-order-date    |EDI Order Date     |Date     |dd/mm/yy         |      |
+	+----------------------+-------------------+---------+-----------------+------+
+	|v-edi-h-tax-exempt-no |EDI Tax Exempt No  |Alpha    |x(15)            |      |
+	+----------------------+-------------------+---------+-----------------+------+
+	|v-edi-h-cust-reference|EDI Cust Reference |Alpha    |x(20)            |      |
+	+----------------------+-------------------+---------+-----------------+------+
+	|v-edi-h-rep-code      |EDI Rep Code       |Alpha    |x(3)             |      |
+	+----------------------+-------------------+---------+-----------------+------+
+	|v-edi-h-delivery-date |EDI Delivery Date  |Date     |dd/mm/yy         |      |
+	+----------------------+-------------------+---------+-----------------+------+
+	|v-edi-h-custom-format |EDI Custom Format  |Alpha    |x(5)             |      |
+	+----------------------+-------------------+---------+-----------------+------+
+	|v-edi-h-filler        |EDI Filler         |Alpha    |x(150)           |      |
+	+----------------------+-------------------+---------+-----------------+------+
+	|v-edi-h-std-instr1    |EDI Std Instr1     |Alpha    |x(30)            |      |
+	+----------------------+-------------------+---------+-----------------+------+
+	|v-edi-h-std-instr2    |EDI Std Instr2     |Alpha    |x(30)            |      |
+	+----------------------+-------------------+---------+-----------------+------+
+	|v-edi-h-std-instr3    |EDI Std Instr3     |Alpha    |x(30)            |      |
+	+----------------------+-------------------+---------+-----------------+------+
+	|v-edi-h-std-instr4    |EDI Std Instr4     |Alpha    |x(30)            |      |
+	+----------------------+-------------------+---------+-----------------+------+
+	|v-edi-h-std-instr5    |EDI Std Instr5     |Alpha    |x(30)            |      |
+	+----------------------+-------------------+---------+-----------------+------+
+	|v-edi-h-bill-to       |EDI Bill To        |Alpha    |x(10)            |      |
+	+----------------------+-------------------+---------+-----------------+------+
+	|v-edi-h-address-id    |EDI Address Id     |Alpha    |x(15)            |      |
+	+----------------------+-------------------+---------+-----------------+------+
+	|v-edi-h-status        |EDI Status         |Alpha    |x(2)             |      |
+	+----------------------+-------------------+---------+-----------------+------+
+	|v-edi-h-date-received |EDI Date Received  |GMT DTM  |dd/mm/yy hh:mm:ss|      |
+	+----------------------+-------------------+---------+-----------------+------+
+	|v-edi-h-date-processed|EDI Date Processed |GMT DTM  |dd/mm/yy hh:mm:ss|      |
+	+----------------------+-------------------+---------+-----------------+------+
+	|v-edi-h-warning-count |EDI Warning Count  |Numeric  |9(5)             |      |
+	+----------------------+-------------------+---------+-----------------+------+
+	|v-edi-h-error-count   |EDI Error Count    |Numeric  |9(5)             |      |
+	+----------------------+-------------------+---------+-----------------+------+
+	|v-edi-h-trigger-flag  |EDI Trigger Flag   |Alpha    |x(2)             |      |
+	+----------------------+-------------------+---------+-----------------+------+
+	|v-edi-h-so-order-no   |EDI Order No       |Numeric  |9(8)             |      |
+	+----------------------+-------------------+---------+-----------------+------+
+	|v-edi-h-so-bo-suffix  |Pronto Order Suffix|Alpha    |x(2)             |      |
+	+----------------------+-------------------+---------+-----------------+------+
+
+
+edi-order-lines
+---------------
+
+Table Description: EDI Order Lines
+
+Table Name: vediordl0
+
+
+Indexes
+
+	+-----+------+--------------------+----------+
+	|Index|Unique|Fields              |Descending|
+	+=====+======+====================+==========+
+	|1    |YES   |v-edi-receipt-number|          |
+	+-----+------+--------------------+----------+
+	|     |      |v-edi-receipt-line  |          |
+	+-----+------+--------------------+----------+
+
+Field List
+
+	+---------------------+------------------+---------+----------+------+
+	|Field                |Description       |Data Type|Pic       |Occurs|
+	+=====================+==================+=========+==========+======+
+	|v-edi-receipt-number |EDI Receipt Number|Numeric  |9(12)     |      |
+	+---------------------+------------------+---------+----------+------+
+	|v-edi-receipt-line   |EDI Receipt Line  |Numeric  |9(5)      |      |
+	+---------------------+------------------+---------+----------+------+
+	|v-edi-l-line-type    |EDI Line Type     |Alpha    |x(1)      |      |
+	+---------------------+------------------+---------+----------+------+
+	|v-edi-l-stock-code   |EDI Stock Code    |Alpha    |x(16)     |      |
+	+---------------------+------------------+---------+----------+------+
+	|v-edi-l-warehouse    |EDI Line Warehouse|Alpha    |x(4)      |      |
+	+---------------------+------------------+---------+----------+------+
+	|v-edi-l-gtin         |EDI GTIN          |Alpha    |x(20)     |      |
+	+---------------------+------------------+---------+----------+------+
+	|v-edi-l-cust-item    |EDI Cust Item     |Alpha    |x(16)     |      |
+	+---------------------+------------------+---------+----------+------+
+	|v-edi-l-description  |EDI Description   |Alpha    |x(60)     |      |
+	+---------------------+------------------+---------+----------+------+
+	|v-edi-l-qty-ordered  |EDI Qty Ordered   |Numeric  |-9(9).9999|      |
+	+---------------------+------------------+---------+----------+------+
+	|v-edi-l-uom          |EDI UOM           |Alpha    |x(4)      |      |
+	+---------------------+------------------+---------+----------+------+
+	|v-edi-l-price        |EDI Price         |Numeric  |-9(9).9999|      |
+	+---------------------+------------------+---------+----------+------+
+	|v-edi-l-system-price |EDI System Price  |Numeric  |-9(9).9999|      |
+	+---------------------+------------------+---------+----------+------+
+	|v-edi-l-accept-price |EDI Accept Price  |Alpha    |x(1)      |      |
+	+---------------------+------------------+---------+----------+------+
+	|v-edi-l-discount     |EDI Discount      |Numeric  |-9(3).999 |      |
+	+---------------------+------------------+---------+----------+------+
+	|v-edi-l-status       |EDI Status        |Alpha    |x(2)      |      |
+	+---------------------+------------------+---------+----------+------+
+	|v-edi-l-warning-count|EDI Warning Count |Numeric  |9(5)      |      |
+	+---------------------+------------------+---------+----------+------+
+	|v-edi-l-error-count  |EDI Error Count   |Numeric  |9(5)      |      |
+	+---------------------+------------------+---------+----------+------+
+	|v-edi-l-trigger-flag |EDI Trigger Flag  |Alpha    |x(2)      |      |
+	+---------------------+------------------+---------+----------+------+
+
+
+edi-uom-conversions
+-------------------
+
+Table Description: EDI UOM Conversions
+
+Table Name: vediuom0
+
+
+Indexes
+
+	+-----+------+--------------+----------+
+	|Index|Unique|Fields        |Descending|
+	+=====+======+==============+==========+
+	|1    |YES   |v-edi-uom-desc|          |
+	+-----+------+--------------+----------+
+
+Field List
+
+	+---------------------+-------------------+---------+----+------+
+	|Field                |Description        |Data Type|Pic |Occurs|
+	+=====================+===================+=========+====+======+
+	|v-edi-uom-desc       |EDI UOM Desc       |Alpha    |x(4)|      |
+	+---------------------+-------------------+---------+----+------+
+	|v-edi-pronto-uom-desc|EDI Pronto UOM Desc|Alpha    |x(4)|      |
+	+---------------------+-------------------+---------+----+------+
+
+
+clibvedi-clear-errors 
+~~~~~~~~~~~~~~~~~~~~~
+	Clear any error prior to validating the transmission.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|  In       |Numeric    |Receipt number (v-edi-receipt-number)                   |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvedi-validate-receipt 
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	Validate all data in the transmission
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|  In       |Numeric    |Receipt number (v-edi-receipt-number)                   |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvedi-error 
+~~~~~~~~~~~~~~
+
+	Add an error to specified receipt
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |Numeric    |The receipt number                                      |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |Numeric    |The line on the receipt causing the error               |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |Numeric    |A sequential number for uniqueness                      |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |Numeric    |The error code from edi error file                      |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |String 1   |Flag indicating whether warning or error                |
+	+-----------+-----------+--------------------------------------------------------+
+
+
+clibvedi-checkquote
+~~~~~~~~~~~~~~~~~~~
+
+	Check if a quote reference passed in an order matches a Pronto Quote.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 30  |Quote reference                                         |
+	|           |           |                                                        |
+	|           |           |Expects an order no with no bo suffix                   |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |Boolean    |True indicates a pronto quote                           |
+	+-----------+-----------+--------------------------------------------------------+
+
+
+clibvedi-find-price 
+~~~~~~~~~~~~~~~~~~~
+
+	Finds a tax exclusive price for a passed customer and stock code
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 10  |Customer Code                                           |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |String 30  |Stock Code                                              |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |Number     |The base price                                          |
+	+-----------+-----------+--------------------------------------------------------+
+
+
+clibvedi-load-order 
+~~~~~~~~~~~~~~~~~~~
+
+	Loads a receipt into the input files required for m50loadso
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |Numeric    |The receipt number                                      |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvedi-add-quick-link 
+~~~~~~~~~~~~~~~~~~~~~~~
+
+	Adds the specified file a quicklink to the EDI receipt file.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |Numeric    |The receipt number                                      |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |String 10  |The company code for the quicklink                      |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |Varchar 4k |Path to file                                            |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |String 50  |Descrtiption of file                                    |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvedi-open-create-tables 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	Open all the custom tables and create them if they do not exist
+
+	No Parameters
+
+clibvedi-check-add-error-codes 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	Add standard error codes to the errors table
+
+	No parameters
+
+clibvedi-check-create-folders 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	Add standard pronto edi folders for a given trading partner
+
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|    In     |String 1k  |The trading partner folder name                         |
+	+-----------+-----------+--------------------------------------------------------+
+	|    Out    |Boolean    |True if all well.  False if an error occurred           |
+	+-----------+-----------+--------------------------------------------------------+
+	|    Out    |String 40  |Error Message.                                          |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvedi-get-status-desc 
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+	Get the status description for a given status code for the receipt
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 2   |The status code                                         |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |String 40  |The Status Description of the receipt                   |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvedi-get-line-status-desc 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	Get the status description for a given order line
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 2   |The status code                                         |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |String 40  |The Status Description of the receipt                   |
+	+-----------+-----------+--------------------------------------------------------+
+
+*/ 
+#include '../include/i4getprice.spl'
+#include '../include/i5soldisc.spl'
+#include '../include/i5pricemod.spl'
+#include '../include/i5linecalc.spl'
+#include '../include/idemo.spl'
+#include "../include/iwrtevntlog.spl"
+#include "../include/i8proglogparam.spl"
+#include '../edi/iedi.spl'
+
+link 'clib/clibwrtevntlog'
+
+// Change the if to TRUE to enable logging
+#define LOG(A) \
+	if FALSE \
+	do clibwrtevntlog-write-log parameters are IWRTEVNTLOG_LEVEL_DEBUG 'APPS'   \
+		str-concat(substring(get-param(0),pattern(get-param(0),"[~/]*$"),str-len(get-param(0))) \
+		,"|",str(pid())) \
+	A \
+	endif
+
+link "clib/clibvpdf"
+
+fields
+	ws-bill-to							like bill-to
+	ws-cust-code						like accountcode
+	ws-found-stk-price					type is boolean
+	ws-quantity							pic 9(6)v99
+#if BMS_DICT_VER < 7500
+	ws-returned-item-price				like sol-item-price
+#endif
+	ws-stk-unit-desc					like stk-unit-desc
+	ws-stock-code						like stock-code
+
+// Standard Input For M50LOADSO
+object pronto-load-so
+	type is prn
+	separator is ","
+	record is
+		std-record-type					pic x
+		std-so-cust-code				like so-cust-code
+		std-so-whse-code				like so-whse-code
+		std-addr1						like so-dl-text occurs 1
+		std-addr2						like so-dl-text occurs 1
+		std-addr3						like so-dl-text occurs 1
+		std-addr4						like so-dl-text occurs 1
+		std-addr5						like so-dl-text occurs 1
+		std-phone-no					pic x(15)
+		std-fax-no						pic x(15)
+		std-postcode					like so-dl-postcode
+		std-so-order-date				pic x(6)
+		std-tax-exemption-no			like sote-tax-exemption-code
+		std-so-cust-reference			like so-cust-reference
+		std-so-rep-code					like so-rep-code
+		std-so-delivery-date			pic x(6)
+		std-stock-code					like stock-code
+		std-sol-line-desc				like sol-line-description
+		std-sol-ordered-qty				pic x(15)
+		std-sol-item-price				pic x(15)
+		std-sol-stk-unit-desc			like sol-stk-unit-desc
+		std-custom-format-code			pic x(5)
+		std-filler						pic x(150)
+		std-header-invoice-no			like so-invoice-no
+		std-header-carrier-code			like so-carrier-code
+		std-header-status-flag			pic xxx
+		std-header-payment-flag			pic x
+		std-cost-centre					like so-extra-ref
+		std-so-credit-note-no			like so-credit-note-no
+		std-so-order-type				like so-order-type-code
+		std-so-consignment-note			like so-consignment-note
+		std-price-code					like so-price-code
+		std-sol-disc-percent			like sol-disc-rate
+		std-notional-line-amount		like sol-line-amount
+		std-instr1						like so-dl-text occurs 1
+		std-instr2						like so-dl-text occurs 1
+		std-instr3						like so-dl-text occurs 1
+		std-instr4						like so-dl-text occurs 1
+		std-instr5						like so-dl-text occurs 1
+	endrecord
+
+procedure library-init
+	// Only Write Log Once When Component Initiated
+	get system-control first
+	on error
+		abort "Must have system control record"
+	endon
+	do i8proglogparam-write-log parameters are "clibvedi"
+end-procedure
+
+procedure clibvedi-clear-errors export no-override
+	parameters are
+		lp-receipt-number				like v-edi-receipt-number
+	// Clear Order Errors
+	select * from edi-order-errors
+		where v-edi-receipt-number = :lp-receipt-number
+		for update
+	detail
+		delete edi-order-errors
+		on error
+		end-on
+	end-select
+	// Reset Order Line Counters
+	select * from edi-order-lines
+		where v-edi-receipt-number = :lp-receipt-number
+		for update
+	detail
+		if v-edi-l-status <> IEDI_L_CANCELLED
+			set v-edi-l-status = IEDI_L_RECEIVED
+		endif
+		set v-edi-l-warning-count = ZERO
+		set v-edi-l-error-count = ZERO
+		update edi-order-lines
+		on error
+		end-on
+	end-select
+	// Reset Order Header Counters
+	get edi-order-headers
+		on index v-edi-receipt-number
+		key is lp-receipt-number
+		lock
+	on error
+		exit
+	end-on
+	set v-edi-h-status = IEDI_RECEIVED
+	set v-edi-h-warning-count = ZERO 
+	set v-edi-h-error-count = ZERO
+	update edi-order-headers
+	on error
+	end-on
+end-procedure
+
+procedure clibvedi-validate-receipt export no-override
+	parameters are
+		lp-receipt-number				like v-edi-receipt-number
+	local fields
+		lf-error-line					like v-edi-e-error-line
+		lf-error-type					like v-edi-error-type
+		lf-line-count					like v-edi-receipt-line
+		lf-l-errors						like v-edi-l-error-count
+		lf-l-warnings					like v-edi-l-warning-count
+		lf-na-type						like na-type
+		lf-valid-item					type boolean
+		lf-gtin-used					type boolean
+		lf-valid-uom					type boolean
+		lf-lower-price					like v-edi-l-price
+		lf-upper-price					like v-edi-l-price
+		lf-realquote					type boolean	
+		lf-fraction						like sol-shipped-qty //jcb used to check if the number has a decimal qty
+		lf-soexists						type boolean
+		lf-tm-notes-exist				type boolean
+		lf-count-open-edis				type number
+// Check Status before doing anything - do NOT always want to revalidate 
+	get edi-order-headers
+		on index v-edi-receipt-number
+		key is lp-receipt-number
+	on error
+		exit
+	else
+		if v-edi-h-status in { "50" "90" "99" }
+			exit
+		endif
+	endon
+	// Clear Existing Errors
+	do clibvedi-clear-errors
+		parameters are lp-receipt-number
+	// Initialise
+	set lf-error-line = ZERO
+	set lf-na-type = SPACES
+	// -----------------
+	// Header Processing
+	// -----------------
+	// Retrieve And Lock Receipt Header
+	get edi-order-headers
+		on index v-edi-receipt-number
+		key is lp-receipt-number
+		lock
+	on error
+		exit
+	end-on
+	// Valid Account
+	get deb-master
+		on index accountcode
+		key is v-edi-h-accountcode
+	on error
+		// Find Account Via DPID
+		select * from name-and-address-master
+			where na-address-id = :v-edi-h-address-id
+			and na-type not in ('C' 'E')
+		detail
+			// Get Account
+			get deb-master
+				on index accountcode
+				key is accountcode
+			on error
+				continue
+			end-on
+			// Matching Bill To?
+			if v-edi-h-bill-to <> bill-to
+				// Hammer Hardware Bill To?
+				if bill-to = 'HAMHEAD'
+					set v-edi-h-bill-to = bill-to
+				else
+					continue
+				endif
+			endif
+			// Match Found
+			set v-edi-h-accountcode = accountcode
+			set lf-na-type = na-type
+			break
+		end-select
+		// Recheck Account
+		get deb-master
+			on index accountcode
+			key is v-edi-h-accountcode
+		on error
+			set v-edi-h-status = IEDI_EXCEPTION
+			set lf-error-line += 1
+			do clibvedi-error
+				parameters are lp-receipt-number 0 lf-error-line 1
+				returning lf-error-type
+			switch on lf-error-type
+				case 'W'
+					set v-edi-h-warning-count += 1
+				else
+					set v-edi-h-error-count += 1
+			end-switch
+			// Exit Further Checks - Waste Of Time Without Valid Account
+			update edi-order-headers
+			on error
+			end-on
+			exit
+		end-on
+	else
+		if v-edi-h-bill-to = SPACES
+			set v-edi-h-bill-to = bill-to
+		endif
+	endon
+	// Closed Account?
+	if deb-status = 'C'
+		set v-edi-h-status = IEDI_EXCEPTION
+		set lf-error-line += 1
+		do clibvedi-error
+			parameters are lp-receipt-number 0 lf-error-line 15
+			returning lf-error-type
+		switch on lf-error-type
+			case 'W'
+				set v-edi-h-warning-count += 1
+			else
+				set v-edi-h-error-count += 1
+		end-switch
+	endif
+	// Delivery Address
+	// If Blank Then Find Appropriate Delivery Address And Load As Override
+	if v-edi-h-std-addr1 = SPACES and v-edi-h-std-addr2 = SPACES and v-edi-h-std-addr3 = SPACES
+		and v-edi-h-std-addr4 = SPACES and v-edi-h-std-addr5 = SPACES and v-edi-h-addr-supplied = 'N'
+		if lf-na-type = SPACES
+			// DPID Given
+			if v-edi-h-address-id <> SPACES
+				select * from name-and-address-master
+					where accountcode = :v-edi-h-accountcode and na-address-id = :v-edi-h-address-id
+						and na-type not in ('C' 'E')
+				detail
+					set lf-na-type = na-type
+					break
+				end-select
+			endif
+			// DPID Not Given
+			if v-edi-h-address-id = SPACES
+				select * from name-and-address-master
+					where accountcode = :v-edi-h-accountcode 
+						and (na-type in ('DA' 'C' ) or na-type between '00' and '99')
+					order by na-type desc 
+				detail
+					set lf-na-type = na-type
+					set v-edi-h-address-id = na-address-id
+					break
+				end-select
+			endif
+		endif
+		get name-and-address-master
+			on index accountcode na-type
+			key is v-edi-h-accountcode lf-na-type
+		on error
+			set v-edi-h-status = IEDI_EXCEPTION
+			set lf-error-line += 1
+			do clibvedi-error
+				parameters are lp-receipt-number 0 lf-error-line 2
+				returning lf-error-type
+			switch on lf-error-type
+				case 'D'
+					// disable - no checking
+				case 'W'
+					set v-edi-h-warning-count += 1
+				else
+					set v-edi-h-error-count += 1
+			end-switch
+		else
+			set v-edi-h-std-addr1 = na-name
+			set v-edi-h-std-addr2 = na-company
+			set v-edi-h-std-addr3 = na-street
+			set v-edi-h-std-addr4 = na-suburb
+			set v-edi-h-std-addr5 = na-country
+		end-on
+	endif
+	// Issue Warning If Address Has Been Supplied
+	if v-edi-h-addr-supplied = 'Y'
+		set v-edi-h-status = IEDI_EXCEPTION
+		set lf-error-line += 1
+		do clibvedi-error
+			parameters are lp-receipt-number 0 lf-error-line 13
+			returning lf-error-type
+		switch on lf-error-type
+			case 'D'
+				// disable - no checking
+			case 'W'
+				set v-edi-h-warning-count += 1
+			else
+				set v-edi-h-error-count += 1
+		end-switch
+	endif
+	// Clear Alternate Warehouse
+	// Note: Warehouses 2 & 3 Not Currently Used
+	set v-edi-h-warehouse-1 = SPACES
+	// Warehouse Valid
+	get system-table
+		on index sys-tbl-type sys-tbl-code
+		key is 'WH' v-edi-h-warehouse
+		lookup
+	on error
+		set v-edi-h-status = IEDI_EXCEPTION
+		set lf-error-line += 1
+		do clibvedi-error
+			parameters are lp-receipt-number 0 lf-error-line 4
+			returning lf-error-type
+		switch on lf-error-type
+			case 'W'
+				set v-edi-h-warning-count += 1
+			else
+				set v-edi-h-error-count += 1
+		end-switch
+	end-on
+	// Delivery Date Passed
+	if v-edi-h-delivery-date <> ZERO and v-edi-h-delivery-date < today()
+		set v-edi-h-status = IEDI_EXCEPTION
+		set lf-error-line += 1
+		do clibvedi-error
+			parameters are lp-receipt-number 0 lf-error-line 8
+			returning lf-error-type
+		switch on lf-error-type
+			case 'D'
+				// disable - no checking
+			case 'W'
+				set v-edi-h-warning-count += 1
+			else
+				set v-edi-h-error-count += 1
+		end-switch
+	endif
+	// Order Date / Delivery Date Check
+	if v-edi-h-order-date <> ZERO
+		if v-edi-h-delivery-date <> ZERO and v-edi-h-order-date > v-edi-h-delivery-date
+			set v-edi-h-status = IEDI_EXCEPTION
+			set lf-error-line += 1
+			do clibvedi-error
+				parameters are lp-receipt-number 0 lf-error-line 9
+				returning lf-error-type
+			switch on lf-error-type
+				case 'D'
+					// disable - no checking
+				case 'W'
+					set v-edi-h-warning-count += 1
+				else
+					set v-edi-h-error-count += 1
+			end-switch
+		endif
+	endif
+	// identify quotations and flag for processing manually
+	if v-edi-h-custom-format = 'Q'
+		do clibvedi-checkquote
+		parameters are v-edi-h-std-instr2
+		returning
+		lf-realquote
+		if lf-realquote
+			set v-edi-h-status = IEDI_EXCEPTION
+			set lf-error-line += 1
+			do clibvedi-error
+				parameters are lp-receipt-number 0 lf-error-line 15
+				returning lf-error-type
+			switch on lf-error-type
+				case 'D'
+					// disable - no checking
+				case 'W'
+					set v-edi-h-warning-count += 1
+				else
+					set v-edi-h-error-count += 1
+			end-switch
+		else
+			set v-edi-h-status = IEDI_EXCEPTION
+			set lf-error-line += 1
+			do clibvedi-error
+				parameters are lp-receipt-number 0 lf-error-line 16
+				returning lf-error-type
+			switch on lf-error-type
+				case 'D'
+					// disable - no checking
+				case 'W'
+					set v-edi-h-warning-count += 1
+				else
+					set v-edi-h-error-count += 1
+			end-switch
+		endif
+	endif
+// rjb log 120-start-------------------------------------------------------------
+	set lf-count-open-edis = 0
+	select lf-count-open-edis = count(*)
+		from edi-order-headers
+		where v-edi-h-status not in (IEDI_LOADED IEDI_CANCELLED)
+		and v-edi-h-accountcode = :v-edi-h-accountcode
+		and v-edi-h-cust-reference = :v-edi-h-cust-reference
+	end-select
+	if lf-count-open-edis > 1
+		set v-edi-h-status = IEDI_EXCEPTION
+		set lf-error-line += 1
+		do clibvedi-error
+			parameters are lp-receipt-number 0 lf-error-line 18
+			returning lf-error-type
+		switch on lf-error-type
+			case 'D'
+				// disable - no checking
+			case 'W'
+				set v-edi-h-warning-count += 1
+			else
+				set v-edi-h-error-count += 1
+		end-switch
+	endif
+// rjb log 120-end---------------------------------------------------------------
+	do clibvedi-checkso
+		parameters are v-edi-h-accountcode v-edi-h-cust-reference
+		returning lf-soexists
+	if lf-soexists
+		set v-edi-h-status = IEDI_EXCEPTION
+		set lf-error-line += 1
+		do clibvedi-error
+			parameters are lp-receipt-number 0 lf-error-line 17
+			returning lf-error-type
+		switch on lf-error-type
+			case 'D'
+				// disable - no checking
+			case 'W'
+				set v-edi-h-warning-count += 1
+			else
+				set v-edi-h-error-count += 1
+		end-switch
+	endif	
+	// Update Header
+	update edi-order-headers
+	on error
+	end-on
+	// ---------------
+	// Line Processing
+	// ---------------
+	// Initialise
+	set lf-l-errors = ZERO
+	set lf-l-warnings = ZERO
+	set lf-line-count = ZERO
+	// Process Order Lines
+	select * from edi-order-lines
+		where v-edi-receipt-number = :lp-receipt-number
+//		order by v-edi-receipt-number v-edi-receipt-line
+		for update
+	detail
+		// Initialise
+		set lf-valid-item = FALSE
+		set lf-gtin-used = FALSE
+		// Count Line
+		set lf-line-count += 1
+		// Line Cancelled
+		if v-edi-l-status = IEDI_L_CANCELLED
+			set lf-error-line += 1
+			do clibvedi-error
+				parameters are lp-receipt-number v-edi-receipt-line lf-error-line 10
+				returning lf-error-type
+			switch on lf-error-type
+				case 'D'
+					// disable - no checking
+				case 'W'
+					set v-edi-l-warning-count += 1
+					set lf-l-warnings += 1
+				else
+					set v-edi-l-error-count += 1
+					set lf-l-errors += 1
+			end-switch
+			// Exit Further Checks
+			update edi-order-lines
+			on error
+			end-on
+			continue
+		endif
+		// Note Line
+		if v-edi-l-line-type = 'N'
+			update edi-order-lines
+			on error
+			end-on
+			continue
+		endif
+		// Invalid Stock Code And GTIN Provided
+		//GTIN now checked first
+		if v-edi-l-gtin <> SPACES	
+			select * from stock-unit-conversion
+			where suc-trade-unit-no = :v-edi-l-gtin
+			detail
+				set v-edi-l-stock-code = stock-code
+				set lf-valid-item = TRUE
+				// Valid Stock Code
+				set lf-gtin-used = TRUE
+				set v-edi-l-uom = suc-unit-desc
+				break
+			end-select
+		endif
+		if lf-valid-item = FALSE
+			get stock-master
+				on index  stock-code
+				key is v-edi-l-stock-code
+			on error
+			else
+				set lf-valid-item = TRUE
+				// Valid Stock Code
+			end-on
+		end-if		
+		// Invalid Stock Code And Customer Item Provided - Translate
+		if lf-valid-item = FALSE and v-edi-l-cust-item <> SPACES
+			select * from stock-conversion-procedure
+				where scp-component-code = :v-edi-l-cust-item
+			detail
+				if scp-accountcode = v-edi-h-bill-to
+					set v-edi-l-stock-code = scp-stock-code
+					set lf-valid-item = TRUE
+					break
+				else
+					continue
+				endif
+			end-select
+		endif
+		// Invalid Stock - Error
+		if lf-valid-item = FALSE
+			set v-edi-l-status = IEDI_L_EXCEPTION
+			set lf-error-line += 1
+			do clibvedi-error
+				parameters are lp-receipt-number v-edi-receipt-line lf-error-line 3
+				returning lf-error-type
+			switch on lf-error-type
+				case 'W'
+					set v-edi-l-warning-count += 1
+					set lf-l-warnings += 1
+				else
+					set v-edi-l-error-count += 1
+					set lf-l-errors += 1
+			end-switch
+			// Exit Further Checks - Waste Of Time Without Valid Item
+			update edi-order-lines
+			on error
+			end-on
+			continue
+		endif
+		// Refresh Stock Code
+		get stock-master
+			on index  stock-code
+			key is v-edi-l-stock-code
+		on error
+		end-on
+		if stk-stock-status = "K"
+			set v-edi-l-status = IEDI_L_EXCEPTION
+			set lf-error-line += 1
+			do clibvedi-error
+				parameters are lp-receipt-number v-edi-receipt-line lf-error-line 17
+				returning lf-error-type
+			switch on lf-error-type
+				case 'D'
+					// disable - no checking
+				case 'W'
+					set v-edi-l-warning-count += 1
+					set lf-l-warnings += 1
+				else
+					set v-edi-l-error-count += 1
+					set lf-l-errors += 1
+			end-switch
+		end-if
+		// Item Stocked In Warehouse
+		get stock-warehouse-detail
+			on index stock-code whse-code
+			key is v-edi-l-stock-code v-edi-h-warehouse
+		on error
+			set v-edi-l-status = IEDI_L_EXCEPTION
+			set lf-error-line += 1
+			do clibvedi-error
+				parameters are lp-receipt-number v-edi-receipt-line lf-error-line 5
+				returning lf-error-type
+			switch on lf-error-type
+				case 'W'
+					set v-edi-l-warning-count += 1
+					set lf-l-warnings += 1
+				else
+					set v-edi-l-error-count += 1
+					set lf-l-errors += 1
+			end-switch
+		end-on
+		// Mandatory Telemarketing Notes Exist?
+		set lf-tm-notes-exist = FALSE
+		select * from stock-notes
+			where stock-code = :v-edi-l-stock-code
+			and stock-note-type = 'TM'
+		detail
+			set lf-tm-notes-exist = TRUE
+			break
+		end-select
+		if lf-tm-notes-exist = TRUE
+			set v-edi-l-status = IEDI_L_EXCEPTION
+			set lf-error-line += 1
+			do clibvedi-error
+				parameters are lp-receipt-number v-edi-receipt-line lf-error-line 19
+				returning lf-error-type
+			switch on lf-error-type
+				case 'D'
+					// disable - no checking
+				case 'W'
+					set v-edi-l-warning-count += 1
+					set lf-l-warnings += 1
+				else
+					set v-edi-l-error-count += 1
+					set lf-l-errors += 1
+			end-switch
+		endif
+		// UOM Supplied - No, Then Use Pronto UOM
+		if v-edi-l-uom = SPACES
+			set v-edi-l-uom = stk-unit-desc
+		endif
+		//USE UOM from GTIN if supplied stf 9/10/2012
+		if v-edi-l-gtin <> SPACES
+			select * from stock-unit-conversion
+				where suc-trade-unit-no = :v-edi-l-gtin
+				and stock-code = :v-edi-l-stock-code
+			detail
+				set v-edi-l-uom = suc-unit-desc
+				break
+			end-select
+		endif
+		// UOM Supplied - Equal To Alternate Convert ONCE
+		if v-edi-l-trigger-flag = '01'
+			if v-edi-l-uom <> stk-unit-desc and v-edi-l-uom = stk-alt-unit-desc
+				set v-edi-l-uom = stk-alt-unit-desc
+				set v-edi-l-qty-ordered = v-edi-l-qty-ordered * stk-conversion-factor
+				set v-edi-l-trigger-flag = SPACES
+			endif
+		endif
+		// Have Quantity Ordered
+		if v-edi-l-qty-ordered <= ZERO
+			set v-edi-l-status = IEDI_L_EXCEPTION
+			set lf-error-line += 1
+			do clibvedi-error
+				parameters are lp-receipt-number v-edi-receipt-line lf-error-line 6
+				returning lf-error-type
+			switch on lf-error-type
+				case 'D'
+					// disable - no checking
+				case 'W'
+					set v-edi-l-warning-count += 1
+					set lf-l-warnings += 1
+				else
+					set v-edi-l-error-count += 1
+					set lf-l-errors += 1
+			end-switch
+		endif
+		// Quantity Ordered Not A Multiple Of Pack Qty ?
+		if v-edi-l-qty-ordered % stk-pack-qty <> ZERO
+			set v-edi-l-status = IEDI_L_EXCEPTION
+			set lf-error-line += 1
+			do clibvedi-error
+				parameters are lp-receipt-number v-edi-receipt-line lf-error-line 14
+				returning lf-error-type
+			switch on lf-error-type
+				case 'D'
+					// disable - no checking
+				case 'W'
+					set v-edi-l-warning-count += 1
+					set lf-l-warnings += 1
+				else
+					set v-edi-l-error-count += 1
+					set lf-l-errors += 1
+			end-switch
+		endif
+		// UOM Valid
+		set lf-valid-uom = FALSE
+		if v-edi-l-uom <> stk-unit-desc and v-edi-l-uom <> stk-alt-unit-desc
+			// Try Generic Conversions
+			get edi-uom-conversions
+				on index v-edi-uom-desc
+				key is v-edi-l-uom
+			on error
+			else
+				if v-edi-pronto-uom-desc = stk-unit-desc
+					set v-edi-l-uom = v-edi-pronto-uom-desc
+					set lf-valid-uom = TRUE
+				endif
+			end-on
+		else
+			set lf-valid-uom = TRUE
+		endif
+		if lf-valid-uom = FALSE
+			set v-edi-l-status = IEDI_L_EXCEPTION
+			set lf-error-line += 1
+			do clibvedi-error
+				parameters are lp-receipt-number v-edi-receipt-line lf-error-line 11
+				returning lf-error-type
+			switch on lf-error-type
+				case 'W'
+					set v-edi-l-warning-count += 1
+					set lf-l-warnings += 1
+				else
+					set v-edi-l-error-count += 1
+					set lf-l-errors += 1
+			end-switch
+		endif
+		// Get System Price And Compare
+		do clibvedi-find-price
+			parameters are v-edi-h-accountcode v-edi-l-stock-code
+			returning v-edi-l-system-price
+		// Priced Per ? (Not Handled By Pronto Routine)
+		if stk-price-per > 1
+			set v-edi-l-system-price = v-edi-l-system-price / stk-price-per
+		endif
+		// Different Price From System ?
+		if v-edi-l-price <> ZERO and v-edi-l-price <> v-edi-l-system-price and v-edi-l-accept-price = 'N'
+			// If Cutomer Price Within 10% Of System Accept System Price
+			set lf-lower-price = v-edi-l-system-price * 0.1
+			set lf-upper-price = v-edi-l-system-price * 1.1
+			if v-edi-l-price >= lf-lower-price and v-edi-l-price <= lf-upper-price
+				set v-edi-l-accept-price = 'S'
+			else
+				set v-edi-l-status = IEDI_L_EXCEPTION
+				set lf-error-line += 1
+				do clibvedi-error
+					parameters are lp-receipt-number v-edi-receipt-line lf-error-line 7
+					returning lf-error-type
+				switch on lf-error-type
+					case 'D'
+						// disable - no checking
+					case 'W'
+						set v-edi-l-warning-count += 1
+						set lf-l-warnings += 1
+					else
+						set v-edi-l-error-count += 1
+						set lf-l-errors += 1
+				end-switch
+			endif
+		endif
+		//check if line qty has a decimal amount
+		set lf-fraction = fraction(v-edi-l-qty-ordered) 
+		if lf-fraction != ZERO
+			set v-edi-l-status = IEDI_L_EXCEPTION
+			set lf-error-line += 1
+			do clibvedi-error
+				parameters are lp-receipt-number v-edi-receipt-line lf-error-line 16
+				returning lf-error-type
+			switch on lf-error-type
+				case 'D'
+					// disable - no checking
+				case 'W'
+					set v-edi-l-warning-count += 1
+					set lf-l-warnings += 1
+				else
+					set v-edi-l-error-count += 1
+					set lf-l-errors += 1
+			end-switch
+		endif
+		//
+		// Update Line
+		update edi-order-lines
+		on error
+		end-on
+	end-select
+	// Add Error Count To Header
+	if lf-l-warnings <> ZERO or lf-l-errors <> ZERO or lf-line-count = ZERO
+		get edi-order-headers
+			on index v-edi-receipt-number
+			key is lp-receipt-number
+			lock
+		on error
+		else
+			// Line Count
+			if lf-line-count = ZERO
+				set lf-error-line += 1
+				do clibvedi-error
+					parameters are lp-receipt-number 0 lf-error-line 12
+					returning lf-error-type
+				switch on lf-error-type
+					case 'D'
+						// disable - no checking
+					case 'W'
+						set v-edi-h-warning-count += 1
+					else
+						set v-edi-h-error-count += 1
+				end-switch
+			endif
+			set v-edi-h-status = IEDI_EXCEPTION
+			set v-edi-h-error-count += lf-l-errors
+			set v-edi-h-warning-count += lf-l-warnings
+			update edi-order-headers
+			on error
+			endon
+		end-on
+	endif
+end-procedure
+
+procedure clibvedi-error export no-override
+	parameters are
+		lp-receipt-number				like v-edi-receipt-number
+		lp-receipt-line					like v-edi-receipt-line
+		lp-error-line					like v-edi-e-error-line
+		lp-error-code					like v-edi-error-code
+	returning
+		lr-error-type					like v-edi-error-type
+	// Get Error
+	get edi-error-codes
+		on index v-edi-error-code
+		key is lp-error-code
+	on error
+		set lr-error-type = 'E'
+	else
+		set lr-error-type = v-edi-error-type
+	end-on
+	// Write Error
+	initialise edi-order-errors
+	set v-edi-receipt-number = lp-receipt-number
+	set v-edi-receipt-line = lp-receipt-line
+	set v-edi-e-error-line = lp-error-line
+	set v-edi-error-code = lp-error-code
+	insert edi-order-errors
+	on error
+	end-on
+end-procedure
+
+procedure clibvedi-checkquote
+	parameters are 
+		lp-quote-ref					like v-edi-h-std-instr2
+	returning
+		lr-realquote					type boolean
+	//check if this quote ref matches a pronto quotation
+	local fields
+		lf-order-no 					like so-order-no
+	set lf-order-no = num(lp-quote-ref)
+	if lf-order-no > 0
+		get sales-order
+			on index so-order-no
+			key is lf-order-no 
+		on error
+			set lr-realquote = false
+		else
+			set lr-realquote = true
+		endon
+	else
+		set lr-realquote = false
+	endif
+end-procedure
+
+procedure clibvedi-find-price export no-override
+	parameters 
+		lp-accountcode					like accountcode
+		lp-stock-code					like stock-code
+	returning
+		lr-price-ex-tax					like sol-item-price
+	// Initialise
+	set lr-price-ex-tax = ZERO
+	// ------------------------------------------------------------
+	// Routine determine-price Is Copied From m4sprcenq.spl
+	// And Sets Up Dummy Sales Order - Check For Changes On Upgrade
+	// ------------------------------------------------------------
+	set ws-cust-code = lp-accountcode
+	set ws-stock-code = lp-stock-code
+	do determine-price
+	// Find Base Price
+#if BMS_DICT_VER < 7500
+	do i4getprice-get-stock-price-record
+		parameter stock-code so-whse-code so-cust-type so-price-code
+		returning ws-found-stk-price ws-returned-item-price prc-region-code
+#else
+	do i4getprice-get-stock-price-record
+		parameter stock-code so-whse-code so-cust-type 
+		returning ws-found-stk-price prc-region-code
+#endif
+	set sol-price-uom = stk-price-per
+	// Set Disc Rate
+	do i5soldisc-get-cust-disc
+	// Look For Price
+	do i5pricemod-pricing-module
+// rjb log 86-start-------------------------------------------------------------
+		parameters are false
+// rjb log 86-end---------------------------------------------------------------
+	if i5pricemod-item-price != ZERO	
+		set sol-item-price = i5pricemod-item-price
+	endif
+	if i5pricemod-is-disc-to-be-used = NO
+		set sol-disc-rate = ZERO
+	endif
+	// Set Return Values
+	//need to apply sol-disc-rate
+	//set lr-price-ex-tax = i5pricemod-item-price
+	set lr-price-ex-tax = i5pricemod-item-price * (1 - (sol-disc-rate / 100))
+	//set lr-price-ex-tax = i5pricemod-item-price - sol-shipped-discount-amt
+end-procedure
+
+procedure determine-price
+// NB. Billto check is only done to ONE level for pricing - therefore
+// there is no need to do i5billto-get-bill-to.
+	local field
+		lf-found-rec						type boolean
+#if BMS_DICT_VER < 7500
+		lf-returned-item-price				like sol-item-price
+#endif
+		lf-billto-price-code				like price-code
+		lf-returned-region					like prc-region-code
+	//
+	set so-cust-code = ws-cust-code									
+	// obtain currency on requested customer/sold-to account
+	get deb-master
+		on index accountcode
+		key is ws-cust-code
+	on error
+		initialise deb-master
+			leaving accountcode
+	endon
+	initialise sales-order
+	set so-cust-code = ws-cust-code
+	set so-order-date = today()
+	set so-delivery-date = today()
+	set so-curr-code = dr-curr-code
+	set so-whse-code = warehouse
+	if so-whse-code = spaces
+		get system-user
+			on index user-id sys-comp-code
+			key is login-id() sys-consolidation-division
+		on error
+			set so-whse-code = sys-default-whse
+		else
+			set so-whse-code = user-whse
+		endon
+	endif
+	if sys-so-territory-default = "M"			
+		set so-territory-code = dr-marketing-flag			
+	else												
+		set so-territory-code = territory
+	endif
+	set so-rep-code = rep-code
+	set so-cust-type = dr-cust-type
+	set ws-bill-to = bill-to
+	set i5pricemod-bill-to = bill-to
+	save deb-master
+	//
+	do clibbillto-get-bill-to
+		parameter
+			ws-bill-to
+		returning
+			bill-to
+	//
+	get deb-master
+		on index accountcode
+		key is bill-to
+	on error
+		set sys-tbl-alpha-2 = spaces
+	else
+		get system-table					
+			on index sys-tbl-type sys-tbl-code
+			key is 'CT' dr-cust-type
+		on error					
+			set sys-tbl-alpha-2 = spaces	
+		endon
+	endon							
+	set lf-billto-price-code = price-code
+	restore deb-master
+	//NOTE: the dr-pricing-category and the dr-price-disc-by-bill-to
+	//	are from the debtor code of the person ORDERING the goods!!!
+	//	
+	// record currency on sold-to account
+	set i5pricemod-dr-pricing-category = dr-pricing-category	
+	get system-table								
+		key is 'CT' so-cust-type				
+	on error												
+		set sys-tbl-alpha-4[1] = spaces					
+		set sys-tbl-alpha-2 = spaces		
+	endon											
+	set i5pricemod-cus-type-prom-flag = sys-tbl-alpha-4[1]
+	if dr-price-disc-by-bill-to in {YES 'B'}	
+		//NOTE: this goes to only 1 level of bill-to!!!!!!
+		if sys-bill-to-size < '1' or sys-bill-to-size > '9'
+			set i5pricemod-acnt-to-use-for-price-lookup = i5pricemod-bill-to
+		else
+			set i5pricemod-acnt-to-use-for-price-lookup =
+				substring(i5pricemod-bill-to,1,num(sys-bill-to-size))
+		endif
+		// sold-to account is setup to use bill-to's pricing
+		set so-price-code = lf-billto-price-code
+	else
+		set i5pricemod-acnt-to-use-for-price-lookup = ws-cust-code
+		// using sold-to's price-code
+		set so-price-code = price-code
+	endif
+	set i5soldisc-acnt-to-use-for-cgd = i5pricemod-acnt-to-use-for-price-lookup
+		//
+	set i5soldisc-trade-disc = 0
+	set i5soldisc-general-disc-rate = 0
+	set i5soldisc-cgd-cust-rate = 0
+	set i5soldisc-cgd-cust-code-flag = FALSE
+	if sys-cgd-flg in {YES 'M' 'L' 'S' 'T' 'U' 'X' 'Z' '1' '2' '3' '4'}	
+		get cust-group-disc
+			key is i5soldisc-acnt-to-use-for-cgd '****' spaces	
+		on error //Not Used - Leave flag as is
+		else
+			set i5soldisc-cgd-cust-code-flag = TRUE	
+			set i5soldisc-cgd-cust-rate = cgd-disc-value	
+				//Plus other two for 'U'
+				+ cgd-disc-value2
+				+ cgd-disc-value3
+				+ cgd-disc-value4		
+		endon
+	endif
+	save deb-master
+	get deb-master												
+		on index accountcode								
+		key is i5soldisc-acnt-to-use-for-cgd				
+	on error											
+		restore deb-master							
+	endon										
+	set sol-disc-rate = zero										
+	get stock-master
+		on index stock-code
+		key is ws-stock-code
+	on error
+		initialise stock-master leaving stock-code 
+	endon
+	get stock-warehouse-detail
+		on index stock-code whse-code
+		key is ws-stock-code so-whse-code
+	on error
+		initialise stock-warehouse-detail leaving stock-code whse-code
+	endon
+	set i5soldisc-set-sol-disc-rate = YES								
+	do i5soldisc-get-cust-disc
+	//
+	save deb-master													
+	get deb-master													
+		on index accountcode										
+		key is i5pricemod-acnt-to-use-for-price-lookup 					
+	on error														
+		restore deb-master											
+	endon															
+	initialise sales-order-line leaving stock-code
+		sol-disc-rate												
+	set sol-line-type = 'SN'
+	//set sol-stk-unit-desc = stk-unit-desc							//kg01aug03
+	set sol-stk-unit-desc = ws-stk-unit-desc						//kg01aug03
+	set sol-ordered-qty = ws-quantity
+	set sol-shipped-qty = ws-quantity
+#if BMS_DICT_VER < 7500
+	do i4getprice-get-stock-price-record
+		parameter stock-code so-whse-code so-cust-type so-price-code
+		returning lf-found-rec
+		   		  lf-returned-item-price
+#else
+	do i4getprice-get-stock-price-record
+		parameter stock-code so-whse-code so-cust-type 
+		returning lf-found-rec
+		   		  lf-returned-region
+#endif
+	if not lf-found-rec
+		initialise stock-price leaving
+			stock-code prc-region-code
+		insert stock-price
+	endif
+	//
+	// Some prices are calculated as markups on the cost
+	// so need to obtain the item cost (stored in sol-item-cost)
+	do i5solicost-get-cost
+	//
+	do i5pricemod-pricing-module
+		parameters are false
+	if i5pricemod-is-disc-to-be-used = no	
+		set sol-disc-rate = 0
+	endif
+	set sol-item-price = i5pricemod-item-price
+	I5LINECALC_SO_LINE_CALC(so-price-code
+		,SPACES
+		,sol-item-price
+		,sol-shipped-qty
+		,sol-stk-unit-desc
+		,sol-price-uom
+		,sol-disc-rate
+		,SPACES
+		,sol-item-wholesale-price
+		,sol-shipped-amount
+		,sol-shipped-discount-amt
+		,sol-shipped-sales-tax-amt)
+	//
+end-procedure
+
+procedure clibvedi-load-order export no-override
+parameters are
+	lp-receipt-number					like v-edi-receipt-number
+local fields
+	lf-data-area						like ql-data-area
+	lf-data-directory					pic x(512) type string
+	lf-load-so							type is string pic x(100)
+	lf-first-line						type boolean
+	lf-ql-description					like ql-description
+	lf-ql-file-name						type is string pic x(100)
+	lf-ql-path							like ql-path
+	lf-ql-path-parameter				like ql-path
+	lf-sales-audit-spool				type string
+	lf-exception-spool					type string
+	lf-valid-records					type numeric
+	x									type number
+	lf-pdf-path							pic x(1024) type string
+	lf-pdf-file							pic x(1024) type string
+	lf-ok								type boolean
+	lf-error-message					pic x(1024) type string
+	// Determine Data Area
+	set lf-data-directory = dir()
+	for x = str-len(lf-data-directory) down to 1
+		if substring(lf-data-directory,x,x) in ( '/' '\' )
+			break
+		endif
+	end-for
+	set lf-data-area = substring(lf-data-directory,x + 1,str-len(lf-data-directory))
+	// Set Quick Links Path
+	set lf-ql-path = str-concat('\\' nodename '\edi\in_pronto\')
+	// Get Receipt Header
+	get edi-order-headers
+		on index v-edi-receipt-number
+		key is lp-receipt-number
+		lock
+	on error
+		exit
+	end-on
+	// Should Be No Errors, Checked Before Call - But!
+	if v-edi-h-error-count <> ZERO
+		update edi-order-headers
+		on error
+		end-on
+		exit
+	endif
+	if v-edi-h-status in ( IEDI_LOADING IEDI_LOADED IEDI_CANCELLED)
+		update edi-order-headers
+		on error
+		endon
+		exit
+	endif
+	// Update Status As Being Loaded
+	set v-edi-h-status = IEDI_LOADING
+	update edi-order-headers
+	on error
+	end-on
+	// Load File Path
+	set lf-load-so = str-concat(get-env('PROEDI'),'/in_pronto','/',str(lp-receipt-number),'.txt')
+	//alternate temp line on virtual box
+	//set lf-load-so = str-concat("/pro/data/csl/edi/in_pronto",'/',str(lp-receipt-number),'.txt')
+	// Open Import File
+	open pronto-load-so truncate permanent
+		file is lf-load-so
+	on error
+		exit
+	end-on
+	// Load Header Info
+	initialise pronto-load-so
+	set std-record-type = 'H'
+	set std-so-cust-code = v-edi-h-accountcode
+	set std-so-whse-code = v-edi-h-warehouse
+	set std-addr1 = v-edi-h-std-addr1
+	set std-addr2 = v-edi-h-std-addr2
+	set std-addr3 = v-edi-h-std-addr3
+	set std-addr4 = v-edi-h-std-addr4
+	set std-addr5 = v-edi-h-std-addr5
+	// Load DPID Into Fax Number
+	// This Is Used In M50LOADSO public-sales-order-conclusion
+	// To Complete The Sales Order Delivery Record Correctly With
+	// Postcode, Route and DPID
+	set std-fax-no = v-edi-h-address-id
+	if v-edi-h-order-date <> ZERO
+		set std-so-order-date = concat(substring(str(year(v-edi-h-order-date)),3,4),
+									zstr(month(v-edi-h-order-date),2,0),
+									zstr(day(v-edi-h-order-date),2,0))
+	endif
+	set std-so-cust-reference = v-edi-h-cust-reference
+	if v-edi-h-delivery-date <> ZERO
+		set std-so-delivery-date = concat(substring(str(year(v-edi-h-delivery-date)),3,4),
+									zstr(month(v-edi-h-delivery-date),2,0),
+									zstr(day(v-edi-h-delivery-date),2,0))
+	endif
+	set std-filler = str(v-edi-receipt-number)
+	set std-instr1 = v-edi-h-std-instr1
+	set std-instr2 = v-edi-h-std-instr2
+	set std-instr3 = v-edi-h-std-instr3
+	set std-instr4 = v-edi-h-std-instr4
+	set std-instr5 = v-edi-h-std-instr5
+	// Initialise
+	set lf-first-line = FALSE
+	// Process Order Lines
+	select * from edi-order-lines
+		where v-edi-receipt-number = :lp-receipt-number
+//		order by v-edi-receipt-number v-edi-receipt-line
+		for update
+	detail
+		// Initialise
+		if lf-first-line
+			initialise pronto-load-so
+			set std-record-type = 'L'
+		endif
+		// Ignore Cancelled Lines
+		if v-edi-l-status = IEDI_L_CANCELLED
+			continue
+		endif
+		// Load Line Info
+		switch on v-edi-l-line-type
+			// Normal 
+			case ' '
+				set std-stock-code = v-edi-l-stock-code
+				get stock-master
+					on index stock-code
+					key is v-edi-l-stock-code
+				on error
+					set std-sol-line-desc = v-edi-l-description
+				else
+					set std-sol-line-desc = stk-description
+				end-on
+				set std-sol-ordered-qty = str(v-edi-l-qty-ordered)
+				if v-edi-l-accept-price = 'Y'
+					set std-sol-item-price = str(v-edi-l-price)
+				endif
+				set std-sol-stk-unit-desc = v-edi-l-uom
+			// Note 
+			case 'N'
+				set std-sol-line-desc = v-edi-l-description
+		end-switch
+		set v-edi-l-status = IEDI_LOADED
+		update edi-order-lines
+		on error
+		end-on
+		insert pronto-load-so
+		on error
+		end-on
+		set lf-first-line = TRUE
+	end-select
+	// Update Header As Loaded
+	get edi-order-headers
+		on index v-edi-receipt-number
+		key is lp-receipt-number
+		lock
+	on error
+	else
+		set v-edi-h-status = IEDI_LOADED
+		set v-edi-h-date-processed = gmt()
+		update edi-order-headers
+		on error
+		end-on
+	end-on
+	// Add Quick Link
+	set lf-ql-file-name = str-concat(str(lp-receipt-number),'.txt')
+	set lf-ql-description = concat('Pronto Order Load File ',lf-ql-file-name)
+	set lf-ql-path-parameter = str-concat(lf-ql-path,lf-ql-file-name)
+	do clibvedi-add-quick-link
+		parameters are v-edi-receipt-number lf-data-area lf-ql-path-parameter lf-ql-description
+	// Load Order Into Pronto
+	spl 'so/m50loadso'
+		parameters are '-std' lf-load-so 'N' '-silent' 'S' returning 
+			lf-sales-audit-spool				
+			lf-exception-spool				
+			lf-valid-records			
+		leave-files-open
+		if lf-sales-audit-spool != spaces
+			LOG(concat("Audit:" lf-sales-audit-spool))
+			set lf-pdf-file =  concat( "AUDIT" str(lp-receipt-number) ".pdf")
+			set lf-pdf-path =  concat( DIR() "/edi/in_pronto/" lf-pdf-file)
+			do clibvpdf-create parameters are lf-sales-audit-spool lf-pdf-path
+			if exit-status() != 0
+				do clibvpdf-get-last-error returning lf-error-message
+			endif
+//				returning lf-ok lf-error-message
+			if lf-ok
+				set lf-ql-description = concat('Pronto Order Load Audit ',lf-pdf-file)
+				set lf-ql-path-parameter = str-concat(lf-ql-path,lf-pdf-file)
+				do clibvedi-add-quick-link
+					parameters are v-edi-receipt-number lf-data-area lf-ql-path-parameter lf-ql-description
+			else
+				LOG(lf-error-message)
+			endif
+		endif
+		if lf-exception-spool != spaces
+			LOG(concat("Exception:" lf-exception-spool))
+			set lf-pdf-file =  concat( "EXCEPTION" str(lp-receipt-number) ".pdf")
+			set lf-pdf-path =  concat( DIR() "/edi/in_pronto/" lf-pdf-file)
+			do clibvpdf-create parameters are lf-exception-spool lf-pdf-path
+			if exit-status() != 0
+				do clibvpdf-get-last-error returning lf-error-message
+			endif
+//				returning lf-ok lf-error-message
+			if lf-ok
+				set lf-ql-description = concat('Pronto Order Load Audit ',lf-pdf-file)
+				set lf-ql-path-parameter = str-concat(lf-ql-path,lf-pdf-file)
+				do clibvedi-add-quick-link
+					parameters are v-edi-receipt-number lf-data-area lf-ql-path-parameter lf-ql-description
+			else
+				LOG(lf-error-message)
+			endif
+		endif
+	// rjb log 115-start-------------------------------------------------------------
+	// Update Header As Loaded
+	get edi-order-headers
+		on index v-edi-receipt-number
+		key is lp-receipt-number
+		lock
+	on error
+	else
+		// Try to find the sales order
+		//
+		select so-order-no, so-bo-suffix
+			from sales-order
+			where IDEMO_ORDER_EDI_RECEIPT = :v-edi-receipt-number
+			order by so-order-no desc so-bo-suffix desc
+			database-sql
+		detail
+			set v-edi-h-so-order-no = so-order-no
+			set v-edi-h-so-bo-suffix = so-bo-suffix
+			break
+		end-select
+		update edi-order-headers
+		on error
+		end-on
+	end-on
+	// rjb log 115-end---------------------------------------------------------------
+endprocedure
+
+procedure clibvedi-add-quick-link export no-override
+	parameters are
+		lp-receipt-number				like v-edi-receipt-number
+		lp-data-area					like ql-data-area
+		lp-path							like ql-path
+		lp-description					like ql-description
+	local fields
+		lf-quick-link-exists			type boolean
+		lf-sequence						like ql-sequence
+		lf-sql-receipt-str				type string
+	// Link Already Exists ?
+	set lf-quick-link-exists = FALSE
+	set lf-sequence = ZERO
+	set lf-sql-receipt-str = str(lp-receipt-number)
+	select * from quick-links
+		where ql-data-area = :lp-data-area
+		and ql-table = 'edi-order-headers'
+		and ql-key = :lf-sql-receipt-str
+		order by ql-data-area ql-table ql-key ql-sequence
+	detail
+		if ql-path = lp-path
+			set lf-quick-link-exists = TRUE
+		endif
+		set lf-sequence = ql-sequence
+	end-select
+	// Add Quick Link ?
+	if lf-quick-link-exists = FALSE
+		initialise quick-links
+		set ql-data-area = lp-data-area
+		set ql-table = 'edi-order-headers'
+		set ql-key = str(lp-receipt-number)
+		set ql-sequence = lf-sequence + 10
+		set ql-path = lp-path
+		set ql-description = lp-description
+		set ql-created-by-user = login-id()
+		set ql-date-time = gmt()
+		insert quick-links
+		on error
+		end-on
+	endif
+end-procedure
+
+procedure clibvedi-checkso
+	parameters are
+		lp-accountcode				like v-edi-h-accountcode
+		lp-so-ref					like v-edi-h-cust-reference
+	returning
+		lr-soexists					type boolean
+	local fields
+		lf-count 					type number
+		select lf-count = count(*) from sales-order
+			where so-cust-code = :lp-accountcode and so-cust-reference = :lp-so-ref
+			database-sql
+		detail
+		end-select
+		if lf-count > ZERO
+			set lr-soexists = TRUE
+		else
+			set lr-soexists = FALSE
+			select lf-count = count(*) from sales-order-archive
+				where so-cust-code = :lp-accountcode and so-cust-reference = :lp-so-ref
+				database-sql
+			detail
+			end-select
+			if lf-count > ZERO
+				set lr-soexists = TRUE
+			else
+				set lr-soexists = FALSE
+			endif
+		endif
+end-procedure
+
+procedure clibvedi-open-create-tables export
+	//
+	open edi-error-codes
+	on error ENOENT
+		open edi-error-codes create permanent
+		on error 
+			exit 1
+		endon
+	endon
+	//
+	open edi-order-errors
+	on error ENOENT
+		open edi-order-errors create permanent
+		on error 
+			exit 1
+		endon
+	endon
+	//
+	open edi-order-headers
+	on error ENOENT
+		open edi-order-headers create permanent
+		on error 
+			exit 1
+		endon
+	endon
+	//
+	open edi-order-lines
+	on error ENOENT
+		open edi-order-lines create permanent
+		on error 
+			exit 1
+		endon
+	endon
+	//
+	open edi-uom-conversions
+	on error ENOENT
+		open edi-uom-conversions create permanent
+		on error 
+			exit 1
+		endon
+	endon
+end-procedure
+
+procedure clibvedi-check-add-error-codes export
+	do add-error-code
+		parameters are 1,'Invalid account code','E'
+	do add-error-code
+		parameters are 2,'Cannot Determine A Delivery Address','E'
+	do add-error-code
+		parameters are 3,'Invalid item code','E'
+	do add-error-code
+		parameters are 4,'Invalid warehouse','E'
+	do add-error-code
+		parameters are 5,'Item not stocked in warehouse','E'
+	do add-error-code
+		parameters are 6,'Zero or negative quantity ordered','E'
+	do add-error-code
+		parameters are 7,'Customer price does not match Pronto','E'
+	do add-error-code
+		parameters are 8,'Delivery date less than todays date','E'
+	do add-error-code
+		parameters are 9,'Order date is greater than delivery date','E'
+	do add-error-code
+		parameters are 10,'Line cancelled','W'
+	do add-error-code
+		parameters are 11,'UOM does not match Pronto item UOM','W'
+	do add-error-code
+		parameters are 12,'Order Has No Lines','E'
+	do add-error-code
+		parameters are 13,'Delivery address has been supplied','W'
+	do add-error-code
+		parameters are 14,'Qty ordered not a multiple of pack qty','W'
+	do add-error-code
+		parameters are 15,'Account has been closed','E'
+	do add-error-code
+		parameters are 16,'Part Quantity Ordered','E'
+	do add-error-code
+		parameters are 17,'Order Already Exists','E'
+	do add-error-code
+		parameters are 18,'Possible duplicate order','E'
+	do add-error-code
+		parameters are 19,'Mandatory Telemarketing Notes exist','W'
+end-procedure
+
+procedure add-error-code
+parameters
+	lp-code								like v-edi-error-code
+	lp-desc								like v-edi-error-description
+	lp-type								like v-edi-error-type
+	//
+	get edi-error-codes
+		on index v-edi-error-code
+		key is lp-code
+	on error ENOREC
+		set v-edi-error-code = lp-code
+		set v-edi-error-description = lp-desc
+		set v-edi-error-type = lp-type
+		insert edi-error-codes
+		on error
+			exit 1
+		endon
+	endon
+end-procedure
+
+procedure clibvedi-check-create-folders export
+parameters 
+	lp-trading-partner-folder-name		pic x(1024) type string
+returning
+	lr-ok								type boolean
+	lr-message							type string
+local
+	lf-folders-required					pic x(20) type string occurs 8
+	i									type number
+	lf-cmd								pic x(1024) type string
+	lf-this-path						pic x(1024) type string
+	//
+	set lr-ok = TRUE
+	get system-companies
+		on index sys-comp-code
+		key is sys-consolidation-division
+	on error ENOREC
+		set lr-ok = FALSE
+		set lr-message = "Unable to locate companies record"
+		exit 1
+	endon
+	if sys-comp-path = spaces
+		set lr-ok = FALSE
+		set lr-message = concat("Cannot determine company path")
+		exit 1
+	endif
+	set lf-folders-required[1] = 'in'
+	set lf-folders-required[2] = 'in_error'
+	set lf-folders-required[3] = 'in_pronto'
+	set lf-folders-required[4] = 'in_save'
+	set lf-folders-required[5] = 'out'
+	set lf-folders-required[6] = 'out_error'
+	set lf-folders-required[7] = 'out_pronto'
+	set lf-folders-required[8] = 'out_error'
+	//
+	for i = 1 to occurence(lf-folders-required)
+		set lf-this-path = str-concat(sys-comp-path 
+									"/edi/" 
+									lf-folders-required[i] 
+									"/" 
+									lp-trading-partner-folder-name)
+		if file-exists(lf-this-path,FALSE) = 0
+			set lf-cmd = concat("mkdir -p " lf-this-path)
+			message lf-cmd
+			command "sh" parameters are "-c" lf-cmd
+			on error
+			endon
+		endif
+		if file-exists(lf-this-path,FALSE) = 0
+			set lr-ok = FALSE
+			set lr-message = concat("Folder not created:" lf-this-path)
+			exit 1
+		endif
+	end-for
+end-procedure
+
+procedure clibvedi-get-status-desc export
+parameters
+	lp-edi-status				like v-edi-h-status
+returning
+	lr-desc						pic x(40) type string
+	switch on lp-edi-status
+		case ' '
+			set lr-desc = 'Received'
+		case IEDI_EXCEPTION
+			set lr-desc = 'Exception (either Warning or Error)'
+		case IEDI_LOADING
+			set lr-desc = 'Loading'
+		case IEDI_LOADED
+			set lr-desc = 'Loaded'
+		case IEDI_CANCELLED
+			set lr-desc = 'Cancelled'
+		else
+			set lr-desc = '** Unknown'
+	end-switch
+end-procedure
+
+procedure clibvedi-get-line-status-desc export
+parameters
+	lp-edi-l-status				like v-edi-l-status
+returning
+	lr-desc						pic x(40) type string
+	switch on lp-edi-l-status
+		case ' '
+			set lr-desc = 'Received'
+		case IEDI_L_EXCEPTION
+			set lr-desc = 'Exception (either Warning or Error)'
+		case IEDI_L_LOADED
+			set lr-desc = 'Loaded'
+		case IEDI_L_CANCELLED
+			set lr-desc = 'Cancelled'
+		else
+			set lr-desc = '** Unknown'
+	end-switch
+end-procedure

@@ -1,0 +1,194 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : Get exchange rates from European Central Bank
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2014
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: clib/clibvecbfx.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 21Oct14  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+/*
+
+	This documentation is in RST format.  To view this as a nice pdf goto
+	https://overbits.herokuapp.com/rsteditor/ or rst.ninjs.org and paste this content.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|           |           |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+
+	Alternatively
+
+	 =========== =========== ======================================================== 
+	  Direction   Data Type   Description                                             
+	 =========== =========== ======================================================== 
+	 =========== =========== ======================================================== 
+
+==========
+clibvecbfx
+==========
+
+	Get exchange rates from the European Central Bank.
+	
+	This code can be used in further program to update pronto files etc.
+
+
+clibvecbfx-get-rate 
+~~~~~~~~~~~~~~~~~~~
+
+	Get the rates and effective date
+
+	 =========== =========== ======================================================== 
+	  Direction   Data Type   Description                                             
+	 =========== =========== ======================================================== 
+	     In       String 3   International FROM currency code
+	     In       String 3   International TO currency code
+		 Out	  Number   	 Exchange rate
+		 Out      Date       The effective date
+	 =========== =========== ======================================================== 
+
+
+*/
+ 
+#include "../include/i8secabt.spl"
+#include "../include/i8proglogparam.spl"
+
+#define DEBUG
+ 
+field
+	ws-function-title						type string
+	ws-rtn-xml								type blob
+	ws-have-xml								type boolean
+
+object mem-curr								
+	type is memory
+	record is 
+		mc-currency							type string pic x(5)
+		mc-rate								type number
+		mc-date								type date
+	end-record
+	key is mc-currency
+
+procedure library-init
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8proglogparam-write-log parameters "clibvecbfx"
+	set ws-have-xml = false
+	open mem-curr temporary
+#ifdef DEBUG
+	report "debug"
+#endif
+end-procedure
+
+procedure clibvecbfx-get-rate export
+parameters
+	lp-from-curr							type string
+	lp-to-curr								type string
+returning
+	lr-rate									type number
+	lr-date									type date
+local
+	// all rates on the file are to the EUR.
+	lf-from-rate							type number
+	lf-to-rate								type number
+//
+	if not ws-have-xml
+		do build-mem-curr
+		set ws-have-xml = true
+	endif
+	get mem-curr
+		on index mc-currency
+		key is lp-from-curr					
+	on error
+		set lf-from-rate = 0
+		exit
+	else
+		set lf-from-rate = mc-rate
+	endon
+	get mem-curr
+		on index mc-currency
+		key is lp-to-curr					
+	on error
+		set lf-to-rate = 0
+		exit
+	else
+		set lf-to-rate = mc-rate
+	endon
+	set lr-rate = lf-to-rate / lf-from-rate
+	set lr-date = mc-date
+end-procedure
+
+procedure build-mem-curr
+returning 
+	lr-error								type boolean
+local 
+	lf-header								type blob
+	lf-doc									type xml-handle
+	lf-root									type xml-handle
+	lf-cube									type xml-handle
+	lf-cube-date							type xml-handle
+	lf-cube-curr							type xml-handle
+	lf-date									type date
+	lf-rate									type number
+//	call-url "http://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml"
+	call-url "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml"
+		returning 
+			http-header lf-header
+			http-body ws-rtn-xml
+	on error
+		set lr-error = true
+#ifdef DEBUG
+		print "failed"
+#endif
+	else
+#ifdef DEBUG
+		if write-blob-to-file(ws-rtn-xml ,  '/tmp/fxblob.txt') endif
+#endif
+		set lr-error = true
+		set lf-doc = xml-parse-text(ws-rtn-xml)
+		if not lf-doc
+			set lr-error = true
+		endif
+		set lf-root = xml-get-root-node(lf-doc)
+		if not lf-root
+			set lr-error = true
+		endif
+		set lf-cube = xml-get-child-by-name(lf-root,"Cube",spaces)
+		if not lf-cube
+			set lr-error = true
+		endif
+		set lf-cube-date = xml-get-child-by-name(lf-cube,"Cube",spaces)
+		if not lf-cube-date
+			set lr-error = true
+		endif
+		set mc-date = date-to-julian(xml-get-node-attribute(lf-cube-date,"time"))
+		set lf-cube-curr = xml-get-first-child-node(lf-cube-date)
+		while lf-cube-curr
+			set mc-currency = xml-get-node-attribute(lf-cube-curr,"currency")
+			set mc-rate = num(xml-get-node-attribute(lf-cube-curr,"rate"))
+			insert mem-curr
+			on error endon
+			set lf-cube-curr = xml-get-next-node(lf-cube-curr)
+		end-while
+		set mc-currency = "EUR"
+		set mc-rate = 1
+		insert mem-curr
+#ifdef DEBUG
+		if not xml-save-as-file(lf-doc,"/tmp/body.xml", "UTF-8",2) 
+			print "Could not save"
+		endif
+#endif
+		set lr-error = false
+	endon
+end-procedure
+

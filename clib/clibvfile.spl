@@ -1,0 +1,895 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : clibvfile - a Collection of tools for working with text files
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2013
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: clib/clibvfile
+//
+// Modification History
+// Date		Who	SDR		What
+////////////////////////////////////////////////////////////////////////////////
+//
+/*
+	This documentation is in RST format.  To view this as a nice pdf goto
+	https://overbits.herokuapp.com/rsteditor/ or rst.ninjs.org and paste this content.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|           |           |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+
+	Alternatively
+
+	 =========== =========== ======================================================== 
+	  Direction   Data Type   Description                                             
+	 =========== =========== ======================================================== 
+	 =========== =========== ======================================================== 
+
+=========
+clibvfile
+=========
+
+	A selection of utilities for dealing with text files.
+
+clibvfile-display-text-file 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	Display the contents of text file in a datagrid
+
+	 =========== =========== ===========================================================
+	  Direction   Data Type   Description                                             
+	 =========== =========== ===========================================================
+	      In     String 256  Full path to the file
+		  In     Number      The maximum number of characters to display from each line
+		  In     String 256  An optional title.  If spaces then the file name is used.
+	 =========== =========== ===========================================================
+
+clibvfile-get-validated-filename 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	Prompt the user to enter a file and return the filename
+	Parameters control whether the file must or must not exist and whether the
+	file is on the server or the client
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 20  |Must be one of:                                         |
+	|           |           |                                                        |
+	|           |           |- "MUSTEXIST"                                           |
+	|           |           |- "MUSTNOTEXIST"                                        |
+	|           |           |- "NOCHECK"                                             |
+	|           |           |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |String 20  |Must be one of:                                         |
+	|           |           |                                                        |
+	|           |           |- "SERVER"                                              |
+	|           |           |- "CLIENT"                                              |
+	|           |           |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |String 1k  |Default file name                                       |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |String 1k  |Filename user selected.                                 |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvfile-chooser 
+~~~~~~~~~~~~~~~~~
+
+	Display a list of filenames in a data grid and allow the user to choose either a
+	file or directory.  User can navigate directores
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|  In       |String 40  |Filter to apply to filenames.                           |
+	|           |           |                                                        |
+	|           |           |As per standard pronto pattern function                 |
+	+-----------+-----------+--------------------------------------------------------+
+	|  In       |String 100 |The full path to the intial directory                   |
+	+-----------+-----------+--------------------------------------------------------+
+	|  Out      |String 100 |The name of the file the user selected                  |
+	+-----------+-----------+--------------------------------------------------------+
+	|  Out      |String 100 |The path to the selected file.                          |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvfile-folder-chooser
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+	This is the same as the file chooser but it is limited to folder names only.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|  In       |String 100 |The full path to the intial directory                   |
+	+-----------+-----------+--------------------------------------------------------+
+	|  Out      |String 100 |The path to the selected file.                          |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvfile-split
+~~~~~~~~~~~~~~~
+	This routine will take a long string and split it up into fields
+	and return a maximum of 100 strings as an array.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 1k  |An input string                                         |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |String 1   |The character to use as a separator                     |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |String 256 |A String array of the fields found.                     |
+	|           |Occurs 100 |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |number     |The number of fields found in the input string          |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvfile-get-parts 
+~~~~~~~~~~~~~~~~~~~
+	Splits a given full path to a file into it's constituent parts
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 1k  |Full path to a file                                     |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |String 20  |Drive name or unc name                                  |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |String 1k  |Path excluding the file name                            |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |String 1k  |File name excluding any extension                       |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |String 20  |File extension                                          |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvfile-pathlist-to-array
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	Splits a list of spearated path (such as PATH or PROPATH) into an array for ease of 
+	processing
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|  In       | String    | Contents of path list                                  |
+	+-----------+-----------+--------------------------------------------------------+
+	|  In       | Char      | Separator (usually ":")                                |
+	+-----------+-----------+--------------------------------------------------------+
+	|  Out      | String Arr| Array of strings (max 100)                             |
+	+-----------+-----------+--------------------------------------------------------+
+
+*/
+#define RGB(R,G,B) \
+     RGB_TO_PRONTO(R,G,B)
+#define RGB_TO_PRONTO(R,G,B) \
+     rgb-to-colour((B * 256 * 256) + (G * 256) + R)
+
+#include "../include/i8proglogparam.spl"
+
+object text-file
+	type is text
+	record is
+		text-line						type varchar pic x(4000)
+	end-record
+
+object textfile-mem
+	type is memory
+	record is
+		m-no							pic 9(6)
+		m-text							type varchar
+	end-record
+	key is m-no
+
+object clibvfile-file-list
+	type isam
+	record
+		clibvfile-file-name 				type string pic x(100)
+		clibvfile-time 					type date 
+		clibvfile-type 					type string pic x
+		clibvfile-full-dir				type string pic x(100)
+	end-record
+	key is clibvfile-type clibvfile-file-name
+
+mode clibvfile-filter
+	prompt "Fi&lter"
+
+mode clibvfile-fselect
+	prompt "Select"
+
+mode clibvfile-cd
+	prompt "Fol&der"
+
+mode clibvfile-down
+	prompt "D&rill"
+	help "Drill down into this folder"
+
+
+procedure library-init
+	get system-control first
+	on error
+	endon
+	do i8proglogparam-write-log parameters are "clibvfile"
+end-procedure
+
+procedure main
+	get system-control first
+	on error
+	endon
+	do testrig
+end-procedure
+
+procedure clibvfile-display-text-file export
+parameters are
+	lp-filename							pic x(256) type string
+	lp-max-len							type number
+	lp-title							pic x(256) type string
+local
+	lf-count							type number
+	i 									type number
+//	
+	open text-file
+		file is lp-filename
+	on error
+		acknowledge "Unable to open"
+		acknowledge "File:" lp-filename
+		acknowledge "Errorno:" file-status()
+		acknowledge "Error:" error-description(file-status())
+	else
+		set lf-count = 0
+		open textfile-mem temporary
+		select * from text-file
+		detail
+			if lp-max-len = 0
+			set lf-count += 1
+			set m-no = lf-count
+			set m-text = text-line
+			insert textfile-mem
+			else
+				while str-len(text-line) > lp-max-len
+					set lf-count += 1
+					set m-no = lf-count
+					set m-text = sub-string(text-line,1,lp-max-len)
+					insert textfile-mem
+					string text-line deleting 1 to lp-max-len
+				end-while
+				// swap tabs for spaces....
+				repeat
+					set i = pattern(text-line,ascii-char(9)) 
+				until i = 0
+					string text-line deleting i to i
+					string text-line inserting "    " at i
+				end-repeat
+				set lf-count += 1
+				set m-no = lf-count
+				set m-text = text-line
+				insert textfile-mem
+			endif
+		end-select
+		if lp-title = spaces
+			set lp-title = lp-filename
+		endif
+		do display-file parameters are lp-title
+	end-on
+end-procedure
+
+screen display-file
+parameters
+	lp-title							type varchar
+	window
+	title lp-title
+	datagrid occurs 22
+	allowed search 
+	no-prompt-for-search
+	select * from textfile-mem
+detail
+	accept m-no @1,1
+		title "Line"
+		colour RGB(153,153,153)
+	display m-text @1,4 
+		title "Text"
+		fixed-width-font
+end-screen
+
+
+//--------------------------------------------------------------------------------
+//   File Picker
+//--------------------------------------------------------------------------------
+
+procedure clibvfile-get-validated-filename export
+parameters
+	lp-check-flag					pic x(20) //  "MUSTEXIST" "MUSTNOTEXIST" "NOCHECK"
+	lp-check-where					pic x(20) // "SERVER" "CLIENT"
+	lp-default						pic x(1024) type string
+returning
+	lr-file							pic x(1024)
+	do validated-filename entry once
+		parameters are lp-check-flag lp-check-where lp-default
+		returning lr-file
+endprocedure
+
+screen validated-filename 
+// this procedure is generally used to allow users to enter a file that will
+// be used for an output file.
+parameters
+	lp-check-flag					pic x(20) //  "MUSTEXIST" "MUSTNOTEXIST" "NOCHECK"
+	lp-check-where					pic x(20) // "SERVER" "CLIENT"
+	lp-default						pic x(1024) type string
+returning
+	lr-file							pic x(1024) type string
+local
+	lf-file-entered					type boolean
+	lf-on-pc						type boolean
+	//
+	window @1,1 to @5,70
+	title "Enter File Name"
+	form-entry
+	no-ok-cancel
+//
+before
+	if lp-check-flag not in { "MUSTEXIST" "MUSTNOTEXIST" "OVERWRITE" "NOCHECK" }
+		message "Invalid check flag"
+		exit
+	endif
+	if lp-check-where not in { "SERVER"  "CLIENT" }
+		message "Invalid location flag"
+		exit
+	endif
+	if lp-check-where = "SERVER"  
+		set lf-on-pc = FALSE
+	else
+		set lf-on-pc = TRUE
+	endif
+	set lf-file-entered = FALSE
+detail
+	accept lr-file @2,20 pic x(50)
+		title "File Name"
+		default lp-default
+	validations
+		set lf-file-entered = TRUE
+		if lp-check-flag  = "MUSTEXIST" and file-exists(lr-file,lf-on-pc) <> 1
+			message-box "File Does not exist or is a directory"
+				title is "Enter File Name"
+				message-buttons MSG_BOX_RETRY
+			re-enter lr-file
+		elseif lp-check-flag  = "MUSTNOTEXIST" and file-exists(lr-file,lf-on-pc) = 1
+			message-box "File Already exists"
+				title is "Enter File Name"
+				message-buttons MSG_BOX_RETRY
+			re-enter lr-file
+		elseif lp-check-flag  = "OVERWRITE" and file-exists(lr-file,lf-on-pc) = 2 
+			message-box "Entered item is a directory"
+				title is "Enter File Name"
+				message-buttons MSG_BOX_RETRY
+			re-enter lr-file
+		elseif lp-check-flag  = "OVERWRITE" and file-exists(lr-file,lf-on-pc) = 1 
+			message-box param-text("File Exists<<BR>>Ok to overwrite?")
+				title is "Enter File Name"
+				message-buttons MSG_BOX_YES_NO_CANCEL
+				icon MSG_BOX_QUESTION
+			if message-status = MSG_BOX_NO
+				reenter lr-file
+			elseif message-status = MSG_BOX_CANCEL
+				set lr-file = spaces
+			endif
+		endif
+	end-validations
+after
+	if lf-file-entered = FALSE // user escaped.
+		set lr-file = spaces
+	endif
+end-screen
+
+procedure clibvfile-folder-chooser export
+parameters
+	lp-initial-folder					pic x(1024) type string
+returning
+	lr-selected-folder					pic x(1024) type string
+	//
+local
+	lf-reentry							type boolean
+	if lp-initial-folder = spaces
+		set lp-initial-folder = str-concat(get-env("PWD"))
+	endif
+	do standardise-slash parameters are lp-initial-folder returning lp-initial-folder
+	if not file-exists(lp-initial-folder,FALSE)
+		message "Invalid Folder:" lp-initial-folder
+	endif
+	repeat
+		do chooser-select-folder
+			parameters are lp-initial-folder
+			returning lr-selected-folder lf-reentry lp-initial-folder
+	until not lf-reentry 
+	end-repeat
+	set lr-selected-folder = lp-initial-folder
+end-procedure
+
+screen chooser-select-folder
+parameters are
+	lp-start-dir						type string pic x(100)
+returning
+	lr-folder							type string pic x(100)
+	lr-reentry							type boolean
+	lr-full-dir							type string pic x(100)
+local
+	l-search-dir						type string pic x(100)
+	l-count								type number
+	i									type number
+	lf-file-selected					type boolean
+	//
+	select * from clibvfile-file-list
+	datagrid occurs 22
+	allowed are clibvfile-down clibvfile-fselect search clibvfile-cd
+	window @1,1 to @24,80
+	title str-concat("Folders :",lp-start-dir)
+	no-prompt-for-search
+before
+	set lf-file-selected = FALSE
+	set l-search-dir = lp-start-dir
+	open clibvfile-file-list
+		temporary
+		lock
+	on error
+		abort "Cannot create temp file"
+	end-on
+	// find all the directories first
+	if START-DIR-SEARCH (l-search-dir,"?*")  
+		repeat
+			set l-count += 1
+			initialise clibvfile-file-list
+			set clibvfile-type = "d"
+			set clibvfile-file-name = NEXT-DIR-ENTRY()
+		until clibvfile-file-name = spaces
+			if is-a-dir(str-concat(l-search-dir,"/",clibvfile-file-name))
+			and clibvfile-file-name != "."
+				set clibvfile-full-dir = str-concat(l-search-dir,"/",clibvfile-file-name)
+				insert clibvfile-file-list
+				on error
+					message "cannot insert record" 
+						error-description(file-status())
+				end-on
+			endif
+		end-repeat
+		if FINISH-DIR-SEARCH 
+		end-if
+	end-if
+	// now find the selected files
+	position clibvfile-file-list first	
+#if BMS_DICT_VER <7600
+	refresh data
+#endif
+detail
+	accept clibvfile-file-name @1,3 pic x(65)
+		colour if-then-else(clibvfile-type = "d",Red,Black)
+		title "File Name"
+	display clibvfile-time @1,70 pic dd-mmm-yy
+		title "Last Changed"
+confirm auto
+	if screenmode = clibvfile-cd
+		do chooser-get-folder parameters are l-search-dir
+			returning lr-full-dir
+		set lr-reentry = TRUE
+		set lf-file-selected = FALSE
+		exit
+	endif
+	if screen-mode() = clibvfile-down
+		set lr-folder = clibvfile-file-name	
+		set lr-reentry = TRUE
+		set lr-full-dir = clibvfile-full-dir
+		if clibvfile-file-name = ".."
+			for i = strlen(l-search-dir) down to 1
+				if substring(l-search-dir,i,i) in ( "/" "\" )
+					set lr-full-dir = substring(l-search-dir,1,i - 1)
+					exit
+				endif
+			end-for
+		endif
+//		set lr-full-dir = clibvfile-full-dir
+		exit
+	end-if
+	if screen-mode() = clibvfile-fselect
+		set lr-folder = clibvfile-file-name	
+		set lf-file-selected = TRUE
+		set lr-full-dir = clibvfile-full-dir
+		exit
+	end-if
+end-confirm
+after
+	if lf-file-selected
+		set lr-full-dir = clibvfile-full-dir
+		set lr-folder = clibvfile-file-name 
+	endif
+end-screen
+
+procedure clibvfile-chooser export
+parameters are
+	lp-filter							type string 
+	lp-dir-spec							type string pic x(100)
+returning
+	lr-file-spec						type string pic x(100)
+	lp-dir-spec 
+local
+	lf-reentry							type boolean
+	if lp-filter = spaces
+		set lp-filter = "?*"
+	endif
+	if lp-dir-spec = spaces
+		set lp-dir-spec = str-concat(get-env("PWD"))
+	endif
+	do standardise-slash parameters are lp-dir-spec returning lp-dir-spec
+	if not file-exists(lp-dir-spec,FALSE)
+		message "Invalid Folder:" lp-dir-spec
+	endif
+	repeat
+		do chooser-select-file
+			parameters are lp-filter lp-dir-spec
+			returning lr-file-spec lf-reentry lp-dir-spec lp-filter 
+	until not lf-reentry 
+	end-repeat
+end-procedure
+
+screen chooser-select-file
+parameters are
+	lp-filter							type string pic x(100)
+	lp-start-dir						type string pic x(100)
+returning
+	lr-file-spec						type string pic x(100)
+	lr-reentry							type boolean
+	lr-full-dir							type string pic x(100)
+	lp-filter 
+local
+	lf-filter							type string pic x(100)
+	l-search-dir						type string pic x(100)
+	lp-filter-new						type string pic x(100)
+	l-count								type number
+	l-date-time							type number
+	i									type number
+	lf-file-selected					type boolean
+	select * from clibvfile-file-list
+	datagrid occurs 22
+	allowed are clibvfile-fselect search clibvfile-filter clibvfile-cd
+	window @1,1 to @24,80
+	title str-concat("Files :",lp-start-dir,"/",lp-filter)
+	no-prompt-for-search
+before
+	set lf-file-selected = FALSE
+	set l-search-dir = lp-start-dir
+	open clibvfile-file-list
+		temporary
+		lock
+	on error
+		abort "Cannot create temp file"
+	end-on
+	// find all the directories first
+	if START-DIR-SEARCH (l-search-dir,"?*")  
+		repeat
+			set l-count += 1
+			initialise clibvfile-file-list
+			set clibvfile-type = "d"
+			set clibvfile-file-name = NEXT-DIR-ENTRY()
+		until clibvfile-file-name = spaces
+			if is-a-dir(str-concat(l-search-dir,"/",clibvfile-file-name))
+			and clibvfile-file-name != "."
+				set clibvfile-file-name = clibvfile-file-name
+				set clibvfile-full-dir = str-concat(l-search-dir,"/",clibvfile-file-name)
+				insert clibvfile-file-list
+				on error
+					message "cannot insert record" 
+						error-description(file-status())
+				end-on
+			endif
+		end-repeat
+		if FINISH-DIR-SEARCH 
+		end-if
+	end-if
+	// now find the selected files
+	do chooser-set-internal-filter parameters are lp-filter returning lf-filter
+	if START-DIR-SEARCH (l-search-dir,lf-filter)
+		repeat
+			set l-count += 1
+			initialise clibvfile-file-list
+			set clibvfile-type = "f"
+			set clibvfile-file-name = NEXT-DIR-ENTRY()
+		until clibvfile-file-name = spaces
+			if is-a-dir(str-concat(l-search-dir,"/",clibvfile-file-name))
+				continue
+			endif
+			set l-date-time = modification-time(
+				str-concat(concat(l-search-dir,"/"),clibvfile-file-name)
+				)
+			set clibvfile-time = date-from-date-time(l-date-time,0)
+			set clibvfile-full-dir = str-concat(l-search-dir)
+			insert clibvfile-file-list
+			on error
+				message "cannot insert record" error-description(file-status())
+			end-on
+		end-repeat
+		if FINISH-DIR-SEARCH 
+		end-if
+	end-if
+	position clibvfile-file-list first	
+#if BMS_DICT_VER <7600
+	refresh data
+#endif
+detail
+	accept clibvfile-file-name @1,3 pic x(65)
+		colour if-then-else(clibvfile-type = "d",Red,Black)
+		title "File Name"
+	display clibvfile-time @1,70 pic dd-mmm-yy
+		title "Last Changed"
+confirm auto
+	if screen-mode() = clibvfile-filter
+		do chooser-get-filter entry once
+			parameters are lp-filter
+			returning lp-filter-new
+		set lp-filter = lp-filter-new
+		refresh
+	end-if 
+	if screenmode = clibvfile-cd
+		do chooser-get-folder parameters are l-search-dir
+			returning lr-full-dir
+		set lr-reentry = TRUE
+		set lf-file-selected = FALSE
+		exit
+	endif
+	if screen-mode() = clibvfile-fselect
+		set lr-file-spec = clibvfile-file-name	
+		if clibvfile-type = "d"
+			set lr-reentry = TRUE
+			set lr-full-dir = clibvfile-full-dir
+			if clibvfile-file-name = ".."
+				for i = strlen(l-search-dir) down to 1
+					if substring(l-search-dir,i,i) in ( "/" "\" )
+						set lr-full-dir = substring(l-search-dir,1,i - 1)
+						exit
+					endif
+				end-for
+			endif
+		else
+			set lf-file-selected = TRUE
+		endif
+		set lr-full-dir = clibvfile-full-dir
+		exit
+	end-if
+end-confirm
+after
+	if lf-file-selected
+		set lr-full-dir = clibvfile-full-dir
+		set lr-file-spec = clibvfile-file-name 
+	endif
+end-screen
+
+screen chooser-get-folder
+parameters are
+	lp-folder type string pic x(100)
+returning
+	lr-folder type string pic x(100)
+	window @1,1 to @4,50
+	title "Folder Entry"
+	allowed are correct
+detail
+	accept lr-folder @2,20 pic x(30) 
+		default is lp-folder
+		title "Folder"
+	validations
+		if not file-exists(lr-folder,FALSE)
+			message rtrim(lr-folder) " does not exist"
+			re-enter
+		endif
+	end-validations
+after
+	if not file-exists(lr-folder,FALSE)
+		set lr-folder = lp-folder
+	endif
+	do standardise-slash parameters are lr-folder returning lr-folder
+end-screen
+
+screen chooser-get-filter
+	parameters are
+		l-filter type string pic x(100)
+	returning
+		l-filternew type string pic x(100)
+	window @10,10 to @14,60
+	title "Filter Entry"
+	allowed are correct
+before
+	clear
+	display "File search pattern :" @11,10
+detail
+	accept l-filternew @11,35 pic x(10) 
+		default is l-filter
+	do chooser-set-internal-filter
+		parameters l-filternew 
+		returning l-filternew 
+end-screen
+
+procedure chooser-set-internal-filter
+parameters are
+	l-user-filter			type string pic x(100)
+returning 
+	l-internal-filter 		type string pic x(100)
+local 
+	i						type number
+	for i = 1 to str-len(l-user-filter)
+		if substring(l-user-filter,i,i) = "*"
+			string l-internal-filter appending "?*"
+		elseif substring(l-user-filter,i,i) = "?"
+			string l-internal-filter appending "?"
+		else
+			string l-internal-filter appending substring(l-user-filter,i,i) 
+		endif
+	endfor
+end-procedure
+
+procedure clibvfile-split export
+// This routine will take a long string and split it up into fields
+// and return a maximum of 100 strings as an array.
+parameters
+	lp-input							pic x(1024) type string
+	lp-separator						pic x
+returning
+	lr-fields							pic x(256) type string occurs 100
+	lr-populated-fields					type number
+local
+	i 									type number
+	lf-work-field						pic x(1024) type string
+	lf-next-sep							type number
+	lf-quote-char						pic x
+//
+	set lf-work-field = lp-input
+	set i = 1
+	// 
+	repeat
+		if substring(lf-work-field,1,1) = '"'
+		or substring(lf-work-field,1,1) = "'"
+		// then there are quotes around strings so the next comma can only be
+		// after the ending quote.
+			set lf-quote-char = substring(lf-work-field,1,1)
+			set lf-next-sep = pattern(lf-work-field,concat(lf-quote-char,lp-separator)) + 1 
+									// add one because the pattern starts at the qute char
+		else
+			set lf-next-sep = pattern(lf-work-field,lp-separator)
+		endif
+	until lf-next-sep = 0 or str-len(lf-work-field) = 0
+		set lr-fields[i] = substring(lf-work-field,1,lf-next-sep - 1)
+		set lr-populated-fields += 1
+		set i += 1
+		string lf-work-field deleting 1 to lf-next-sep 
+	end-repeat
+	if str-len(lf-work-field) > 0
+		set lr-fields[i] = lf-work-field
+		set lr-populated-fields += 1
+	endif
+	// trim and trailing and leading double quotes
+	for i = 1 to occurence(lr-fields)
+		if substring(lr-fields[i],1,1) = '"'
+		or substring(lr-fields[i],1,1) = "'"
+			string lr-fields[i] deleting 1 to 1
+		endif
+		if substring(lr-fields[i],strlen(lr-fields[i]),strlen(lr-fields[i])) = '"'
+		or substring(lr-fields[i],strlen(lr-fields[i]),strlen(lr-fields[i])) = "'"
+			string lr-fields[i] deleting strlen(lr-fields[i]) to strlen(lr-fields[i]) 
+		endif
+	end-for
+end-procedure
+
+procedure clibvfile-get-parts export
+parameters
+	lp-filename				pic x(1024) type string
+returning
+	lr-drive				pic x(20) type string // unc or pc drive
+	lr-path					pic x(1024) type string
+	lr-basename				pic x(1024) type string
+	lr-extension			pic x(20) type string
+local
+	lf-work					pic x(1024) type string
+	i						type number
+	lf-found				type boolean
+//
+	if lp-filename = spaces
+		exit
+	endif
+	set lf-work = lp-filename
+	// start at the end
+	set i = pattern(lf-work, ".") 
+	if i > 0
+		set lr-extension = sub-string(lf-work,i + 1,strlen(lf-work))
+		string lf-work deleting i to str-len(lf-work)
+	endif
+	// ensure all slashes are either one way or the other
+	for i = 1 to str-len(lf-work)
+		if substring(lf-work,i,i) = "\"
+			string lf-work replacing "/" at i
+		endif
+	endfor
+	set lf-found = false
+	// find the last slash
+	for i = str-len(lf-work) down to 1
+		if sub-string(lf-work,i,i) = "/"
+			set lf-found = true
+			set lr-basename = substring(lf-work,i + 1,strlen(lf-work))
+			string lf-work deleting i to strlen(lf-work)
+			break
+		endif
+	endfor
+	if not lf-found
+		set lr-basename = lf-work
+		exit
+		// there are no other parts
+	endif
+	if lf-work = spaces
+		// there is no path or drive
+		exit
+	endif
+	// must be some left over
+	if substring(lf-work,1,2) = "//"
+		// find next slash
+		string lf-work deleting 1 to 2
+		set i = pattern(lf-work,"/")
+		if i = 0
+			// something wrong
+			exit
+		else
+			set lr-drive = substring(lf-work,1,i - 1)
+			string lf-work deleting 1 to i  - 1
+			set lr-path = lf-work
+		endif
+	elseif substring(lf-work,2,2) = ":"
+		// then there is a drive
+		set lr-drive = substring(lf-work,1,2)
+		string lf-work deleting 1 to 2
+		set lr-path = lf-work
+	else
+		set lr-path = lf-work
+	endif
+end-procedure
+
+procedure standardise-slash
+parameters
+	lp-path								pic x(500) type string
+returning
+	lr-path								pic x(500) type string
+local
+	i									type number
+	//
+	set lr-path = lp-path
+	for i = 1 to str-len(lr-path)
+		if substring(lr-path,i,i) = "\"
+			string lr-path replacing "/" at i
+		endif
+	endfor
+end-procedure
+
+procedure clibvfile-pathlist-to-array export
+parameters
+	lp-path-list						pic x(1024) type string
+	lp-separator						pic x // usually ":"
+returning
+	lr-paths							pic x(256) occurs 100
+local
+	lf-offset							type number
+//
+// Convert a path list such as PATH or PROPATH into an array of paths
+// 
+	set lf-offset = 1
+	while lp-path-list != spaces
+		if substring(lp-path-list,1,1) = lp-separator
+			set lf-offset += 1
+		else
+			string lr-paths[lf-offset] appending substring(lp-path-list,1,1)
+		endif
+		string lp-path-list deleting 1 to 1
+	end-while
+end-procedure
+
+
+procedure testrig
+local
+	lf-folder							pic x(500) type string
+	do clibvfile-folder-chooser parameters are "/pro/pronto/cus"
+	returning  lf-folder
+	message lf-folder
+end-procedure

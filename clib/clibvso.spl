@@ -1,0 +1,34 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : 
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2022
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: clib/clibvso.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 17Aug22  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+ 
+field
+	ws-function-title						type string
+
+procedure main
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8secabt-check-abort
+		parameters are sys-consolidation-division login-id() "EMS" "X000"
+		returning ws-function-title 
+	do i8proglog-write-log
+end-procedure
+

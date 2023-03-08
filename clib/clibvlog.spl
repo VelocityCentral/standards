@@ -1,0 +1,343 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : clibvlog - clibwrtevntlog wrapper.
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2018
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: clib/clibvlog.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 15Aug18  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+/*
+
+	This documentation is in RST format.  To view this as a nice pdf goto
+	https://overbits.herokuapp.com/rsteditor/ or rst.ninjs.org and paste this content.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|           |           |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+
+	Alternatively
+
+	 =========== =========== ======================================================== 
+	  Direction   Data Type   Description                                             
+	 =========== =========== ======================================================== 
+	 =========== =========== ======================================================== 
+
+========
+clibvlog
+========
+
+Use this collection of clibs to write messages to the system event log.
+
+sel-type in the event log is always "APPS"
+
+sel-event-code in the event log is the name of the program followed by the process-id of this
+occurrence of the program.  The two values are separated by a space.
+
+You can also print all the messages created by this instance of the routine.
+
+Particularly useful for batch programs, clibs and api's.
+
+Each event is classified as Emergency, Alert, Critical, Error, Warning, Notice, Info or Debug.
+
+A count of the number of each level of messages is kept (and can be re-initialised at any time)
+
+clibvlog-xxxxxxxxx 
+~~~~~~~~~~~~~~~~~~
+
+Create an event log entry of the type specified by xxxxxxxx
+
+.. Note:: There are are eight of these procedures:
+
+	- clibvlog-emergency
+	- clibvlog-alert
+	- clibvlog-critical
+	- clibvlog-error
+	- clibvlog-warning
+	- clibvlog-notice
+	- clibvlog-info
+	- clibvlog-debug
+
+Parameters 
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|  In       |String 1k  |Message text                                            |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvlog-initialise-counters 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	Reinitialise the counters of each event type.
+
+clibvlog-get-counter-above 
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	Return a count of all the errors raised from a specific level and above (above
+	in this context means of higher severity)
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 30  |Text of the level you want count of.  Must be one of:   |
+	|           |           |                                                        |
+	|           |           | - EMERGENCY                                            |
+	|           |           | - ALERT                                                |
+	|           |           | - CRITICAL                                             |
+	|           |           | - ERROR                                                |
+	|           |           | - WARNING                                              |
+	|           |           | - NOTICE                                               |
+	|           |           | - INFO                                                 |
+	|           |           | - DEBUG                                                |
+	|           |           |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|  Out      |Number     |Count of errors of this level and above                 |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvlog-print-events 
+~~~~~~~~~~~~~~~~~~~~~
+
+	Print a report of all errors ** for this process only ** from a specified date and time.
+
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |datetime   |The starting date and time (zero acceptable)            |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |String 30  |Minimum level. Must be one of:                          |
+	|           |           |                                                        |
+	|           |           | - EMERGENCY                                            |
+	|           |           | - ALERT                                                |
+	|           |           | - CRITICAL                                             |
+	|           |           | - ERROR                                                |
+	|           |           | - WARNING                                              |
+	|           |           | - NOTICE                                               |
+	|           |           | - INFO                                                 |
+	|           |           | - DEBUG                                                |
+	|           |           |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+*/
+ 
+#include "../include/i8proglogparam.spl"
+#include "../include/iwrtevntlog.spl"
+ 
+#define LOGLEVEL_DESC(A) \
+	if-then-else(A = IWRTEVNTLOG_LEVEL_EMERGENCY, 'EMERGENCY' \
+		,if-then-else(A = IWRTEVNTLOG_LEVEL_ALERT, 'ALERT' \
+		,if-then-else(A = IWRTEVNTLOG_LEVEL_CRITICAL, 'CRITICAL' \
+		,if-then-else(A = IWRTEVNTLOG_LEVEL_ERROR, 'ERROR' \
+		,if-then-else(A = IWRTEVNTLOG_LEVEL_WARNING, 'WARNING' \
+		,if-then-else(A = IWRTEVNTLOG_LEVEL_NOTICE, 'NOTICE' \
+		,if-then-else(A = IWRTEVNTLOG_LEVEL_INFO, 'INFO' \
+		,if-then-else(A = IWRTEVNTLOG_LEVEL_DEBUG, 'DEBUG' \
+		,'Unknown'))))))))
+
+
+#define THISPROCESS \
+		str-concat(substring(get-param(0),pattern(get-param(0),"[~/]*$"),str-len(get-param(0))) \
+		,"|",str(pid())) 
+
+link 'clib/clibwrtevntlog'
+
+field
+	ws-counter							type number occurs IWRTEVNTLOG_NO_OF_LEVELS
+	ws-heading-level					pic x(20) type string
+	ws-heading-date-time				type datetime
+
+procedure library-init
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8proglogparam-write-log parameters are "clibvlog"
+end-procedure
+
+procedure clibvlog-emergency export
+parameters are 
+	lp-string							pic x(1024) type string
+	do clibwrtevntlog-write-log parameters are IWRTEVNTLOG_LEVEL_EMERGENCY 'APPS'   
+		THISPROCESS lp-string
+	set ws-counter[IWRTEVNTLOG_LEVEL_EMERGENCY + 1] += 1
+end-procedure
+
+procedure clibvlog-alert export
+parameters are 
+	lp-string							pic x(1024) type string
+	do clibwrtevntlog-write-log parameters are IWRTEVNTLOG_LEVEL_ALERT 'APPS'   
+		THISPROCESS lp-string
+	set ws-counter[IWRTEVNTLOG_LEVEL_ALERT + 1] += 1
+end-procedure
+
+procedure clibvlog-critical export
+parameters are 
+	lp-string							pic x(1024) type string
+	do clibwrtevntlog-write-log parameters are IWRTEVNTLOG_LEVEL_CRITICAL 'APPS'   
+		THISPROCESS lp-string
+	set ws-counter[IWRTEVNTLOG_LEVEL_CRITICAL + 1] += 1
+end-procedure
+
+procedure clibvlog-error export
+parameters are 
+	lp-string							pic x(1024) type string
+	do clibwrtevntlog-write-log parameters are IWRTEVNTLOG_LEVEL_ERROR 'APPS'   
+		THISPROCESS lp-string
+	set ws-counter[IWRTEVNTLOG_LEVEL_ERROR + 1] += 1
+end-procedure
+
+procedure clibvlog-warning export
+parameters are 
+	lp-string							pic x(1024) type string
+	do clibwrtevntlog-write-log parameters are IWRTEVNTLOG_LEVEL_WARNING 'APPS'   
+		THISPROCESS lp-string
+	set ws-counter[IWRTEVNTLOG_LEVEL_WARNING + 1] += 1
+end-procedure
+
+procedure clibvlog-notice export
+parameters are 
+	lp-string							pic x(1024) type string
+	do clibwrtevntlog-write-log parameters are IWRTEVNTLOG_LEVEL_NOTICE 'APPS'   
+		THISPROCESS lp-string
+	set ws-counter[IWRTEVNTLOG_LEVEL_NOTICE + 1] += 1
+end-procedure
+
+procedure clibvlog-info export
+parameters are 
+	lp-string							pic x(1024) type string
+	do clibwrtevntlog-write-log parameters are IWRTEVNTLOG_LEVEL_INFO 'APPS'   
+		THISPROCESS lp-string
+	set ws-counter[IWRTEVNTLOG_LEVEL_INFO + 1] += 1
+end-procedure
+
+procedure clibvlog-debug export
+parameters are 
+	lp-string							pic x(1024) type string
+	do clibwrtevntlog-write-log parameters are IWRTEVNTLOG_LEVEL_DEBUG 'APPS'   
+		THISPROCESS lp-string
+	set ws-counter[IWRTEVNTLOG_LEVEL_DEBUG + 1] += 1
+end-procedure
+
+procedure clibvlog-initialise-counters export
+	set ws-counter[*] = 0	
+end-procedure
+
+procedure clibvlog-get-counter export
+parameters
+	lp-desc								pic x(30) type string
+returning
+	lr-count							type number
+local
+	lf-level							like sel-level
+	do desc-to-number parameters are lp-desc returning lf-level
+	set lr-count = ws-counter[lf-level + 1]
+end-procedure
+
+procedure clibvlog-get-counter-above export
+parameters
+	lp-desc								pic x(30) type string
+returning
+	lr-count							type number
+local
+	lf-level							like sel-level
+	i									type number
+	do desc-to-number parameters are lp-desc returning lf-level
+	for i = 0 to lf-level + 1
+		set lr-count += ws-counter[i]
+	end-for
+end-procedure
+
+procedure desc-to-number
+parameters
+	lp-string							pic x(30) type string
+returning 
+	lr-no								type number
+	//
+	switch uppercase(lp-string)
+	case 'EMERGENCY'
+		set lr-no = IWRTEVNTLOG_LEVEL_EMERGENCY
+	case 'ALERT'
+		set lr-no = IWRTEVNTLOG_LEVEL_ALERT
+	case 'CRITICAL'
+		set lr-no = IWRTEVNTLOG_LEVEL_CRITICAL
+	case 'ERROR'
+		set lr-no = IWRTEVNTLOG_LEVEL_ERROR
+	case 'WARNING'
+		set lr-no = IWRTEVNTLOG_LEVEL_WARNING
+	case 'NOTICE'
+		set lr-no = IWRTEVNTLOG_LEVEL_NOTICE
+	case 'INFO'
+		set lr-no = IWRTEVNTLOG_LEVEL_INFO
+	case 'DEBUG'
+		set lr-no = IWRTEVNTLOG_LEVEL_DEBUG
+	else
+		set lr-no = 0
+	end-switch
+end-procedure
+
+procedure report-heading
+	print company-name 
+		"System Event Log" col 30
+		today() col 80
+		tod() col 90
+		"Page" col 100
+		page-no 
+	skip
+	print concat("Events for process " str(pid()) 
+		" from " format-picture(ws-heading-date-time , "dd mmm yyyy HH:MM:SS")
+		" of type " str-concat(ws-heading-level) " and above.")
+	skip
+end-procedure
+
+procedure clibvlog-print-events export
+parameters
+	lp-start							type date-time
+	lp-level							type string
+local
+	lf-level-num						like sel-level
+	lf-sql-cf-process					like sel-code
+	lf-sql-cf-login						type string
+	//
+	set ws-heading-date-time = lp-start
+	set ws-heading-level = lp-level
+	do desc-to-number parameters are lp-level
+		returning lf-level-num
+	report "System Event Log"
+		full-xml
+		heading report-heading
+	//
+	page
+	//
+	set lf-sql-cf-process = THISPROCESS
+	set lf-sql-cf-login = login-id()
+	select *
+		from system-event-log
+		where sel-type = "APPS"
+		and sel-date-time >= :lp-start
+		and sel-login-id = lf-sql-cf-login
+		and sel-code = :lf-sql-cf-process
+		and sel-level <= lf-level-num
+		order by sel-date-time sel-type
+	detail
+		print LOGLEVEL_DESC(sel-level) pic x(15)
+				tag "Level"
+			sel-date-time col 15
+				tag "Date"
+			sel-text
+				tag "Text"
+			section "event_detail"
+	end-select
+	report finished
+end-procedure
+
+
+

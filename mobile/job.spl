@@ -1,0 +1,487 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : Job Maintenance - sample for Ginger demo
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2020
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: job/jobmaintg.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 03Jun20  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+#include "../include/bmsdef.spl"
+
+link "mobile/clibmob"
+link "clib/clibvwp"
+
+#define RTITLE(ONE,TWO,THREE) param-text('{"title1":"<<p1>>","title2":"<<p2>>","title3":"<<p3>>"}',ONE,TWO,THREE)
+ 
+field
+	ws-function-title						type string
+
+object like-job-cost-variation-inv-detail like job-cost-variation-inv-detail
+
+mode md-new
+	prompt "New"
+
+
+procedure main
+local
+	lf-job-code						like job-code
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8secabt-check-abort
+		parameters are sys-consolidation-division login-id() "ZMOB" "M001"
+		returning ws-function-title 
+	do i8proglog-write-log
+	do get-job
+		returning lf-job-code
+	do job-maint parameters are lf-job-code
+end-procedure
+
+procedure get-job
+returning
+	lr-job-code						like job-code
+	do clibmob-enterprise-search //entry once
+		parameters "5" "Project Search" 
+		returning lr-job-code
+end-procedure
+
+
+screen job-maint
+parameters
+	lp-job-code						like job-code
+	window
+		title RTITLE("Job Maintenance", job-code,job-cost-description)	
+	select *
+		from job-cost-master
+		where job-code = :lp-job-code
+	allowed correct
+	responsive
+before
+	screen-section	
+		title "Budget/Actuals"
+		do budget-actuals no-wait
+	end-screen-section
+	screen-section
+		title "CBS"
+		do cbs no-wait
+	end-screen-section
+	screen-section
+		do variations no-wait
+	end-screen-section
+	screen-section
+		do openpos no-wait
+	end-screen-section
+detail
+	refresh title
+	screen-group
+		width 12
+		field-group
+			accept job-code 
+				title "Code"
+				when screenmode in (search correct)
+				show-value
+			accept job-cost-description
+				title "Description"
+		end-field-group
+	end-screen-group
+	screen-group
+		title "Details"
+		accept job-type
+			title "Type"
+		dropdown width 38
+			'N' title DD('N',"Normal")
+			'C' title DD('C','Contract')
+		end-drop-down
+		accept jcm-project-manager
+			title "Manager"
+		dropdown width 38
+			select slt-login-id, 
+				DDS(slt-login-id,user-employee-name),
+				0,
+				if-then-else(suc-user-inactive-flag != spaces
+					or user-officer-class[3] = 'T'
+					or user-officer-class[4] = 'R',0,1)
+				from system-login-table, system-user-control
+			where slt-type = 'JO'
+			and slt-login-id = user-id
+		end-drop-down
+		accept jcm-cust-reference
+			title "Reference"
+	end-screen-group
+	screen-group
+		title "Reporting Details"
+		accept jcm-project-type
+			title "Job Type"
+			drop-down width 38
+				select sys-tbl-code,
+					DDS(sys-tbl-code,sys-description)
+					from system-table
+					where sys-tbl-type = 'JP'
+			end-drop-down
+		accept jcm-work-type
+			title "Nature"
+			drop-down width 38
+				select sys-tbl-code,
+					DDS(sys-tbl-code,sys-description)
+					from system-table
+					where sys-tbl-type = 'JW'
+			end-drop-down
+		accept jcm-service-type
+			title "Activity"
+			drop-down width 38
+				select sys-tbl-code,
+					DDS(sys-tbl-code,sys-description)
+					from system-table
+					where sys-tbl-type = 'JV'
+			end-drop-down
+		accept jcm-application-type
+			title "Work"
+			drop-down width 38
+				select sys-tbl-code,
+					DDS(sys-tbl-code,sys-description)
+					from system-table
+					where sys-tbl-type = 'JA'
+			end-drop-down
+	end-screen-group
+	screen-group
+		title "Dates"
+		accept jcm-start-date
+			title "Start Date"
+		accept jcm-budget-date
+			title "Budget Date"
+		accept jcm-ex-factory-date
+			title "Ex-Factory"
+		accept jcm-on-site-date
+			title "On Site"
+		accept jcm-finish-date
+			title "Finish Date"
+	end-screen-group
+	screen-group
+		title "Financial Summary"
+		display jcm-total-budget-amount
+			title "Budget Cost"
+		display jcm-total-budget-hours
+			title "Budget Hours"
+		display jcm-total-budgeted-profit
+			title "Expected Profit"
+		display jcm-total-budget-profit-%
+			title "Expected Profit %ge"
+		display jcm-total-contract-amount
+			title "Total Budgeted Charge"
+		display jcm-total-actual-cost-amount
+			title "Charged LTD"
+	end-screen-group
+end-screen
+
+screen budget-actuals
+	window
+		select *
+			from job-cost-centre-budget-actual
+			where job-code = :job-code
+	datagrid occurs 5
+	allowed search
+detail
+	accept job-cost-centre  @1,1
+		title "Cost Centre"
+		when screenmode = search
+		show-value
+	display job-budget-amount @1,2
+		title "Budget Cost"
+	display job-budget-amount + job-budget-margin-amount pic s(5)9.99 @1,3
+		title "Budget Income" 
+	display job-actual-amount @1,4
+		title "Charged to Date"
+end-screen
+
+screen cbs
+	window
+	select * 
+			from job-cost-breakdown
+			where jcb-job-code  = :job-code
+			and jcb-type = 'JC'
+			order by jcb-section-key
+	allowed search
+	datagrid occurs 10
+	no-prompt-for-search
+detail
+	accept jcb-section-code @1,1 pic x(10)
+		title "Section"
+		when screenmode = search
+		show-value
+	display jcb-description @1,2 pic x(20)
+		title "Description"
+	display jcb-section-total-cost @1,3
+		title "Cost"
+	display jcb-section-contract-value @1,4
+		title "Value"
+end-screen
+
+screen variations
+	window
+		title "Variations"
+	select *
+		from job-cost-variation-inv-detail
+		job-cost-varn-status-desc
+	where job-code = :job-code
+	and jcvsd-language = spaces
+	and jcvsd-status = job-variation-status
+	datagrid occurs 5
+	allowed search md-new
+detail
+	if screenmode = md-new
+		do insert-new-variation parameters are job-code
+		refresh review
+	endif
+	accept job-variation-reference @1,1
+		title "Variation"
+		when screenmode = search
+		show-value
+	display job-variation-description[1] @1,2
+		title "Description"
+	display jcvsd-description @1,3
+		title "Status"
+	display job-variation-client-ref @1,4
+		title "Ref"
+	display job-variation-total-cost @1,5
+		title "Cost"
+	display job-variation-approved-amount @1,6
+		title "Value"
+end-screen
+
+screen insert-new-variation
+parameters are 
+	lp-job-code							like job-code
+local
+	lf-instructed-by					like job-variation-instructed-by
+	lf-client-ref						like job-variation-client-ref
+	lf-rough-estimate					type number
+	lf-variation-notes					type varchar pic x(16000)
+	window 
+		window-position 5
+		title "New Variation"
+	responsive
+	allowed correct
+	//
+detail
+	screen-group // ---- Notes ----------------------------
+		accept lf-instructed-by
+			title "Instructed By"
+			optional
+		accept lf-client-ref
+			title "Client Reference"
+			optional
+		accept lf-variation-notes 
+			title "notes"
+			help "Enter your notes here"
+			multi-line
+			rows 5
+			columns 50
+		accept lf-rough-estimate pic z(8)9
+			title "Rough Cost Estimate"
+			help "Rough Cost Estimate"
+			optional
+	end-screen-group // ---- Notes --------------------------------------
+	confirm
+	confirmed
+		do insert-variation
+			parameters are
+				lp-job-code							
+				lf-instructed-by				
+				lf-client-ref
+				lf-rough-estimate		
+				lf-variation-notes	
+	end-confirm
+end-screen
+
+procedure insert-variation
+parameters 
+	lp-job-code							like job-code
+	lp-instructed-by					like job-variation-instructed-by
+	lp-client-ref						like job-variation-client-ref
+	lp-rough-estimate					type number
+	lp-variation-notes					type varchar pic x(16000)
+local
+	lf-next-seq							type number
+	lf-commit							type boolean
+	lf-last-error						type string pic x(128)
+	lf-first-note						like job-variation-description occurs 1
+	lf-notes-added						type number
+	//
+	set lf-commit = TRUE
+	transaction begin
+	do clibvwp-set-line-at-line-feed parameters true
+	get job-cost-master
+		on index job-code
+		key is lp-job-code
+	initialise job-cost-variation-inv-detail
+		leaving job-code
+	do get-next-job-variation-number
+		parameters job-code
+		returning job-variation-reference
+	set job-variation-date = today
+	set job-variation-status = "E"
+	set job-variation-description[1] = 'Entered from Mobile'  // overridden further down with notes
+	set job-variation-description[2] = concat(login-id() 
+		" on " format-picture(today(), "dd-mm-yy") 
+		" at " format-picture(tod(),"HH:MM"))
+	set job-variation-instructed-by = lp-instructed-by
+	set job-variation-deb-accountcode = accountcode
+	set job-variation-client-ref = lp-client-ref
+	insert job-cost-variation-inv-detail
+	on error
+		set lf-commit = FALSE
+		set lf-last-error = "Could not insert variation master record"
+	endon
+	// now deal with the notes
+	repeat
+		do clibvwp-break-to-line parameters are lp-variation-notes size-of(jvn-text) 
+			returning jvn-text lp-variation-notes
+	until jvn-text = spaces
+		// Do whatever is required to insert the line here
+		set lf-notes-added += 1
+		set lf-next-seq += 1
+		if lf-next-seq = 1
+			// remember the first line of the notes
+			set lf-first-note = jvn-text
+		endif
+		initialise job-variation-notes
+			leaving job-code  job-variation-reference jvn-text
+		set jvn-note-type = spaces
+		set jvn-note-seq = lf-next-seq
+		insert job-variation-notes
+		on error 
+			set lf-commit = FALSE
+			set lf-last-error = "Failed to insert variation note text"
+			set lf-notes-added -= 1
+		endon
+	end-repeat
+	if lf-notes-added = 0
+		set lf-commit = false
+		set lf-last-error = "Failed to add any notes"
+	endif
+	if lp-rough-estimate != 0
+		set lf-next-seq += 1
+		initialise job-variation-notes
+			leaving job-code  job-variation-reference 
+		set jvn-note-type = spaces
+		set jvn-note-seq = lf-next-seq
+		set jvn-text = spaces
+		insert job-variation-notes
+		on error 
+			set lf-commit = FALSE
+			set lf-last-error = "Failed to add rough estimate note (blank line)"
+		endon
+		set lf-next-seq += 1
+		initialise job-variation-notes
+			leaving job-code  job-variation-reference 
+		set jvn-note-type = spaces
+		set jvn-note-seq = lf-next-seq
+		set jvn-text = concat("Rough Cost Estimate:" format-picture(lp-rough-estimate,"$$$,$$$,$$$"))
+		insert job-variation-notes
+		on error 
+			set lf-commit = FALSE
+			set lf-last-error = "Failed to add rough estimate note"
+		endon
+	endif
+	// go back and update the desc
+	get job-cost-variation-inv-detail
+		on index job-code job-variation-reference
+		key is job-code job-variation-reference
+		lock
+	on error
+		set lf-commit = FALSE
+		set lf-last-error = "Failed to relock master record"
+	else
+		set job-variation-description[1] = lf-first-note
+		update job-cost-variation-inv-detail
+		on error
+			set lf-commit = FALSE
+			set lf-last-error = "Failed to update variation description"
+		endon
+	endon
+	if lf-commit 
+		transaction commit
+	else
+		transaction rollback
+		message-box param-text("<<P1>><<BR>><<p2>>"
+			,"An error occurred adding the variation"
+			,lf-last-error)
+			title is ws-function-title
+			message-buttons  MSG_BOX_CANCEL
+			icon MSG_BOX_STOP
+			optional bell 
+	endif
+end-procedure
+
+screen openpos
+	window
+	title "Open Purchase Orders"
+	select *
+		from purchase-order as t0
+		purchase-order-status-desc as t1
+		cre-master as t2
+		where t0.po-job-no = :job-code
+		and t1.posd-language = spaces
+		and t1.posd-status = t0.po-order-status
+		and t0.po-order-status < '90'
+		and t0.cre-accountcode = t2.cre-accountcode
+	allowed search md-new
+	datagrid occurs 5
+detail
+	if screenmode = md-new
+		spl "mobile/purchasing" parameters 
+			"-project" job-code
+			"-costcat" "MAT"
+		reselect
+		refresh data
+	endif
+	accept po-order-no @1,1
+		title "Order"
+	accept po-backorder-flag @1,2
+		title "Sfx"
+	display cre-accountcode @1,3
+		title "Supp Code"
+	display cr-shortname @1,4
+		title "Supplier Name"
+	display posd-description @1,5
+		title "Status"
+	display po-order-total @1,6
+		title "Amount"
+	display po-order-date @1,7
+		title "Date"
+end-screen
+
+procedure get-next-job-variation-number
+parameters
+	lp-job-code							like job-code
+returning
+	lr-variation-no						like job-variation-reference
+local
+	lf-next-number						like job-variation-reference
+	push job-cost-variation-inv-detail		
+	select * 
+		from like-job-cost-variation-inv-detail	
+		where job-code = :lp-job-code
+		order by job-code job-variation-reference
+	detail
+		if num(job-variation-reference) > ZERO
+		and num(lf-next-number) < num(job-variation-reference) 
+			set lf-next-number = job-variation-reference
+		endif
+	endselect
+	pop job-cost-variation-inv-detail	
+	set lr-variation-no = fstr(num(lf-next-number) + 1,
+		size-of(job-variation-reference),0)
+end-procedure

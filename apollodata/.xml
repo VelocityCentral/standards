@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<Reports>
+  <report>
+    <reportdef>
+      <ap-desc></ap-desc>
+      <ap-spl-name></ap-spl-name>
+      <ap-primary></ap-primary>
+      <ap-monitor></ap-monitor>
+      <ap-skeleton></ap-skeleton>
+      <ap-full-pgm></ap-full-pgm>
+      <ap-xml></ap-xml>
+      <ap-module></ap-module>
+      <ap-function></ap-function>
+      <ap-excel></ap-excel>
+      <ap-build-file></ap-build-file>
+      <ap-di-project></ap-di-project>
+    </reportdef>
+    <reportfil/>
+    <reportsel/>
+    <reportcal/>
+    <reportsql/>
+    <reporttxt/>
+  </report>
+</Reports>

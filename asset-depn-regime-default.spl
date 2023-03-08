@@ -1,0 +1,87 @@
+// *************************************************
+// Auto-Generated Program - Do not modify this code
+//
+// Generated - By sys/m8userfield
+//             On 16-JUL-2020 at 07:51 AM
+// *************************************************
+
+mode go-screen prompt is 'Screen' perform show-form-screen
+mode go-datagrid prompt is 'Data Grid' perform show-datagrid
+
+procedure main
+    get asset-depn-regime-default
+        on index adrd-depreciation-code adrd-regime
+        key is get-param(1) get-param(2)
+    on error
+       //this is ok, get first record
+    endon
+    do show-datagrid
+endprocedure // main ---------------------------------------------------
+
+screen show-datagrid
+    window @1,1 to @24,90
+    title 'asset-depn-regime-default user fields'
+    primary asset-depn-regime-default
+    datagrid occurs 22
+    allow search correct go-screen
+before
+detail
+    accept adrd-depreciation-code @1,1
+        when screenmode() != correct
+        show-value
+    accept adrd-regime @1,2
+        when screenmode() != correct
+        show-value
+    display adrd-regime @1,3
+        title 'Regime:'
+    accept adrd-user-only-date @1,4
+    accept adrd-user-only-alpha4-1 @1,5
+    accept adrd-user-only-alpha4-2 @1,6
+    accept adrd-user-only-num1 @1,7
+    accept adrd-user-only-num2 @1,8
+confirm auto
+confirmed
+    if screenmode() = go-screen
+        refresh data
+    endif
+end-confirm
+endscreen // show-datagrid ------------------------------------------------------------
+
+screen show-form-screen
+    allowed search correct
+    primary asset-depn-regime-default
+    window @1,1 to @17,80
+    title 'asset-depn-regime-default User Only fields'
+before
+    box @1,3 to @7,78
+        title 'Record'
+    box @8,3 to @16,78
+        title 'User Data'
+detail
+    accept adrd-depreciation-code @3,33
+        when screenmode() != correct
+        show-value
+        title 'Code:'
+    accept adrd-regime @4,33
+        when screenmode() != correct
+        show-value
+        title 'Regime:'
+    display adrd-regime @5,33
+        title 'Regime:'
+    accept adrd-user-only-date @10,33
+        title 'adrd-user-only-date:'
+    accept adrd-user-only-alpha4-1 @11,33
+        title 'adrd-user-only-alpha4-1:'
+    accept adrd-user-only-alpha4-2 @12,33
+        title 'adrd-user-only-alpha4-2:'
+    accept adrd-user-only-num1 @13,33
+        title 'adrd-user-only-num1:'
+    accept adrd-user-only-num2 @14,33
+        title 'adrd-user-only-num2:'
+confirm auto
+confirmed
+    if screenmode() = go-datagrid
+        refresh data
+    endif
+end-confirm
+endscreen // show-form-screen ------------------------------------------------------

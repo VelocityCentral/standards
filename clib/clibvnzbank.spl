@@ -1,0 +1,240 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : clibvnzbank - Verify NZ bank accounts 
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2011
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: clib/clibvnzbank.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 26Aug11  rjb         written 
+// This is a generalised routine to that uses the check digit processing used
+// by NZ banks to verify account numbers.  Note - It does not mean that the
+// accounts exist - simply that they confirm to the rules.
+////////////////////////////////////////////////////////////////////////////////
+/*
+
+	This documentation is in RST format.  To view this as a nice pdf goto
+	https://overbits.herokuapp.com/rsteditor/ or rst.ninjs.org and paste this content.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|           |           |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+
+	Alternatively
+
+	 =========== =========== ======================================================== 
+	  Direction   Data Type   Description                                             
+	 =========== =========== ======================================================== 
+	 =========== =========== ======================================================== 
+
+===========
+clibvnzbank
+===========
+
+clibvnzbank-verify-bank-code 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	This code contains the check digit verfication for checking nz bank accounts.
+	
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|    In     |String 40  |6 digit bank and branch code                            |
+	+-----------+-----------+--------------------------------------------------------+
+	|    In     |String 40  |Bank account                                            |
+	|           |           |                                                        |
+	|           |           |Only the first seven characters are used.  This should  |
+	|           |           |Trim any trailing suffix                                |
+	+-----------+-----------+--------------------------------------------------------+
+
+
+*/
+ 
+#include "../include/i8proglogparam.spl"
+
+field
+	ws-last-error							pic x(1024) type string
+
+procedure library-init
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8proglogparam-write-log parameters "clibvnzbank"
+end-procedure
+
+procedure clibvnzbank-get-last-error export
+returning
+	lr-message							like ws-last-error
+	set lr-message = ws-last-error
+end-procedure
+
+procedure clibvnzbank-verify-bank-code export
+parameters
+	lp-bank-branch							type string
+	lp-acct									type string
+returning
+	lr-ok									type boolean
+	lr-message								pic x(128) type string
+local
+	lf-bank									pic xx
+	lf-acct									pic x(7) // correct acct size
+//
+	get bank-state-branch
+		on index bsb-code
+		key is lp-bank-branch
+	on error
+		set lr-ok = FALSE
+		set lr-message = concat("Invalid bank/branch combination (" lp-bank-branch ")")
+		exit
+	endon
+	set lf-bank = substring(lp-bank-branch,1,2)
+	set lf-acct = lp-acct // trims off any suffix
+	if lf-bank = "08"
+		do check-digit-calc-08
+			parameters are lp-bank-branch lf-acct returning lr-ok lr-message
+	elseif lf-bank = "25"
+		do check-digit-calc-25
+			parameters are lp-bank-branch lf-acct returning lr-ok lr-message
+	else
+		do check-digit-calc-default
+			parameters are lp-bank-branch lf-acct returning lr-ok lr-message
+	endif
+end-procedure
+
+procedure check-digit-calc-default
+// this is the generalised routine that nearly all NZ banks use.
+parameters
+	lp-branch								pic x(10) type string
+	lp-account								pic x(7)
+returning
+	lr-ok									type boolean
+	lr-message								pic x(128) type string
+local
+	i										type number
+	lf-acct									type string
+	lf-multiplier							type number occurs 11
+	lf-total								type number
+	set lr-ok = TRUE
+//
+	set lf-multiplier[1] = 6
+	set lf-multiplier[2] = 3
+	set lf-multiplier[3] = 7
+	set lf-multiplier[4] = 9
+	set lf-multiplier[5] = 0
+	set lf-multiplier[6] = 10
+	set lf-multiplier[7] = 5
+	set lf-multiplier[8] = 8
+	set lf-multiplier[9] = 4
+	set lf-multiplier[10] = 2
+	set lf-multiplier[11] = 1
+//
+	set lf-acct = concat(substring(lp-branch,3,6),lp-account)
+	for i = 1 to 11
+		set lf-total += num(substring(lf-acct,i,i)) * lf-multiplier[i]
+	endfor
+	set lf-total = lf-total % 11
+	if lf-total <> 0
+		set lr-ok = FALSE
+		set lr-message = concat("Invalid check digit on account number (" 
+			lp-branch "/"
+			lp-account ")")
+	endif
+end-procedure
+
+procedure check-digit-calc-08
+// **************************************************
+// *       Untested due to Lack of test data        *
+// **************************************************
+// National Bank of Australia
+// As at Aug 2011 this bank code is registered to BNZ.  Assumably they
+// purchased National Bank of Australia.  This company has been coded becuase
+// the bank code still exists on the register.  There may be accounts out
+// there somewhere but I have not seen any.
+parameters
+	lp-branch								pic x(10) type string
+	lp-account								pic x(7)
+returning
+	lr-ok									type boolean
+	lr-message								pic x(128) type string
+local
+	i										type number
+	lf-acct									type string
+	lf-multiplier							type number occurs 11
+	lf-total								type number
+	set lr-ok = TRUE
+//
+	set lf-multiplier[1] = 0
+	set lf-multiplier[2] = 0
+	set lf-multiplier[3] = 0
+	set lf-multiplier[4] = 0
+	set lf-multiplier[5] = 1
+	set lf-multiplier[6] = 7
+	set lf-multiplier[7] = 3
+	set lf-multiplier[8] = 1
+	set lf-multiplier[9] = 7
+	set lf-multiplier[10] = 3
+	set lf-multiplier[11] = 1
+//
+	set lf-acct = concat(substring(lp-branch,3,6),lp-account)
+	for i = 1 to 11
+		set lf-total += num(substring(lf-acct,i,i)) * lf-multiplier[i]
+	endfor
+	set lf-total = lf-total % 10
+	if lf-total <> 0
+		set lr-ok = FALSE
+		set lr-message = concat("Invalid check digit on account number (" 
+			lp-branch "/"
+			lp-account ")")
+	endif
+end-procedure
+
+procedure check-digit-calc-25
+// Country Wide and Rural Banks.
+// As at Aug2011 The Bank register records this as National Bank.  However
+// there are still some of the old accounts out there that use this method
+// (assumably NAB purchased Country Wide and Rural)
+parameters
+	lp-branch								pic x(10) type string
+	lp-account								pic x(7)
+returning
+	lr-ok									type boolean
+	lr-message								pic x(128) type string
+local
+	i										type number
+	lf-acct									type string
+	lf-multiplier							type number occurs 11
+	lf-total								type number
+	set lr-ok = TRUE
+//
+	set lf-multiplier[1] = 0
+	set lf-multiplier[2] = 0
+	set lf-multiplier[3] = 0
+	set lf-multiplier[4] = 0
+	set lf-multiplier[5] = 1
+	set lf-multiplier[6] = 7
+	set lf-multiplier[7] = 3
+	set lf-multiplier[8] = 1
+	set lf-multiplier[9] = 7
+	set lf-multiplier[10] = 3
+	set lf-multiplier[11] = 1
+//
+	set lf-acct = concat(substring(lp-branch,3,6),lp-account)
+	for i = 1 to 11
+		set lf-total += num(substring(lf-acct,i,i)) * lf-multiplier[i]
+	endfor
+	set lf-total = lf-total % 10
+	if lf-total <> 0
+		set lr-ok = FALSE
+		set lr-message = concat("Invalid check digit on account number (" 
+			lp-branch "/"
+			lp-account ")")
+	endif
+end-procedure

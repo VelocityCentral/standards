@@ -1,0 +1,25 @@
+#PRONTO Screen Customiser File (Override statements only).
+#PCS_TIMESTAMP : Wed Apr 24 11:00:22 2019 rayb
+#PCS_TIMESTAMP : Wed Apr 24 10:58:32 2019 rayb
+#PCS_TIMESTAMP : Wed Jul 19 10:53:56 2017 rayb
+#PCS_TIMESTAMP : Wed Jul 19 10:22:35 2017 rayb
+screen report-datagrid
+	{
+	trigger
+		{
+		trigger_point = validate_mode
+		name = "md-list-preview"
+		run = "screens/pcsproprint_gui|run-preview" tmp-us-spoolfile
+		type = clib
+		}
+	}
+screen user-report-selection
+	{
+	trigger
+		{
+		trigger_point = validate_mode
+		name = "md-preview"
+		run = "screens/pcsproprint_gui|run-preview" tmp-us-spoolfile
+		type = clib
+		}
+	}

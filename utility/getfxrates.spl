@@ -1,0 +1,110 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : 
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2014
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: utility/getfxrates.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 21Oct14  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/i8proglog.spl"
+
+link 'clib/clibvecbfx'
+ 
+field
+	ws-function-title						type string
+
+procedure main
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8proglog-write-log
+	do update-exchange-rates parameters "NZD" "USD"
+	do update-exchange-rates parameters "NZD" "EUR"
+	do update-exchange-rates parameters "NZD" "GBP"
+	do update-exchange-rates parameters "NZD" "AUD"
+	do update-exchange-rates parameters "NZD" "CAD"
+	do update-exchange-rates parameters "NZD" "USD"
+	do update-exchange-rates parameters "NZD" "SGD"
+	do update-exchange-rates parameters "NZD" "JPY"
+end-procedure
+
+procedure update-exchange-rates
+parameters are 
+	lf-from								type string
+	lf-to								type string
+local
+	lf-num								type number
+	lf-date								type date
+	do clibvecbfx-get-rate
+		parameters are 
+			lf-from lf-to
+		returning 
+			lf-num
+			lf-date
+	if lf-num  = 0
+		exit
+	endif
+	do update-ccm parameters are lf-from
+	do update-ccm parameters are lf-to
+	do update-cpl parameters are lf-to spaces
+	get currency-code-rates
+		on index ccr-currency-code-from ccr-currency-code-to ccr-start-date-time
+		key is  lf-to spaces gmt
+	on error
+		initialise currency-code-rates
+			leaving ccr-currency-code-from ccr-currency-code-to ccr-start-date-time
+		set ccr-currency-rate = lf-num
+		insert currency-code-rates
+		on error
+			message "on insert"
+		endon
+	endon
+end-procedure
+
+procedure update-cpl
+parameters 
+	lp-from					like ccm-currency-code
+	lp-to					like ccm-currency-code
+//
+	get currency-pair-link
+		on index cpl-currency-code-from cpl-currency-code-to
+		key is lp-from lp-to
+	on error ENOREC
+		initialise currency-pair-link
+			leaving cpl-currency-code-from cpl-currency-code-to
+		set cpl-unit-from = 1
+		set cpl-unit-to = 1
+		set cpl-mord = 'D'
+		insert currency-pair-link
+		on error
+		endon
+	endon
+end-procedure
+
+procedure update-ccm
+parameter
+	lp-code					like ccm-currency-code
+//
+	get currency-code-master
+		on index ccm-currency-code
+		key is lp-code
+	on error ENOREC
+		initialise currency-code-master
+		leaving ccm-currency-code
+		set ccm-description = "Created by getfxrates"
+		set ccm-active-flag = YES
+		insert currency-code-master
+		on error
+		endon
+	endon
+end-procedure

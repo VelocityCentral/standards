@@ -1,0 +1,699 @@
+////////////////////////////////////////////////////////////////////////////////
+//putaway - ITW Putaway Report
+//=========================================================================//
+// Copyright (C)  Velocity Global Ltd 2011
+//
+// PRONTO is a registered trademark of Pronto Software P/L.
+//
+// All Rights Reserved. Unauthorised copying is prohibited.
+//=========================================================================//
+//
+// Modification History
+// Date		Who	SDR		What
+// 22Aug11	mdr 		written
+////////////////////////////////////////////////////////////////////////////////
+
+#define NO_OF_SELECTION_PARAMETERS '1'
+#define REPORT_NAME 'Putaway Report'
+
+link 'clib/clibwhse'
+
+#define QTYPIC pic s(7).99
+
+#include '../include/bmsdef.spl'
+#include '../include/rbtchproc.spl'
+#include '../include/i8secabt.spl'
+#include '../include/i8proglog.spl'
+#include '../include/iwgetwhse.spl'
+#include '../include/iwcommon.spl'
+
+object temp-file
+	type is isam
+	record is
+		t-po-shipment-no				pic x(15)
+		t-po-shipment-consignment-no	like po-shipment-consignment-no
+		t-stock-code					like stock-code
+		t-stk-condition-code			like stk-condition-code
+		t-stk-description				like stk-description
+		t-warehouse-holding-qty			like warehouse-holding-qty
+		t-pick-1-location				like holding-location-code
+		t-pick-1-space					like warehouse-holding-qty
+		t-pick-2-location				like holding-location-code
+		t-pick-2-space					like warehouse-holding-qty
+		t-bulk-1-location				like holding-location-code
+		t-bulk-2-location				like holding-location-code
+	end-record
+	key is t-po-shipment-no t-po-shipment-consignment-no t-stock-code
+
+field
+	ws-excel-flag						pic x
+	ws-function-title					pic x(80) type string
+	ws-whse-code						pic x(4)
+	ws-print-current-locations			type boolean
+	ws-print-lot-details				type boolean
+	ws-style							pic x
+
+procedure main
+	get system-control first
+	get system-user-control	
+		on index user-id											
+		key is login-id()
+	on error														
+		abort "No valid Login"
+	endon															
+	get system-user
+		on index user-id sys-comp-code
+		key is login-id sys-consolidation-division
+	on error
+		abort "User does not exist in company"
+	endon
+	set ws-whse-code = user-whse
+	do i8secabt-check-abort parameters
+		sys-consolidation-division login-id() "ZVG" "R015"
+			returning ws-function-title
+	set ws-report-started = FALSE
+	do i8proglog-write-log
+	RBTCHPROC_RUN_PROGRAM(REPORT_NAME)
+endprocedure
+
+#if BMS_DICT_VER > 7600
+
+screen rbtchproc-report-parameters
+	allow entry
+	window @1,1 to @24,80
+	title ws-function-title
+	responsive
+before
+	do iwgetwhse-get-whse-code
+	set ws-whse-code = iwgetwhse-valid-whse
+detail
+	screen-group // ---- Parameters ----------------------------
+		title "Parameters"  // The title is optional
+		accept ws-whse-code 
+			title 'Warehouse :'
+			optional
+			help "Warehouse"
+			uppercase
+			default ws-whse-code
+		check-box ws-print-current-locations 
+			values True False
+			title "Print Location Detail"
+			right-coordinate
+			default is TRUE
+			help "When selected each location with stock will be printed on a separate line"
+		on change
+			if not ws-print-current-locations
+				set ws-print-lot-details = FALSE
+			endif
+		end-on
+		end-check-box 		
+		check-box ws-print-lot-details 
+			values True False
+			when ws-print-current-locations
+			title "Print Lot Details"
+			right-coordinate
+			default is ws-print-lot-details
+			help "Select this box to make the field true"
+			before-check-box
+				if screenmode = form-entry-defaults
+					set ws-print-lot-details = FALSE
+				endif
+				//
+			end-before-check-box
+		end-check-box 
+		field-group // ---- Style ----------------------------
+			title "Style"  // Title is optional
+			radio-button ws-style
+				"A" title  "Available Locations"
+				"P" title  "Putaway form"
+				default ws-style
+				before-radio-button
+					if screenmode = form-entry-defaults
+						set ws-style = "A"
+					endif
+				end-before-radio-button
+			end-radio-button 
+		end-field-group // ---- Style --------------------------------------
+	end-screen-group // ---- Parameters --------------------------------------
+	screen-group // ---- Group Title ----------------------------
+		title "Group Title"  // The title is optional
+		next row
+		radio-button ws-excel-flag
+			@20,18 NO title "No Export"
+			@20,27 "D" title "View Datagrid"
+			default "NO"
+			help "N)o export D)isplay data as a datagrid"
+		end-radio-button
+	end-screen-group // ---- Options --------------------------------------
+	confirm auto
+	confirmed
+		RBTCHPROC_EXECUTION
+	endconfirm
+endscreen
+
+#else 
+
+screen rbtchproc-report-parameters
+	allow entry
+	window @1,1 to @24,80
+	title ws-function-title
+	form-entry
+before
+	clear
+	box @18,1 to @22,80
+	do iwgetwhse-get-whse-code
+	set ws-whse-code = iwgetwhse-valid-whse
+detail
+	accept ws-whse-code @6,36
+		title 'Warehouse :'
+		optional
+		help "Warehouse"
+		uppercase
+		default ws-whse-code
+	check-box ws-print-current-locations @7,36
+		values True False
+		title "Print Location Detail"
+		right-coordinate
+		default is TRUE
+		help "When selected each location with stock will be printed on a separate line"
+	on change
+		if not ws-print-current-locations
+			set ws-print-lot-details = FALSE
+		endif
+	end-on
+	end-check-box 		
+	check-box ws-print-lot-details @8,36
+		values True False
+		when ws-print-current-locations
+		title "Print Lot Details"
+		right-coordinate
+		default is ws-print-lot-details
+		help "Select this box to make the field true"
+		before-check-box
+			if screenmode = form-entry-defaults
+				set ws-print-lot-details = FALSE
+			endif
+			//
+		end-before-check-box
+	end-check-box 
+	radio-button ws-excel-flag
+		@20,18 NO title "No Export"
+		@20,27 "D" title "View Datagrid"
+		default "NO"
+		help "N)o export D)isplay data as a datagrid"
+	confirm auto
+	confirmed
+		RBTCHPROC_EXECUTION
+	endconfirm
+endscreen
+
+#endif
+
+procedure rbtchproc-set-parameters
+	RBTCHPROC_LOAD_SET_ALPHA(ws-whse-code)
+	RBTCHPROC_LOAD_SET_NUM(ws-print-current-locations)
+	RBTCHPROC_LOAD_SET_NUM(ws-print-lot-details)
+	RBTCHPROC_LOAD_SET_ALPHA(ws-style)
+endprocedure
+
+procedure start-report
+	set rbtchproc-report-name = REPORT_NAME
+	report rbtchproc-report-name		
+		header is skeleton-report-header
+		width is 192
+		depth is 80
+		no-message
+		full-xml
+	set ws-report-started = TRUE
+	if rbtchproc-in-background
+		RBTCHPROC_MESSAGE_REPORT_STARTED
+	else
+		display 'Report :' @20,59 background right bold
+		display spool-file-name() @20,68 pic x(12) foreground prompts
+	endif
+endprocedure
+
+procedure skeleton-report-header
+	if report-is-xml()
+		report section "headings_section"
+	endif
+	print company-name col 1
+		rbtchproc-report-name col 81 bold
+		"Date:" col 145
+		today() col 151
+		"Time:" col 164
+		tod() col 170
+		'Page:' col 180
+		left-justify(str(page-no)) col 186 pic x(4)
+	skip
+	print
+		"Item" in col 1
+		"Cond" in col 17
+		"Description" in col 23
+		right-justify("Qty To",9) in col 55 pic x(9) right
+		"Pick 1" in col 66
+		right-justify("Available",10) in col 75 pic x(10) right
+		right-justify("Qty",9) in col 87 pic x(9) right
+		"Pick 2" in col 98
+		right-justify("Available",10) in col 107 pic x(10) right
+		right-justify("Qty",9) in col 119 pic x(9) right
+		"Bulk 1" in col 130
+		right-justify("Qty",9) in col 140 pic x(9) right
+		"Bulk 2" in col 151
+		right-justify("Qty",9) in col 161 pic x(9) right
+		right-justify("Other",9) in col 172 pic x(9) right
+		right-justify("Qty",9) in col 183 pic x(9) right
+	print
+		right-justify("Putaway",9) in col 55 pic x(9) right
+		"Location" in col 66
+		right-justify("Space",10) in col 75 pic x(10) right
+		right-justify("Located",9) in col 87 pic x(9) right
+		"Location" in col 98
+		right-justify("Space",10) in col 107 pic x(10) right
+		right-justify("Located",9) in col 119 pic x(9) right
+		"Location" in col 130
+		right-justify("Located",9) in col 140 pic x(9) right
+		"Location" in col 151
+		right-justify("Located",9) in col 161 pic x(9) right
+		right-justify("Location",9) in col 172 pic x(9) right
+		right-justify("Located",9) in col 183 pic x(9) right
+	skip
+	if report-is-xml()
+		report section finished
+	endif
+endprocedure
+
+procedure rbtchproc-report-detail
+	local field
+		lf-rec-counter					type number
+		lf-qty-on-hand					type number
+		lf-qty-due-out					type number
+		lf-qty-due-in					type number
+		lf-qty-due-on-hold				type number
+		lf-lot-count					type number
+	window @19,44 to @24,80
+	    title is "Report Progress"
+	    color white
+	    no-hide
+	if not rbtchproc-in-background
+		display bitmap concat(getenv('BMS')'/images/repedge.gif') @19,44
+		display spool-file-name() @20,68 pic x(12) foreground prompts
+		display "Now at :" @23,45 background prompts left
+	endif
+	if ws-style = "A"
+		do available-locations-report
+		exit 0
+	endif
+	//
+	do build-file
+	do start-report
+	page
+	// Print From Temp File
+	select * from temp-file
+		order by  t-po-shipment-no t-po-shipment-consignment-no t-stock-code
+	BEFORE t-po-shipment-no
+		// Sub Headings
+		report section 'sub_head_1'
+		skip 2
+		print
+			'Shipment#:' in col 1 bold
+			t-po-shipment-no in col 12 pic x(15) bold
+				tag is 't_po_shipment_no'
+			'Container:' in col 25 bold
+			t-po-shipment-consignment-no in col 36 pic x(20) bold
+				tag is 't_po_shipment_consignment_no'
+		skip
+		report section finished
+	detail
+		report section 'detail_line'
+		skip
+		print
+			t-stock-code in col 1 pic x(16)
+				tag is 't_stock_code'
+			t-stk-condition-code in col 18 pic X bold
+				tag is 't_stk-condition-code'
+			t-stk-description in col 23 pic x(30)
+				tag is 't_stk_description'
+			t-warehouse-holding-qty in col 55 pic -s(8) 
+				tag is 't_warehouse_holding_qty'
+			t-pick-1-location in col 66
+				tag is 't_pick_1_location'
+			t-pick-1-space in col 76 pic -s(7)9
+				tag is 't_pick_1_space'
+			'__________' in col 87
+			t-pick-2-location in col 98
+				tag is 't_pick_2_location'
+			t-pick-2-space in col 108 pic -s(7)9
+				tag is 't_pick_2_space'
+			'__________' in col 119
+			t-bulk-1-location in col 130
+				tag is 't_bulk_1_location'
+			'__________' in col 140
+			t-bulk-2-location in col 151
+				tag is 't_bulk_2_location'
+			'__________' in col 161
+			'__________' in col 172
+			'__________' in col 183
+		if  ws-print-current-locations
+			select 
+				whse-code
+				stock-code
+				sl-location-type
+				sl-location-code
+				lf-qty-on-hand = sum(sl-qty-on-hand)
+				lf-qty-due-out = sum(sl-qty-due-out)
+				lf-qty-due-in = sum(sl-qty-due-in)
+				lf-qty-due-on-hold = sum(sl-qty-on-hold)
+				lf-lot-count = count(*)
+				from stock-location stock-master
+				where whse-code = :ws-whse-code
+				and stock-code = :t-stock-code
+				and sl-location-code not in IWCOMMON_SPECIAL_LOCATIONS
+				group by whse-code,stock-code,sl-location-type, sl-location-code
+				order by whse-code stock-code sl-location-type  sl-location-code 
+			before 
+				skip
+				print "Type" in col 18 underline
+					"Location" in col 22 underline
+					"Qty On Hand" in col 31 right underline
+					"Due in" col 42 pic x(10) right underline
+					"Due Out" col 52 pic x(10) right underline
+					"On Hold" col 62 pic x(10) right underline
+					if-then-else(ws-print-lot-details,"Lots","   ") col 75 underline
+			detail
+				print sl-location-type in col 18
+					sl-location-code in col 22
+					lf-qty-on-hand in col 32 QTYPIC
+					lf-qty-due-in in col 42 QTYPIC
+					lf-qty-due-out in col 52 QTYPIC
+					lf-qty-due-on-hold in col 62 QTYPIC
+					if-then-else(ws-print-lot-details,
+						format-picture(lf-lot-count,"s(6)"),
+						"       ") in col 75 
+				if ws-print-lot-details
+					select 
+						whse-code stock-code sl-location-type sl-location-code 
+						sl-reference-lot sl-receipt-date
+						sl-qty-on-hand sl-qty-due-out sl-qty-due-in sl-qty-on-hold
+						from stock-location stock-master
+						where whse-code = :ws-whse-code
+						and stock-code = :t-stock-code
+						and sl-location-code = :sl-location-code
+					detail
+						print str-concat("Lot: " 
+							sl-reference-lot " Qty:" 
+							str(sl-qty-on-hand) 
+							" Received:" format-picture(sl-receipt-date,"ddmmmyy")
+							)
+							col 22
+					after
+						Skip
+					end-select
+				endif
+			end-select
+		endif 
+		skip 
+		report section finished
+		set lf-rec-counter += 1
+		if not rbtchproc-in-background
+			display "Printing Report" @20,59 background left bold
+			display t-stock-code @23,54 foreground prompts
+		endif
+	AFTER t-po-shipment-no
+		if sub-string(t-po-shipment-no,1,2) != "SO"
+			page
+		endif
+	end-select
+	do finish-report
+endprocedure
+
+procedure build-file
+	local field
+		lf-po-order-no					like po-order-no
+		lf-work-quantity				like warehouse-holding-qty
+		x								type number
+	open temp-file temporary create
+	select * from warehouse-stock-holding-file
+		where whse-code = :ws-whse-code 
+		and holding-qa-hold-flag <> IWCOMMON_IS_ON_HOLD
+		and holding-location-code = IWCOMMON_INWARDS_HOLDING_LOCATION
+		and inwards-status =  IWCOMMON_IS_AWAITING_PUTAWAY
+	detail
+		// Initialise Record
+		initialise temp-file
+		// Get Stock Master
+		get stock-master
+			on index stock-code
+			key is stock-code
+		on error
+			initialise stock-master leaving stock-code
+			set t-stk-description = '** Unknown'
+			set t-stk-condition-code = spaces
+		else
+			set t-stk-description = stk-description
+			set t-stk-condition-code = stk-condition-code
+		endon
+		set t-stock-code = stock-code
+		// Purchased?
+		if  wshf-document-type = 'PO'
+			set lf-po-order-no = num(wshf-document-no)
+			get purchase-order
+				on index po-order-no po-backorder-flag
+				key is lf-po-order-no wshf-document-suffix
+			on error
+				initialise purchase-order
+			endon
+			get purchase-order-shipment
+				on index po-shipment-no
+				key is po-shipment-no
+			on error
+				initialise purchase-order-shipment
+			endon
+			set t-po-shipment-no = po-shipment-no
+			set t-po-shipment-consignment-no = po-shipment-consignment-no
+		// Sales Order Return
+		elseif wshf-document-type = 'SO'
+			set t-po-shipment-no = concat("SO",wshf-document-no,wshf-document-suffix)
+			set t-po-shipment-consignment-no = SPACES
+		endif
+		// Temp Record Exists For Shipment Already?
+		get temp-file
+			on index t-po-shipment-no t-po-shipment-consignment-no t-stock-code
+			key is t-po-shipment-no t-po-shipment-consignment-no t-stock-code
+			lock
+		on error
+			// Determine Stock Locations
+			// Pick
+			set x = 1
+			select * from stock-location
+				where stock-code = t-stock-code 
+				// and sl-location-type in ('AP' 'DP' 'AM' 'DM' 'B1' 'PF')
+				order by sl-picking-preference sl-location-code
+			before sl-location-code
+				set lf-work-quantity = ZERO
+			detail
+				set lf-work-quantity += sl-qty-on-hand
+			after sl-location-code
+				if x = 1
+					set t-pick-1-location = sl-location-code
+					get warehouse-stock-location-conf
+						on index whse-code stock-code stock-location-type
+						key is whse-code stock-code sl-location-type
+					on error
+						set t-pick-1-space = 99999999
+					else
+						if wslc-max-qty > lf-work-quantity
+							set t-pick-1-space = wslc-max-qty - lf-work-quantity
+						else
+							set t-pick-1-space = ZERO
+						endif
+					end-on
+				endif
+				if x = 2
+					set t-pick-2-location = sl-location-code
+					get warehouse-stock-location-conf
+						on index whse-code stock-code stock-location-type
+						key is whse-code stock-code sl-location-type
+					on error
+						set t-pick-2-space = 99999999
+					else
+						if wslc-max-qty > lf-work-quantity
+							set t-pick-2-space = wslc-max-qty - lf-work-quantity
+						else
+							set t-pick-2-space = ZERO
+						endif
+					end-on
+				endif
+				if x > 2
+					set t-pick-2-location = 'MANY'
+					set t-pick-2-space = ZERO
+				endif
+				set x += 1
+			end-select
+			// Bulk
+			set x = 1
+			select * from stock-location
+				where stock-code = t-stock-code and sl-location-type in ('AB' 'DB')
+				order by sl-picking-preference sl-location-code
+			before sl-location-code
+				set lf-work-quantity = ZERO
+			detail
+				set lf-work-quantity += sl-qty-on-hand
+			after sl-location-code
+				if x = 1
+					set t-bulk-1-location = sl-location-code
+				endif
+				if x = 2
+					set t-bulk-2-location = sl-location-code
+				endif
+				if x > 2
+					set t-bulk-2-location = 'MANY'
+				endif
+				set x += 1
+			end-select
+			// Remaining Fields
+			set t-warehouse-holding-qty = warehouse-holding-qty
+			insert temp-file
+			on error
+			endon
+		else
+			set t-warehouse-holding-qty += warehouse-holding-qty
+			update temp-file
+			on error
+			end-on
+		end-on
+		if not rbtchproc-in-background
+			display "Building File" @20,59 background left bold
+			if time-elapsed(100,5)
+			display stock-code @23,54 foreground prompts
+			endif
+		endif
+	end-select
+	if ws-excel-flag = "D"
+		do display-datagrid
+	endif
+end-procedure
+
+procedure finish-report
+	if report-is-xml()
+		page
+		report section "options_page"
+	endif
+	if ws-report-started
+		skip 2
+		print 'Options selected : ' col 2 no-newline
+			tag  'options_print'
+		print 'Warehouse                     =  : ' in col 22
+			 tag is 'prompt_ws_whse_code'
+			ws-whse-code                   tag is 'ws_whse_code'
+		skip
+	endif
+	if report-is-xml()
+		report section finished
+	endif
+	RBTCHPROC_SCREEN_FINISH_MESSAGE(ws-report-started,23,45)
+endprocedure
+
+screen display-datagrid
+	window @1,1 to @24,80
+	title REPORT_NAME
+	datagrid occurs 22
+	select * from temp-file
+	allowed search
+detail
+	display t-po-shipment-no @1,1
+		Title "Shipment  "
+	display t-po-shipment-consignment-no @1,2
+		Title "Shipment consignment no"
+	display t-stock-code @1,3
+		Title "Item Code "
+	display t-stk-description @1,4
+		Title "Item Description "
+	display t-warehouse-holding-qty @1,5
+		Title "Quantity  "
+	display t-pick-1-location @1,6
+		Title "Quantity  "
+	display t-pick-1-space @1,7
+		Title "Quantity  "
+	display t-pick-2-location @1,8
+		Title "Quantity  "
+	display t-pick-2-space @1,9
+		Title "Quantity  "
+	display t-bulk-1-location @1,10
+		Title "Quantity  "
+	display t-bulk-2-location @1,11
+		Title "Quantity  "
+end-screen
+
+procedure available-locations-heading
+	print company-name
+		"Putaway Report" col 50
+		today col 80
+		tod col 90
+		"Page " col 100
+		page-no
+	skip
+	print "Stock Code"
+		"Description" col 20
+		"Awaiting Putaway" col 60
+	print 132"-"
+end-procedure
+
+procedure available-locations-report
+local
+	lf-max-qty							type number
+	lf-under-max-qty					type number
+	lf-percent-full						type number
+	lf-replen-qty						type number
+	lf-replen-leeway					type number
+	lf-config							type string
+	//
+	report "Putaway report"
+		no-message
+		heading available-locations-heading
+	page
+	//
+	select *
+		from stock-location, stock-master
+		where sl-location-code = "00000000"
+		and whse-code = :ws-whse-code
+	detail
+		print stock-code 
+			stk-description col 20
+	sl-qty-on-hand						pic z(9)9 col 60
+		select * 
+			from stock-location 
+			where stock-code = :stock-code
+			and whse-code = :ws-whse-code
+			and sl-location-code not in ("00000000" "ZINVOICE" "LOST")
+		before
+			print "Location" col 10
+				right-justify("Qoh",10) col 20
+				right-justify("Room for",10) col 30
+				right-justify("Capacity",10) col 40
+				right-justify("Replen",10) col 50
+		detail
+			/*
+			do clibwhse-determine-max-storage-for-item-location
+				parameters  whse-code stock-code sl-location-code spaces
+				returning lf-location-capacity
+			do clibwhse-determine-replen-level-for-item-location
+				parameters  whse-code stock-code sl-location-code spaces lf-location-capacity
+				returning lf-replen
+			*/
+			do clibwhse-determine-capacities
+				parameters  whse-code stock-code sl-location-code spaces
+				returning lf-max-qty lf-under-max-qty lf-percent-full lf-replen-qty lf-replen-leeway lf-config
+			print sl-location-code col 10
+				sl-qty-on-hand			pic z(9)9 col 20
+				lf-under-max-qty		pic z(9)9 col 30
+				lf-max-qty				pic z(9)9 col 40
+				lf-replen-qty			pic z(9)9 col 50
+//			print lf-max-qty lf-under-max-qty lf-percent-full lf-replen-qty lf-replen-leeway lf-config
+		after
+			skip
+		end-select
+	end-select
+end-procedure
+
+

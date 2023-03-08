@@ -1,0 +1,570 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : Reads the output of ipmitool -sdr list all 
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2011
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: c:\usr\pronto\cus\standards\xiutils\ipmi\addreading.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 21Apr11	rjb	Log 1	written
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/i8secabt.spl" 
+#include "../include/i8proglog.spl" 
+#include "../include/i8gparam.spl" 
+// #define DEBUG
+
+#if PRONTO_RELEASE < 71
+link 'clib/clibsql'
+#endif
+ 
+#define SETREADINGVALUE(A) \
+	if A > max-value(ipmi-reading-value) \
+		set ipmi-reading-value = max-value(ipmi-reading-value) - smallest-increment(ipmi-reading-value) \
+	else \
+		set ipmi-reading-value = A \
+	endif
+ 
+field 
+	ws-function-title					type string
+	ws-file-name						type string
+
+
+object readings
+	type is external
+	separator is ","
+	record is
+		r-date							type string
+		r-time							type string
+		r-text							type string
+		r-f4							type string
+		r-f5							type string
+		r-f6							type string
+		r-f7							type string
+		r-f8							type string
+		r-f9							type string
+	end-record
+
+object dfoutput
+	type is external
+	record is
+		df-mount						type string
+		df-type							type string
+		df-size							type string
+		df-used							type string
+		df-avail						type string
+		df-percent						type string
+	end-record
+
+object generics_output
+	type is external
+	record is
+		g-date							type string
+		gtime							type string
+		g-text							type string
+		g-value							type string
+		g-uom							type string
+	end-record
+
+procedure main 
+local
+#if PRONTO_RELEASE >= 71
+	lf-sql									type varchar pic x(4096)
+#endif
+	lf-filename								pic x(128) type string
+	lf-addone								type boolean
+	lf-ok									type boolean
+	get system-control first 
+	on error
+//		abort "No Control Record"
+//		Do nothing - don't care
+	endon
+//	do i8secabt-check-abort
+//		parameters are sys-consolidation-division login-id() "ZUSR" "M001"
+//		returning ws-function-title 
+	do i8proglog-write-log
+	open ipmi-readings 
+	on error
+		open ipmi-readings create 
+		on error
+			message "Unable to open readings table"
+			exit
+		endon
+	endon
+	// delete old readings
+#ifdef DEBUG
+	message "In debug mmode"
+#endif
+#if PRONTO_RELEASE < 71
+	do build-sql
+#else
+	set lf-sql = "delete  from sysinfo:ipmi_readings"
+	string lf-sql appending  " where row_id in ("
+	string lf-sql appending  " select r.row_id"
+	string lf-sql appending  " from sysinfo:ipmi_readings r, sysinfo:ipmi_master m"
+	string lf-sql appending  " where r.code = m.code"
+	string lf-sql appending  " and r.reading_time < current - m.days_to_keep units day);"
+	if db-command(lf-sql) endif
+#endif
+	//
+	I8GPARAM_ALPHA("-file",spaces,lf-filename)
+	if lf-filename = spaces
+		set ws-file-name = concat("/tmp/ipmi",str(pid()))
+		do build-reading-file parameters are ws-file-name
+			returning lf-ok
+		if not lf-ok
+			abort "Unable to get IPMI Readings"
+		endif
+	else
+		I8GPARAM_FLAG("-addone",FALSE,lf-addone)
+		if lf-addone
+			// this allows for an external program to passs some values to add
+			// This could be a shell script that checks dbspaces for example
+			do add-one-reading
+		else
+			set ws-file-name = lf-filename
+			if ws-file-name = spaces
+				message "No file passed to program"
+				exit
+			endif
+			if not file-exists(ws-file-name,FALSE)
+				message "Invalid file name passed to program"
+				exit
+			endif
+		endif
+	endif
+	open readings
+		file is ws-file-name
+		read-only
+	on error
+		message "Could not open file " ws-file-name
+		message error-description(file-status)
+		exit
+	endon
+	do process-file
+	do update-fs
+	// If there is a shell script in the ipmi folder called "generics.sh"
+	// then this fiel will be executed.  This script must create a file that
+	// is pipe delimited and the file layout is shown as above.  
+	// The shell script must send it's output to stdout as it will be
+	// redirected in this process
+	do process-generics
+#ifndef DEBUG
+	if lf-filename = spaces
+		close readings and remove
+	endif
+#endif
+end-procedure
+
+procedure process-generics
+local
+	lf-filename							type string
+	lf-found							type boolean
+	lf-key								like ipmi-code
+	lf-process							type boolean
+	i									type number
+	if file-exists(str-concat(get-env("CUS"),"/ipmi/generics.sh"),FALSE)
+		set lf-filename = str-concat("/tmp/gen" str(pid()) ".txt")
+		command "sh" parameters are "-c" concat("$CUS/ipmi/generics.sh > " lf-filename)
+		on error
+			message "Problem executing script"
+			message error-description(exit-status)
+			exit
+		endon
+		open generics_output
+			file is lf-filename
+		select * from generics_output
+		detail
+			// process the file
+			// Look for the master
+			set lf-found = false
+			set lf-process = true
+			select * from ipmi-master
+			detail
+				if uppercase(g-text) = uppercase(ipmi-match-text)
+					set lf-found = true
+					break
+				endif
+			end-select
+			if not lf-found
+				set i = 0
+				repeat
+					set i += 1
+					set lf-key = concat("auto_",format-picture(i,"999"))
+					get ipmi-master 
+						on index ipmi-code
+						key is lf-key
+					on error
+						set lf-found = true
+					endon
+				until lf-found  or i > 1000
+				end-repeat
+				initialise ipmi-master leaving ipmi-code
+				set ipmi-description = "auto created"
+				set ipmi-match-text = g-text
+				set ipmi-reading-field = 4
+				set ipmi-reading-type = "N"
+				set ipmi-boolean-tf = "F"
+				set ipmi-days-to-keep = 90
+				set ipmi-trigger-high = max-value(ipmi-trigger-high)
+				insert ipmi-master
+				on error
+					set lf-process = false
+				endon
+			endif
+			if lf-process
+				initialise ipmi-readings
+					leaving ipmi-code
+				set ipmi-datetime = systime()
+				set g-value = left-justify(g-value)
+				if ipmi-reading-type = "N"
+					SETREADINGVALUE(num(g-value))
+					set ipmi-reading-unit = g-uom
+				elseif ipmi-reading-type = "B"
+					if uppercase(g-value) = uppercase(ipmi-reading-boolean-match)
+						set ipmi-reading-value = if-then-else(ipmi-boolean-tf = "T",TRUE,FALSE)
+					else
+						set ipmi-reading-value = if-then-else(ipmi-boolean-tf = "F",TRUE,FALSE)
+					endif
+					set ipmi-reading-unit = "T/F"
+				endif
+				insert ipmi-readings
+				on error
+					message ipmi-code ":" ipmi-datetime ":" error-description(file-status())
+				endon
+			endif
+		end-select
+	endif
+end-procedure
+
+procedure add-one-reading
+// The prgram can be called with :
+// -addone
+// code for which this value will be added
+// value
+// units
+local
+	lf-code							like ipmi-code
+	lf-value						type string
+	lf-units						type string
+	set lf-code = get-param(2)
+	set lf-value = get-param(3)
+	set lf-units = get-param(4)
+	get ipmi-master
+		on index ipmi-code
+		key is lf-code
+	on error
+		message "No Such code exists: " lf-code
+	else
+		initialise ipmi-readings
+			leaving ipmi-code
+		set ipmi-datetime = systime()
+		set lf-value = left-justify(lf-value)
+		if ipmi-reading-type = "N"
+			SETREADINGVALUE(num(g-value))
+			set ipmi-reading-unit = lf-units
+		elseif ipmi-reading-type = "B"
+			if uppercase(lf-value) = uppercase(ipmi-reading-boolean-match)
+				set ipmi-reading-value = if-then-else(ipmi-boolean-tf = "T",TRUE,FALSE)
+			else
+				set ipmi-reading-value = if-then-else(ipmi-boolean-tf = "F",TRUE,FALSE)
+			endif
+			set ipmi-reading-unit = "T/F"
+		endif
+		insert ipmi-readings
+		on error
+			message error-description(file-status())
+		endon
+	endon
+end-procedure
+
+procedure process-file
+window no-hide
+local
+	lf-process-reading					type boolean
+	lf-field							type string
+	lf-count							type number
+//
+#ifdef DEBUG
+	report "ipmi readings"
+		no-message
+	message spool-file-name()
+#endif
+	if not batched()
+		display  tod() @12,10
+	endif
+	select * from readings
+		where r-f4 != "00h"
+	detail
+		set lf-count += 1
+		if not batched()
+			if not lf-count % 2000
+				display lf-count @10,10
+			endif
+		endif
+		set lf-process-reading = false
+		select * from ipmi-master
+		detail
+#ifdef DEBUG
+			print r-text ipmi-match-text
+#endif
+			if uppercase(r-text) = uppercase(ipmi-match-text)
+				set lf-process-reading = true
+				break
+			endif
+		end-select
+		if lf-process-reading
+			initialise ipmi-readings
+				leaving ipmi-code
+			do get-date-time parameters are r-date r-time
+				returning ipmi-datetime
+#ifdef DEBUG
+			print r-date r-time ipmi-datetime
+			print r-f4
+			print r-f5
+			print r-f6
+			print r-f7
+			print r-f8
+			print r-f9
+#endif
+			switch ipmi-reading-field
+			case 4
+				set lf-field = r-f4
+			case 5
+				set lf-field = r-f5
+			case 6
+				set lf-field = r-f6
+			case 7
+				set lf-field = r-f7
+			case 8
+				set lf-field = r-f8
+			end-switch
+			set lf-field = left-justify(lf-field)
+			if ipmi-reading-type = "N"
+				SETREADINGVALUE(num(lf-field))
+				set ipmi-reading-unit = r-f5
+			elseif ipmi-reading-type = "B"
+				if uppercase(lf-field) = uppercase(ipmi-reading-boolean-match)
+					set ipmi-reading-value = if-then-else(ipmi-boolean-tf = "T",TRUE,FALSE)
+				else
+					set ipmi-reading-value = if-then-else(ipmi-boolean-tf = "F",TRUE,FALSE)
+				endif
+				set ipmi-reading-unit = "T/F"
+			endif
+			insert ipmi-readings
+			on error
+				message error-description(file-status())
+			endon
+		endif
+		// at the end of the loop we should initialise all the fields
+		// for a csv file if there are missing fields (i.e. not all commas are
+		// in the field), fields will retain there previous values.
+//		set r-f4 = spaces
+//		set r-f5 = spaces
+//		set r-f6 = spaces
+////		set r-f7 = spaces
+//		set r-f8 = spaces
+//		set r-f9 = spaces
+	end-select
+#ifdef DEBUG
+	report finished
+#endif
+	if not batched()
+		display  tod() @13,10
+		display lf-count @14,10
+		pause
+	endif
+end-procedure
+
+procedure get-date-time
+parameters 
+	lp-date							type string
+	lp-time							type string
+returning
+	lr-datetime						type datetime
+local
+	lf-date							type date
+	lf-time							type time
+//
+	set lf-date = julian(
+					num(substring(lp-date,1,2)),
+					num(substring(lp-date,4,5)),
+					num(substring(lp-date,7,8))
+					)
+	set lf-time = (num(substring(lp-time,1,2)) * 3600 ) +
+					(num(substring(lp-time,4,5)) * 60 ) +
+					num(substring(lp-time,7,8))
+	set lr-datetime = datetime(lf-date,lf-time,FALSE)
+end-procedure
+
+procedure build-reading-file
+parameters
+	lf-file-name					pic x(256) type string
+returning 
+	lr-ok							type boolean
+local
+	lf-cmnd-text					pic x(512) type is string
+	lf-user							type string
+	lf-host							type string
+	lf-password						type string
+	lf-port							type string
+	lf-interface					type string
+//
+	set lr-ok = TRUE
+	I8GPARAM_ALPHA("-host",spaces,lf-host)
+	I8GPARAM_ALPHA("-user",spaces,lf-user)
+	I8GPARAM_ALPHA("-password",spaces,lf-password)
+	I8GPARAM_ALPHA("-port",spaces,lf-port)
+	I8GPARAM_ALPHA("-interface",spaces,lf-interface)
+	if lf-host = spaces
+		set lf-cmnd-text = "sudo -E ipmitool -c sdr list | awk "
+	else
+//		set lf-cmnd-text = "sudo -E ipmitool -UUSERID -PPASSW0RD -H192.168.110.101 -c sdr list | awk "
+		set lf-cmnd-text = "sudo -E ipmitool "
+		if lf-interface <> spaces
+			string lf-cmnd-text appending concat(" -I " lf-interface)
+		endif
+		if lf-user <> spaces
+			string lf-cmnd-text appending concat(" -U " lf-user)
+		endif
+		if lf-password <> spaces
+			string lf-cmnd-text appending concat(" -P " lf-password)
+		endif
+		if lf-host <> spaces
+			string lf-cmnd-text appending concat(" -H " lf-host)
+		endif
+		if lf-port <> spaces
+			string lf-cmnd-text appending concat(" -p " lf-port)
+		endif
+		string lf-cmnd-text appending " -c sdr list | awk "
+	endif
+	set lf-cmnd-text = concat(lf-cmnd-text, " ' { print strftime(",'"',"%d/%m/%y,%H:%M:%S,",'"',") $0} ' > ", lf-file-name)
+	command 'sh' parameters are '-c' lf-cmnd-text
+	on error
+		set lr-ok = FALSE
+	endon
+end-procedure
+
+
+#if PRONTO_RELEASE < 71
+procedure build-sql
+returning
+	lr-ok									type boolean
+	lr-file									pic x(1024) type string
+local
+	lf-ok									type boolean
+//
+	set lr-ok  = TRUE
+	do clibsql-prepare-sql
+		returning lf-ok
+	if not lf-ok
+		set lr-ok = FALSE
+		exit
+	endif
+	// delete readings that are older than the specified number of days
+	do clibsql-add-sql-text parameters "delete  from sysinfo:ipmi_readings"
+	do clibsql-add-sql-text parameters "where row_id in ("
+	do clibsql-add-sql-text parameters "select r.row_id"
+	do clibsql-add-sql-text parameters "from sysinfo:ipmi_readings r, sysinfo:ipmi_master m"
+	do clibsql-add-sql-text parameters "where r.code = m.code"
+	do clibsql-add-sql-text parameters "and r.reading_time < current - m.days_to_keep units day);"
+	// It is a requirement of the exesql script that some sort of select
+	// statement is included.  So this is just a dummy to ensure to executes.
+	// set the trigger points.
+	do clibsql-exec-sql-text
+		returning lr-file lr-ok
+	// We don't need the output so we can delete it right away
+	command "sh" parameters are "-c" concat("sudo rm -f ", lr-file)
+end-procedure
+#endif
+
+procedure update-fs
+local
+	lf-fname								type string
+	lf-command								pic x(128) type string
+	lf-found								type boolean
+	lf-last-key								like ipmi-code
+	//
+	set lf-fname = str-concat("/tmp/df",str(pid),".txt")
+	set lf-command = "df -Pm --print-type / /vg? | sed '1d' | awk '{print $7"
+	string lf-command appending '"|"$2"|"$3"|"$4"|"$5"|"$6}'
+	string lf-command appending str-concat("' > ",lf-fname)
+//	message lf-command
+	command 'sh' parameters are '-c' lf-command
+	on error
+		message "Could not execute command:" error-description(exit-status)
+		exit
+	endon
+	//
+	open dfoutput 
+		file is lf-fname
+	on error
+		message "Could not open " lf-fname " : " error-description(file-status())
+		exit
+	endon
+	select * from dfoutput
+		where pattern(df-type,"ext")
+	detail
+		// find the right master record
+		// the key is kept in description becuase
+		// it is possible that the file system name may exceed 10 characters
+		//
+		select * from ipmi-master
+			where sql-substring(ipmi-code,1,2) = "FS"
+		detail
+			if ipmi-match-text = df-mount 
+				set lf-found = true
+				break
+			endif
+			set lf-last-key = ipmi-code
+		end-select
+		// What if there were none?
+		if not lf-found and lf-last-key = spaces
+			initialise ipmi-master
+			set ipmi-code = "FS1"
+			set ipmi-description = concat("File System %full",df-mount)
+			set ipmi-match-text = df-mount
+			set ipmi-reading-type = "N"
+			set ipmi-trigger-high = 80
+			set ipmi-days-to-keep = 180
+			insert ipmi-master
+			on error
+				message "Failed to add master record"
+			endon
+		elseif not lf-found
+			// then we must have found something in lf-last-key that starts
+			// with FS, so make the next one that code + 1
+			set ipmi-code = concat("FS",str(num(substring(lf-last-key,3,10)) + 1))
+			set ipmi-description = concat("File System %full",df-mount)
+			set ipmi-match-text = df-mount
+			set ipmi-reading-type = "N"
+			set ipmi-trigger-high = 80
+			set ipmi-days-to-keep = 180
+			insert ipmi-master
+			on error
+				message "Failed to add master record"
+			endon
+		endif
+		// at this point ipmi-code is either set because we found it initially
+		// or because we just added it.
+		//
+		initialise ipmi-readings
+			leaving ipmi-code
+		set ipmi-datetime = systime()
+		// trim off the last character - it is "%"
+		set ipmi-reading-value = num(substring(df-percent,1,str-len(df-percent) - 1))
+		set ipmi-reading-unit = "Percent"
+		insert ipmi-readings
+		on error
+			message "Failed to insert reading:" error-description(file-status()) ":" ipmi-code "," ipmi-datetime
+		endon
+	end-select
+	close dfoutput and remove
+end-procedure
+

@@ -1,0 +1,183 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : Generic Routines for stock
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2022
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: clib/clibvstk.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 21Sep22  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+ 
+
+/*
+
+=====================================
+clibvstk
+=====================================
+
+	Generic routines for managing stock at GDR
+
+	Check exit status of each routine to verify correct execution.  Use -get-last-error to 
+	return last error message.
+
+clibvstk-get-user-warehouse
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	Returns the default warehouse for the user.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   Out     | X(4)      | Default warehouse code                                 |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvstk-get-qty-pic-clause
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	Return a pic clause to use to display the numbers based on the no of decimals in the uom
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      | String    | A valid stock code                                     |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      | String    | A valid uom. If blank then the default stock uom will  |
+	|           |           | be used.                                               |
+	|           |           |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      | Number    | A maximum size to display.  If 0 then 14 characters    |
+	|           |           | is used.                                               |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     | String    | A Valid Pic Clause                                     |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvstk-get-last-error
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	Returns the text of the last error message
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   Out     |String 1k  |Text of last error message                              |
+	+-----------+-----------+--------------------------------------------------------+
+
+	use rst_paras_table<t> to add more parameter tables
+
+*/
+
+
+#include "../include/i8proglogparam.spl"
+
+link "clib/clibstk"
+ 
+field
+	ws-last-error						pic x(1024) type string
+
+procedure library-init
+	get system-control first
+	on error
+		abort "No System Control record"
+	endon
+	do i8proglogparam-write-log parameters are "clibgdrstk"
+end-procedure
+
+procedure main
+	get system-control first
+	on error
+		abort "No System Control record"
+	endon
+	do i8proglogparam-write-log parameters are "clibgdrstk"
+	do testcases
+end-procedure
+
+procedure clibvstk-get-last-error export
+returning
+	lr-message							like ws-last-error
+	set lr-message = ws-last-error
+end-procedure
+
+//
+//  --------- Exported routines and supporting code goes here ---------
+//
+
+procedure clibvstk-get-user-warehouse export
+returning
+	lr-whse								like whse-code
+	//
+	get system-user
+		on index user-id sys-comp-code
+		key is login-id sys-consolidation-division
+	on error
+	else
+		if user-whse != spaces
+			set lr-whse = user-whse
+			exit
+		endif
+	endon
+	if sys-default-whse != spaces
+		set lr-whse = sys-default-whse
+		exit 
+	endif
+end-procedure
+
+procedure clibvstk-get-qty-pic-clause export
+parameters
+	lp-stock-code						like stock-code
+	lp-uom								like stk-unit-desc
+	lp-max-size							type number
+returning
+	lr-pic								type string
+local
+	lf-rounding							type number
+	lf-decimals							type number
+	i 									type number
+	//
+	if lp-max-size = 0
+		set lp-max-size = 14
+	endif
+	get stock-master
+		on index stock-code
+		key is lp-stock-code
+	on error
+		set ws-last-error = str-concat("Stock Code does not exist (" lp-stock-code ")")
+		exit 1
+	endon
+	if lp-uom = spaces
+		set lp-uom = stk-unit-desc
+	endif
+	do clibstk-item-rounding 
+		parameters are lp-uom
+		returning lf-rounding lf-decimals
+	//
+	set lr-pic = "-("
+	if lf-decimals  = 0
+		string lr-pic appending str(lp-max-size)
+		string lr-pic appending ")9"
+	else
+		string lr-pic appending str(lp-max-size - lf-decimals - 1)
+		string lr-pic appending ")9."
+		for i = 1 to lf-decimals
+			string lr-pic appending "9"
+		end-for
+	endif
+end-procedure
+//
+//  ---------  Test cases and ssetup code go here -------- 
+//
+
+menu testcases
+	window no-hide
+detail
+	option "Setup" @1,1
+		message "Put calls to setup code here"
+	option "Test 1" @3,1
+		message "Replace with do testcase 1 when written"
+end-menu

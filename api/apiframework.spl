@@ -1,0 +1,118 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : Connect APIs template 
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2020
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: vapi/vapipos.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 110Sep20  stf         written 
+////////////////////////////////////////////////////////////////////////////////
+ 
+version-number "1.0.0"
+
+//link 'clib/clibwapi'
+
+//#ifndef LOAD_FROM_DICT
+//#define LOAD_FROM_DICT
+//#endif
+#include "../api/ixml.spl"
+#include "../api/ixmldef.spl"
+
+procedure api-server-init
+	get system-control first
+	on error
+		abort 'No Control Record'
+	endon
+endprocedure
+
+api vapi-sample-response export no-override
+	parameters
+		lp-request-blob						type blob
+		lp-pronto-token						like st-token
+		lp-url								like aav-api-version
+		lp-url-complete						type string pic x(BMSDEF_PATHSIZE)
+		lp-query-string						pic x(4000) type varchar //used to extract get parameters if relevant
+	returning	
+		lr-response-blob					type blob
+		lr-http-header-Content-Type			type string
+	local fields
+		lf-response-doc-handle				type xml_handle
+		lf-response-parent-node				type xml-handle
+		lf-request-doc-handle				type xml_handle
+		lf-node-root						type xml-handle
+		lf-node-child						type xml-handle
+		lf-ok-to-process					type boolean
+		lf-error-no							type number
+		lf-error-message					type string pic x(BMSDEF_PATHSIZE)
+		lf-parameter1						type string
+		lf-response1						type string
+	///////////////////////////////////////////////////////////////////////////////
+	//Main processing
+	//parse request
+	set lf-request-doc-handle = xml-parse-text(lp-request-blob)
+	set lf-node-root =  xml-get-root-node(lf-request-doc-handle)
+	set lf-ok-to-process = true
+	if lf-node-root = ZERO
+		set lf-ok-to-process = false
+		set lf-error-message = "Invalid root" 
+	endif
+	//get msisdn
+	set lf-node-child = xml-get-child-by-name(lf-node-root,"parameter1",SPACES)
+	if lf-node-child = ZERO	
+		set lf-parameter1 = spaces
+		set lf-ok-to-process = false
+		set lf-error-message = "No Valid Parameter 1"
+	else
+		set lf-parameter1 = xml-node-text(lf-node-child)			
+	endif
+	///////////////////////////////////////////////////////////////////////////////
+	if lf-ok-to-process
+		do work-procedure
+		parameters are
+			lf-parameter1
+		returning
+			lf-response1
+			lf-error-no
+			lf-error-message
+	else
+	endif
+	//create response doc
+	set lr-http-header-content-type = "application/xml"
+	set lf-response-doc-handle = xml-new-document("1.0",SPACES)
+	//response
+	set lf-response-parent-node = xml-add-child-node(xml-get-root-node(lf-response-doc-handle),"APIResponseStatus", SPACES)
+	if xml-add-child-node-text(lf-response-parent-node,"Code",SPACES,str(lf-error-no))	endif
+	if xml-add-child-node-text(lf-response-parent-node,"Message",SPACES,lf-error-message)	endif
+	if lf-response1 != spaces
+		set  lf-response-parent-node = xml-add-child-node(xml-get-root-node(lf-response-doc-handle),"ResponseFields", SPACES)
+		if xml-add-child-node-text(lf-response-parent-node,"Response 1",SPACES,lf-response1)	endif	
+	endif
+	//boilerplate close
+	IXML_SAVE_AND_CLOSE_RESPONSE
+end-api
+
+procedure  work-procedure
+parameters are
+	lp-parameter1							type string
+returning
+	lr-response1							type string
+	lr-error-no								type number
+	lr-error-message						type string pic x(BMSDEF_PATHSIZE)
+	if lp-parameter1 = spaces
+		set lr-response1 = spaces
+		set lr-error-no = 1
+		set lr-error-message = 'Parameter 1 required'
+	else
+		set lr-response1 = concat("success: ", lp-parameter1)
+		set lr-error-no = 0
+		set lr-error-message = 'OK'
+	endif
+end-procedure
+

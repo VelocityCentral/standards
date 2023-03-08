@@ -1,0 +1,215 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : Sample EDI Data Create
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2018
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: edi/crtsampleords.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 12Mar18  rjb         written 
+// This program is intended to be run via cron to generate sample orders
+// during a demo.
+// output file looks like this:
+// <order>
+// 		<customer>
+// 		<delivery_date>
+// 		<PO>
+// 		<line>
+// 			<stock_code>
+// 			<qty>
+// 			<price>
+// 			<disc>
+// 		</line>
+// </order>
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/i8proglog.spl"
+#include "../include/iwrtevntlog.spl"
+
+#define MAKE_PO_UNIQUE
+
+link 'clib/clibwrtevntlog'
+
+#define LOG(A) \
+	do clibwrtevntlog-write-log parameters are IWRTEVNTLOG_LEVEL_DEBUG 'APPS'   \
+		str-concat(substring(get-param(0),pattern(get-param(0),"[~/]*$"),str-len(get-param(0))) \
+		,"|",str(pid())) \
+		A
+ 
+field
+	ws-function-title					type string
+
+#define RANDOM_BETWEEN(A,B) \
+	(((RANDOM(0) / 32767) * (B - A)) + A)
+
+
+//change here for each demo
+#define MAXORDSPERFILE 10
+#define MINLINESPERORD 1
+#define MAXLINESPERORD 3 // note that this is added to MIN  (ie if min is 3 max 4 then there will be between 3 and 7 lines)
+
+// --------------------- Customers --------------------------
+#define CUSTOMERS idx(RANDOM_BETWEEN(1,3),"C0002","C0003","C0004") 
+// In the following the last one is duplicated to increase probability of selection
+//#define CUSTOMERS idx(RANDOM_BETWEEN(1,4),"C0002","C0005","C0006", "C0006")  // note last one duplicated to increase probability of selection
+
+// --------------------- Stock Items --------------------------
+// Don't try to load lot controlled or serial traced items this way.
+// It will work but all the orders will go on hold because lots have not been
+// allocated.
+// Basic items:
+#define STOCK_CODES idx(RANDOM_BETWEEN(1,3),"EQ100","EQ110","EQ120")
+// Manufactured items:
+// #define STOCK_CODES idx(RANDOM_BETWEEN(1,3),"BR300","BR400","BU100")
+// Style Colour Size:
+//#define STOCK_CODES idx(RANDOM_BETWEEN(1,3), "SH001BLUL", "SH001BLUM", "SH001BLUS")
+//
+//--------------------- Delivery Dates -------------------------
+//
+// This function will determine the number of days to add to todays date to
+// get a delivery date.  Duplicating some of the numbers simply increases the
+// probabilty of that value being selected.
+#define DELDATEDAYS idx(RANDOM_BETWEEN(1,10), 0,21,14,2,3,7,7,14,21,28)
+//
+// ----------------------   QTY to use on sales orders ------------------
+//
+// Sometimes you want to use the pack qty, sometimes not.  This controls it:
+// Macro to determine the qty.  
+//
+/*
+// this example makes it always a function of pack qty
+#define QTY \
+		integer(RANDOM_BETWEEN(1,10) * stk-pack-qty)
+// this example makes it always a function of pack qty but has bigger numbers
+// for the manufactured items
+#define QTY \
+		if-then-else(stock-code in ('BR300','BR400','BU100'), \
+		integer(RANDOM_BETWEEN(10,20) * stk-pack-qty), \
+		integer(RANDOM_BETWEEN(1,10) * stk-pack-qty))
+// 20% probablity of the pack qty
+#define QTY \
+	if-then-else(RANDOM_BETWEEN(1,10) < 2,integer(RANDOM_BETWEEN(1,2) * stk-pack-qty), \
+		integer(RANDOM_BETWEEN(1,10)))
+// This example has a 90% probabability of a1 or 2 times the pack qty,
+// and a 10% chance of using a random number between 1 and 10:
+#define QTY \
+	if-then-else(RANDOM_BETWEEN(1,10) < 9,integer(RANDOM_BETWEEN(1,2) * stk-pack-qty), \
+		integer(RANDOM_BETWEEN(1,10)))
+*/
+// this example makes it always a function of pack qty
+#define QTY \
+		integer(RANDOM_BETWEEN(1,10) * stk-pack-qty)
+
+
+
+procedure main
+returning 
+	lr-results						pic x(1024) type string
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8proglog-write-log
+	do create-data
+		returning lr-results
+	LOG(lr-results)
+end-procedure
+
+procedure create-data
+returning 
+	lr-results						pic x(1024) type string
+local
+	lf-doc								type xml-handle
+	lf-root								type xml-handle
+	lf-ord								type xml-handle
+	lf-line								type xml-handle
+	i									type number
+	j									type number
+	lf-accountcode						like accountcode
+	lf-stock-code						like stock-code
+	lf-file								pic x(100) type string
+	lf-all-pack-qty						type number
+	lf-stock-codes-on-order				pic x(30) type string occurs 100
+	k									type number
+	lf-k-loop-counter					type number
+	lf-order-max						type number
+	lf-line-max							type number
+	//
+	if random(tod()) endif
+	set lf-doc = xml-new-document(spaces,"orders")
+	set lf-root  = xml-get-root-node(lf-doc)
+	set lf-order-max = integer(RANDOM_BETWEEN(1,MAXORDSPERFILE))
+	for i = 1 to lf-order-max
+		set lf-ord = xml-add-child-node(lf-root,"Order",spaces)
+		set lf-accountcode =  CUSTOMERS
+		set lf-stock-codes-on-order[*] = spaces
+		get deb-master
+			on index accountcode 
+			key is lf-accountcode
+		if xml-add-child-node-text(lf-ord,"customer",spaces,lf-accountcode) endif
+		if xml-add-child-node-text(lf-ord,"delivery_date",spaces,
+			format-picture((today() + DELDATEDAYS),"dd mm yyyy")) endif
+//
+#ifdef MAKE_PO_UNIQUE
+		if xml-add-child-node-text(lf-ord,"PO",spaces,
+			str-concat("PO" str((num(str(systime()))) * 
+				RANDOM_BETWEEN(1,5)))) endif
+#else
+		if xml-add-child-node-text(lf-ord,"PO",spaces,
+			str-concat("PO" str(integer(RANDOM_BETWEEN(1000,5000) * 
+				RANDOM_BETWEEN(1,5))))) endif
+#endif
+/*
+#ifndef ALWAYS_USE_PACK_QTY
+		if RANDOM_BETWEEN(1,10) <= 9 // 90% probability
+			set lf-all-pack-qty = TRUE
+		else
+			set lf-all-pack-qty = FALSE
+		endif
+#else
+		set lf-all-pack-qty = TRUE
+#endif
+*/
+		set lf-line-max = integer(RANDOM_BETWEEN(1,MAXLINESPERORD))
+		for j = 1 to lf-line-max
+			set lf-line = xml-add-child-node(lf-ord,"line",spaces)
+			set k = 1
+			set lf-stock-code = STOCK_CODES
+			while lf-k-loop-counter < occurrence(lf-stock-codes-on-order) 
+				set lf-k-loop-counter += 1
+				if lf-stock-codes-on-order[k] = spaces
+					break
+				endif
+				if lf-stock-codes-on-order[k] = lf-stock-code
+					set lf-stock-code = STOCK_CODES
+					set k = 0
+				endif
+				set k += 1
+			end-while
+			if lf-k-loop-counter >= occurrence(lf-stock-codes-on-order) 
+				break
+			endif
+			set lf-stock-codes-on-order[k] = lf-stock-code
+			get stock-master
+				on index stock-code 
+				key is lf-stock-code 
+			on error
+			endon
+			if xml-add-child-node-text(lf-line,"stock_code",spaces,lf-stock-code) endif
+			if xml-add-child-node-text(lf-line,"qty",spaces,str(QTY)) endif
+		end-for
+	end-for
+	set lf-file = str-concat(get-env('PROEDI'),"/in/demo/edi",format-picture(today(),"yyyymmdd"),str(pid()),str(tod),".xml")
+	if not xml-save-as-file(lf-doc,lf-file,spaces,2) 
+		set lr-results = concat("unable to save file:",lf-file)
+	else
+		set lr-results = concat("File Created :",lf-file)
+	endif
+end-procedure
+

@@ -1,0 +1,17 @@
+# Created by Apollo
+screen select-saved-projects
+	{
+	mode
+		{
+		name = "apollo"
+		add = true
+		text = "Apollo"
+		}
+	trigger
+		{
+		trigger_point = confirmed
+		name = "apollo"
+		run = "apollodi/definer" "-di" dim-project-id
+		type = pronto
+		}
+	}

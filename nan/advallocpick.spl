@@ -1,0 +1,249 @@
+/*
+
+	program to allocate pick locations to items not located
+
+*/
+
+#define PICK_LOCATION_TYPE "PF"
+
+link 'clib/clibvods'
+
+field
+	ws-warehouse-code				like whse-code
+
+procedure main
+	get system-control first
+	get warehouse-user-access
+		on index wu-user-id
+		key is login-id()
+	on error ENOREC
+		message "You are not allocated to a warehouse"
+		exit
+	else
+		set ws-warehouse-code = wu-whse-code
+	endon
+	do mainmenu
+end-procedure
+
+menu mainmenu
+	window
+	title ws-warehouse-code
+detail
+	option "Show Allocated Pick Locations" @1,1
+		do show-allocated-locations
+	option "Allocate new locations" @2,1
+		do allocate-pick-locations
+		message "Complete - see report"
+	option "Spreadsheet of Location capacities by item" @3,1
+		do buildss
+end-menu
+
+screen show-allocated-locations
+local
+	lf-count					type number
+	window
+	title "Location Allocations"
+	datagrid
+	select *
+		from stock-location as t0
+		inner join warehouse-location-types as t1 
+			on t0.sl-location-type = t1.location-type
+			and t0.whse-code = t1.whse-code
+		where t0.sl-location-type = PICK_LOCATION_TYPE
+before
+	select lf-count = count(*)
+		from stock-location 
+		where sl-location-type = PICK_LOCATION_TYPE
+		and stock-code != spaces
+	end-select
+	if lf-count = 0
+		message "There are no stock items allocated to any locations"
+	endif
+detail
+	accept whse-code  col 1
+		title "Warehouse"
+	accept sl-location-code col 2
+		title "Location"
+	accept stock-code col 3
+		title "Stock"
+	display sl-picking-preference col 4
+		title "Pick Pref"
+	display sl-location-type col 5
+		title "Type"
+	display location-description col 6
+		title "locn desc"
+	display sl-qty-on-hand col 8
+		title "Qty"
+end-screen
+
+
+procedure allocate-pick-locations
+local
+	lf-picklocs							type number
+	lf-location							like sl-location-code
+	report "Allocated Locations"
+	select *
+		from system-table
+		where sys-tbl-type = "WH"
+		and sys-tbl-sales-mtd = 3
+	detail
+		print "processing warehouse " sys-tbl-code
+		select *
+			from stock-warehouse-detail
+			where whse-code = :sys-tbl-code
+			and whse-qty-on-hand <> 0
+		detail
+			select lf-picklocs = count(*)
+				from stock-location
+				where whse-code = :whse-code
+				and stock-code = :stock-code
+				and sl-location-type = PICK_LOCATION_TYPE
+			end-select
+			if lf-picklocs = 0
+				get warehouse-location-types
+					on index whse-code location-type
+					key is whse-code PICK_LOCATION_TYPE
+				on error
+					get warehouse-location-types
+						on index whse-code location-type
+						key is spaces PICK_LOCATION_TYPE
+					on error
+						message "no valid type"
+						exit 1
+					endon
+				endon
+				do get-next-pick-location 
+					parameters are whse-code location-type
+					returning lf-location
+				if lf-location = spaces
+					acknowledge "no locations"
+					exit
+				endif
+				initialise stock-location
+					leaving whse-code stock-code
+				set sl-location-code = lf-location
+				set sl-picking-preference = location-preference
+				set sl-location-type = location-type
+				insert stock-location
+				on error
+				else
+					print stock-code " in " whse-code " allocated to pick location " sl-location-code
+				endon
+			endif
+		end-select
+	end-select
+end-procedure
+
+procedure get-next-pick-location
+parameters
+	lp-whse-code					like whse-code
+	lp-location-type				like location-type
+returning 
+	lr-location-code				like sl-location-code
+	select * 
+		from warehouse-valid-locations
+		where sl-location-code not in (select sl-location-code from stock-location)
+		order by sl-location-code
+	detail
+		set lr-location-code = sl-location-code
+		exit
+	end-select
+end-procedure
+
+procedure buildss
+local
+	lf-plt-qty							type number
+	//
+	// Calculate number of
+	do clibvods-start-export parameters "/tmp"
+	do clibvods-add-sheet parameters "Whse Capacities" True
+	do clibvods-add-sheet-row
+	do clibvods-fill-a-cell-alpha parameters spaces "Stock Code"
+	do clibvods-fill-a-cell-alpha parameters spaces "Stock Group"
+	do clibvods-fill-a-cell-alpha parameters spaces "Stock Description"
+	do clibvods-fill-a-cell-alpha parameters spaces "Locn Type"
+	do clibvods-fill-a-cell-alpha parameters spaces "Val Type"
+	do clibvods-fill-a-cell-alpha parameters spaces "Value"
+	select * from stock-master 
+		where stk-stock-status not in ( "I", "K", "Z", "L" )
+		order by stock-code
+	detail
+		select * from warehouse-stock-master
+			where stock-code = :stock-code
+			and wsm-whse-code in ( 'W01' spaces )
+			order by wsm-whse-code desc
+		detail
+			// break on the first record.  We read in wsm-whse-code DESC order
+			// therefore the first record is either one for the warheouse or
+			// the default one (spaces)
+			break 
+		end-select
+		// get the pallet qty
+		// The UOM for the Pallet MUST be PLT (see stk/m4stkstore)
+		get stock-unit-conversion
+			on index stock-code suc-unit-desc
+			key is stock-code "PLT"
+		on error ENOREC
+			set lf-plt-qty = 0
+		else
+			set lf-plt-qty = suc-unit-conversion
+		endon
+		select * from warehouse-location-types
+			where whse-code = :ws-warehouse-code
+		detail
+			// IS there an override?
+			get warehouse-stock-location-conf
+				on index whse-code stock-code stock-location-type
+				key is ws-warehouse-code stock-code location-type
+			on error ENOREC
+				// use the values from the location type
+				do add-a-row  parameters
+					stock-code 
+					location-type
+					"MAX"
+					suc-unit-conversion * if-then-else(wlt-pallet-storage-max = 0, 1 , wlt-pallet-storage-max)
+				do add-a-row  parameters
+					stock-code 
+					location-type
+					"TOPUP"
+					suc-unit-conversion * if-then-else(location-replenishment-level = 0, 1 , location-replenishment-level)
+			else
+				// use the values from warehouse-stock-location-conf
+				do add-a-row  parameters
+					stock-code 
+					location-type
+					"MAX"
+					wslc-max-qty
+				do add-a-row  parameters
+					stock-code 
+					location-type
+					"TOPUP"
+					wslc-replenish-point
+			endon
+		end-select
+	end-select
+	do clibvods-finish-export parameters are "/tmp/Storage.ods"
+	message "File created in /tmp"
+end-procedure
+
+procedure add-a-row
+parameters
+	lp-stock-code				like stock-code
+	lp-location-type			like location-type
+	lp-value-type				pic x(10)
+	lp-value					type number
+	//
+	// currency on stock master
+	//
+	do clibvods-add-sheet-row
+	do clibvods-fill-a-cell-alpha parameters spaces lp-stock-code
+	do clibvods-fill-a-cell-alpha parameters spaces stock-group
+	do clibvods-fill-a-cell-alpha parameters spaces stk-description
+	do clibvods-fill-a-cell-alpha parameters spaces lp-location-type
+	do clibvods-fill-a-cell-alpha parameters spaces lp-value-type
+	do clibvods-fill-a-cell-numeric parameters spaces lp-value
+end-procedure
+
+procedure create-stock-take-file
+	// Search through each
+end-procedure

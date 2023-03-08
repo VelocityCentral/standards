@@ -1,0 +1,329 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : Cognos Integrity.
+//
+// The purppse of this code is look at a number of things on the Pronto
+// server that are required for the correct execution of cognos.   If there
+// are problems are report is produced that gives you a starting point.
+//
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2019
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: utility/cognosinteg.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 22Aug19  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+#include "../include/i8gparam.spl"
+ 
+field
+	ws-function-title						type string
+
+object text-file
+	type is external
+	record is
+		tf-line								pic x(1024) type string
+	end-record
+
+object systables
+	type is indexed
+	record is
+		st_tabname						pic x(20) type string db-column-name "tabname"
+		st_owner						pic x(20) type string db-column-name "owner"
+		st_tabtype						pic x type string db-column-name "tabtype"
+	end-record
+	key is st_tabname
+	no-rowid
+
+object systabauth
+	type is indexed
+	record is
+		sa_grantee						pic x(20) type string db-column-name "grantee"
+	end-record
+	key is sa_grantee
+	no-rowid
+
+procedure main
+local
+	lf-silent								type boolean
+	lf-ok									type boolean
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8secabt-check-abort
+		parameters are sys-consolidation-division login-id() "ZUSR" "R004"
+		returning ws-function-title 
+	do i8proglog-write-log
+	I8GPARAM_FLAG('-silent', FALSE, lf-silent)
+	if lf-silent
+		do check-cognos returning lf-ok
+		if not lf-ok
+			message "There were problems.  See report"
+		endif
+	else
+		do prompt-screen entry once
+	endif
+end-procedure
+
+screen prompt-screen
+local
+	lf-ok						type boolean
+	lf-dummy					pic x
+	window
+	form-entry
+	no-ok-cancel
+before
+	display "This program produces a report that checks a few setups for cognos" @1,1
+detail
+	accept lf-dummy @132,99
+		no-warning
+	option "Press Enter to check" @3,3
+		do check-cognos
+			returning lf-ok
+		if not lf-ok
+			message-box param-text("<<P1>><<BR>><<p2>>"
+				,"There seems to be some problem"
+				,"See the produced report for details")
+				title is ws-function-title
+				message-buttons MSG_BOX_CANCEL
+				icon MSG_BOX_STOP
+		else
+			message-box param-text("<<P1>><<BR>><<p2>>"
+				,"Everything looks like it is ok."
+				,"May still be some things wrong but so far so good")
+				title is ws-function-title
+				message-buttons MSG_BOX_OK
+				icon MSG_BOX_INFORMATION
+		endif
+	end-option
+end-screen
+
+#define CALL(A) \
+	do A returning lf-ok \
+	if not lf-ok \
+		set lr-ok = FALSE \
+	endif
+
+procedure check-cognos
+returning
+	lr-ok								type boolean
+local
+	lf-ok								type boolean
+	set lr-ok = TRUE
+	report "Cognos Integrity"
+	CALL(check-licence)
+	CALL(check-serial)
+	CALL(check-server-name)
+	CALL(check-companies)
+	CALL(check-views)
+	CALL(check-imix-auth)
+	report finished
+end-procedure
+
+procedure check-licence
+returning
+	lr-ok								type boolean
+local
+	lf-sql-count						type number
+	//
+	set lr-ok = FALSE
+	select lf-sql-count = count(*)
+		from group-license-master
+	end-select
+	if lf-sql-count = 0
+		print "SYS.M092 - There does not appear to be any licence"
+		exit
+	endif
+	set lr-ok = TRUE
+end-procedure
+
+procedure check-serial
+returning
+	lr-ok								type boolean
+local
+	lf-cmd								pic x(1024) type string
+	lf-serial-file						pic x(1024) type string
+	//
+	set lr-ok = FALSE
+	set lf-serial-file = str-concat("/tmp/serial" str(pid()) ".txt")
+	set lf-cmd = "dd skip=10 count=6 if="
+	string lf-cmd appending get-env("PRONTO")
+	string lf-cmd appending "/lib/proctrl of="
+	string lf-cmd appending  lf-serial-file
+	string lf-cmd appending " bs=1"
+	command "sh" parameters are "-c" lf-cmd
+	command "sh" parameters are "-c" concat("sed -i 's/$/\n/' " lf-serial-file)
+	open text-file
+		file is lf-serial-file
+	on error
+		print "Unable to check licence serial no" in col 1 error-description(file-status()) lf-serial-file
+		exit
+	endon
+	select * from text-file
+	detail
+		if tf-line = "950572"
+			print "WARNING: this is velocity's site id. "
+		endif
+		break // one record only
+	end-select
+	close text-file and remove
+	get system-site-id
+		on index sys-company
+		key is spaces
+	on error
+		print "The site id is missing from system_site_id" in col 1
+		exit
+	endon
+	if ssi-site-id != tf-line 
+		print "The site id is not the same as the licence (see system-site-id)" in col 1
+		exit
+	endif
+	set lr-ok = TRUE
+end-procedure
+
+procedure check-server-name
+returning
+	lr-ok								type boolean
+local
+	lf-text-file						pic x(1024) type string
+	lf-domain							pic x(1024) type string
+	//
+	set lr-ok = FALSE
+	set lf-text-file = str-concat("/tmp/text" str(pid()) ".txt")
+	command "sh" parameters are "-c" concat("hostname > " lf-text-file)
+	open text-file
+		file is lf-text-file
+	on error
+		print "Unable to check hostname " in col 1 error-description(file-status()) lf-text-file
+		exit
+	endon
+	select * from text-file
+	detail
+		set lf-domain = tf-line
+		string lf-domain deleting 1 to pattern(lf-domain ,  ".") 
+		break
+	end-select
+	close text-file and remove
+	//
+	// now check
+	//
+	// get the domain
+	select * from cap-server
+	detail
+		switch cs-code
+		case spaces 
+			if pattern(cs-server-url ,  lf-domain) = 0
+				print concat("SYS.M169 The domain does not appear in the url for the cognos server (" lf-domain ")")
+				exit
+			endif
+		case "E"
+			if pattern(cs-server-url ,  lf-domain) = 0
+				print concat("SYS.M169 The domain does not appear in the email  for the cognos server (" lf-domain ")")
+				exit
+			endif
+		end-switch
+	end-select
+	set lr-ok = TRUE
+end-procedure
+
+procedure check-companies
+returning
+	lr-ok								type boolean
+local
+	lf-sql-count						type number
+	//
+	set lr-ok = FALSE
+	select *
+		from system-companies
+	detail
+		select lf-sql-count = count(*)
+			from cap-data-source-config
+			where cdsc-comp-code = :sys-comp-code
+		detail
+			if lf-sql-count = 0
+				print "SYS.M171 " sys-comp-code " is missing from cap-data-source-config "
+				exit
+			endif
+		end-select
+	end-select
+	set lr-ok = TRUE
+end-procedure
+
+procedure check-views
+returning
+	lr-ok								type boolean
+local
+	lf-db								pic x(100) type string
+	lf-sql-count						type number
+	set lr-ok = FALSE
+	do get-db returning lf-db
+	open systables
+		file is str-concat("/",lf-db,"/informix.systables")
+	on error
+		print "Can't open systables" 
+		exit
+	endon
+	select lf-sql-count = count(*)
+		from systables
+		where st_tabname in ( 'sales_order_all' , 'gl_balance')
+	end-select
+	if lf-sql-count != 2
+		print "SYS.M217 It does not look like the views have been created for the current db" 
+		exit
+	endif
+	set lr-ok = TRUE
+end-procedure
+
+procedure check-imix-auth
+returning
+	lr-ok								type boolean
+local
+	lf-db								pic x(100) type string
+	lf-sql-count						type number
+	lf-user-count						type number
+	set lr-ok = FALSE
+	do get-db returning lf-db
+	open systabauth
+		file is str-concat("/",lf-db,"/informix.systabauth")
+	on error
+		print "Can't open systabauth" 
+		exit
+	endon
+	set lf-user-count = 0
+	select sa_grantee,lf-sql-count = count(*)
+		from systabauth
+		where sa_grantee like 'rpt%'
+		group by sa_grantee
+	detail
+		set lf-user-count += 1
+		if lf-sql-count < 1
+			print "SYS.X038 It does not look like authoristaions have been done for internal users"
+			exit
+		endif
+	end-select
+	if lf-user-count < 3
+		print "SYS.X038 It does not look like authoristaions have been done for internal users."
+		exit
+	endif
+	set lr-ok = TRUE
+end-procedure
+
+procedure get-db
+returning
+	lr-db								pic x(50) type string
+	//
+	set lr-db = dir()
+	while pattern(lr-db,"/") 
+		string lr-db deleting 1 to pattern(lr-db,"/")
+	end-while
+end-procedure
+

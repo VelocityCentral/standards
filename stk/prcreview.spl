@@ -1,0 +1,603 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : Price Review
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2021
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: stk/prcreview.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 29Jul21  rjb         written 
+// This program is written to be used in conjunction with price list 
+// Processing.  The Standard program is crap.
+// This is a better review function.
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+#include "../include/i8secok.spl"
+
+#define NO_OF_PRICES 3
+#define PARAXML concat(get-env("HOME"),"/prcpreview.xml")
+
+
+// This program compares three prices the WAC cost and one other cost (which
+// must be on the stock master - replacement, std or sales)
+// any more is just a coding nightmare.
+// because another customer may want to compare different prices and costs
+// and making that change programatically dynamic is too hard,
+// the names of the field are defined here in #DEFINES.
+// To change it, change the field names here
+// NEWPRICE must be on stock-price-list
+// OLDPRICE must be on stock-price
+// COST must be on stock master
+#define NEWPRICE1 prclst-price-level-zero
+#define NEWPRICE2 prclst-break-price[1]
+#define NEWPRICE3 prclst-break-price[2]
+#define OLDPRICE1 prc-wholesale-price
+#define OLDPRICE2 prc-break-price[1]
+#define OLDPRICE3 prc-break-price[2]
+#define COST stk-sales-cost
+#define COSTTITLE "Sales"
+#define COSTTITLESHORT "Sls"
+#define TITLEOFFSET1 1
+#define TITLEOFFSET2 2
+#define TITLEOFFSET3 3
+ 
+field
+	ws-function-title					type string
+	ws-INV-S001							type boolean // showcost
+	// Application Parameters
+	ws-whse-for-cost					like whse-code
+
+
+mode md-detail
+	prompt "Detail"
+mode md-console
+	prompt "Console"
+mode md-shipments
+	prompt "Shipments"
+mode md-select
+	prompt "Select"
+mode md-change-cost
+	prompt "Sales Upd"
+mode md-change-price
+	prompt "Change Price"
+mode md-paras
+	prompt "Parameters"
+
+procedure main
+local
+	i									type number
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8secabt-check-abort
+		parameters are sys-consolidation-division login-id() "EMS" "X000"
+		returning ws-function-title 
+// TODO: Security
+	set ws-function-title = "Price Maintenance"
+	get system-defaults first
+	for i = 1 to occurrence(sys-price-level-prompt)
+		if sys-price-level-prompt[i] = spaces
+			set sys-price-level-prompt[i] = concat("Price Level " str(i))
+		endif
+	end-for
+	do i8secok-check-ok parameters
+		sys-consolidation-division login-id() "INV" "S001"
+		returning ws-INV-S001
+	do i8proglog-write-log
+	if not file-exists(PARAXML,FALSE)
+		do set-parameters
+	endif
+	do get-app-paras
+	do display-dg parameters are ws-whse-for-cost
+end-procedure
+
+/*
+markup is Sales-cost / cost
+GP is Sales-Cost / Sales
+*/
+#define MK(S,C) (if-then-else(S = 0,0,(S - C) / if-then-else( C = 0,1,C) * 100))
+#define GP(S,C) ((S - C ) / if-then-else( S = 0,1,S) * 100)
+#define DIFF(A,B) if-then-else(B = 0, 0, (A - B) / B * 100)
+
+#define PCNTPIC pic s(5).99%
+
+screen display-dg
+parameters are 
+	lp-whse-code						like whse-code
+local
+	lf-ngp-rep-p1					type number // new gp for cost on price 1
+	lf-nmk-rep-p1					type number // new markup for cost on price 1
+	lf-ngp-wac-p1					type number // new gp for WA Cost on price 1
+	lf-nmk-wac-p1					type number // new markup for WA Cost on price 1
+	lf-ogp-rep-p1					type number // old gp for cost on price 1
+	lf-omk-rep-p1					type number // old markup for cost on price 1
+	lf-ogp-wac-p1					type number // old gp for WA Cost on price 1
+	lf-omk-wac-p1					type number // old markup for WA Cost on price 1
+	lf-change-p1					type number // percentage change price 1
+	lf-ngp-rep-p2					type number
+	lf-nmk-rep-p2					type number
+	lf-ngp-wac-p2					type number
+	lf-nmk-wac-p2					type number
+	lf-ogp-rep-p2					type number // old gp for cost on price 1
+	lf-omk-rep-p2					type number // old markup for cost on price 1
+	lf-ogp-wac-p2					type number // old gp for WA Cost on price 1
+	lf-omk-wac-p2					type number // old markup for WA Cost on price 1
+	lf-change-p2					type number // percentage change price 1
+	lf-ngp-rep-p3					type number
+	lf-nmk-rep-p3					type number
+	lf-ngp-wac-p3					type number
+	lf-nmk-wac-p3					type number
+	lf-ogp-rep-p3					type number // old gp for cost on price 1
+	lf-omk-rep-p3					type number // old markup for cost on price 1
+	lf-ogp-wac-p3					type number // old gp for WA Cost on price 1
+	lf-omk-wac-p3					type number // old markup for WA Cost on price 1
+	lf-change-p3					type number // percentage change price 1
+	window // @1,1 to @22,150
+		title ws-function-title
+	datagrid occurs 22
+	select *
+		lf-ngp-rep-p1 = GP(t0.NEWPRICE1, t2.COST)
+		lf-nmk-rep-p1 = MK(t0.NEWPRICE1 , t2.COST) 
+		lf-ngp-wac-p1 = GP(t0.NEWPRICE1, t3.whse-avg-cost)
+		lf-nmk-wac-p1 = MK(t0.NEWPRICE1 , t3.whse-avg-cost) 
+		lf-ogp-rep-p1 = GP(t1.OLDPRICE1, t2.COST)
+		lf-omk-rep-p1 = MK(t1.OLDPRICE1 , t2.COST) 
+		lf-ogp-wac-p1 = GP(t1.OLDPRICE1, t3.whse-avg-cost)
+		lf-omk-wac-p1 = MK(t1.OLDPRICE1 , t3.whse-avg-cost) 
+		lf-change-p1 =  DIFF(t0.NEWPRICE1,t1.OLDPRICE1)
+		lf-ngp-rep-p2 = GP(t0.NEWPRICE2, t2.COST)
+		lf-nmk-rep-p2 = MK(t0.NEWPRICE2 , t2.COST) 
+		lf-ngp-wac-p2 = GP(t0.NEWPRICE2, t3.whse-avg-cost)
+		lf-nmk-wac-p2 = MK(t0.NEWPRICE2 , t3.whse-avg-cost) 
+		lf-ogp-rep-p2 = GP(t1.OLDPRICE2, t2.COST)
+		lf-omk-rep-p2 = MK(t1.OLDPRICE2 , t2.COST) 
+		lf-ogp-wac-p2 = GP(t1.OLDPRICE2, t3.whse-avg-cost)
+		lf-omk-wac-p2 = MK(t1.OLDPRICE2 , t3.whse-avg-cost) 
+		lf-change-p2 =  DIFF(t0.NEWPRICE2,t1.OLDPRICE2)
+		lf-ngp-rep-p3 = GP(t0.NEWPRICE3, t2.COST)
+		lf-nmk-rep-p3 = MK(t0.NEWPRICE3 , t2.COST) 
+		lf-ngp-wac-p3 = GP(t0.NEWPRICE3, t3.whse-avg-cost)
+		lf-nmk-wac-p3 = MK(t0.NEWPRICE3 , t3.whse-avg-cost) 
+		lf-ogp-rep-p3 = GP(t1.OLDPRICE3, t2.COST)
+		lf-omk-rep-p3 = MK(t1.OLDPRICE3 , t2.COST) 
+		lf-ogp-wac-p3 = GP(t1.OLDPRICE3, t3.whse-avg-cost)
+		lf-omk-wac-p3 = MK(t1.OLDPRICE3 , t3.whse-avg-cost) 
+		lf-change-p3 =  DIFF(t0.NEWPRICE3,t1.OLDPRICE3)
+		from stock-price-list as t0
+		inner join stock-price as t1 on t0.stock-code = t1.stock-code and t0.prclst-region-code = t1.prc-region-code
+		inner join stock-master as t2 on t0.stock-code = t2.stock-code
+		inner join stock-warehouse-detail as t3 on t0.stock-code = t3.stock-code and t3.whse-code = :lp-whse-code
+		order by t0.stock-code
+	allowed search md-detail md-paras
+detail
+	if screenmode = md-detail
+		do all-the-detail parameters stock-code whse-code
+	endif
+	if screenmode = md-paras
+		do set-parameters correct once
+		reselect
+		refresh data
+	endif
+	accept stock-code @1,1
+		title "Stock Code"
+	display stk-description @1,2
+		title "Description"
+	display prclst-date-effective @1,3
+		title "Effective"
+	display stk-abc-class @1,4
+		title "ABC"
+	display COST @1,5
+		title COSTTITLE
+	display whse-avg-cost @1,6
+		title "WAC"
+	display NEWPRICE1 @1,7
+		title sys-price-level-prompt[TITLEOFFSET1]
+	display lf-ngp-rep-p1 @1,8 PCNTPIC
+		title concat("New GP " COSTTITLESHORT " P1")
+	display lf-nmk-rep-p1 @1,9 PCNTPIC
+		title concat("New Markup " COSTTITLESHORT " P1")
+	display lf-ngp-wac-p1 @1,10 PCNTPIC
+		title "New GP WAC P1"
+	display lf-nmk-wac-p1 @1,11 PCNTPIC
+		title "New Markup WAC P1"
+	display lf-ogp-rep-p1 @1,12 PCNTPIC
+		title concat("Old GP " COSTTITLESHORT " P1")
+	display lf-omk-rep-p1 @1,13 PCNTPIC
+		title concat("Old Markup " COSTTITLESHORT "P1")
+	display lf-ogp-wac-p1 @1,14 PCNTPIC
+		title "Old GP WAC P1"
+	display lf-omk-wac-p1 @1,15 PCNTPIC
+		title "Old Markup WAC P1"
+	display lf-change-p1 @1,16 PCNTPIC
+		title concat("Diff " sys-price-level-prompt[TITLEOFFSET1])
+	display NEWPRICE2 @1,17
+		title sys-price-level-prompt[TITLEOFFSET2]
+	display lf-ngp-rep-p2 @1,18 PCNTPIC
+		title concat("New GP " COSTTITLESHORT " P2")
+	display lf-nmk-rep-p2 @1,19 PCNTPIC
+		title concat("New Markup " COSTTITLESHORT " P2")
+	display lf-ngp-wac-p2 @1,20 PCNTPIC
+		title "New GP WAC P2"
+	display lf-nmk-wac-p2 @1,21 PCNTPIC
+		title "New Markup WAC P2"
+	display lf-ogp-rep-p2 @1,22 PCNTPIC
+		title concat("Old GP " COSTTITLESHORT " P2")
+	display lf-omk-rep-p2 @1,23 PCNTPIC
+		title concat("Old Markup " COSTTITLESHORT " P2")
+	display lf-ogp-wac-p2 @1,24 PCNTPIC
+		title "Old GP WAC P2"
+	display lf-omk-wac-p2 @1,25 PCNTPIC
+		title "Old Markup WAC P2"
+	display lf-change-p2 @1,26 PCNTPIC
+		title concat("Diff " sys-price-level-prompt[TITLEOFFSET2])
+	display NEWPRICE3 @1,27
+		title sys-price-level-prompt[TITLEOFFSET3]
+	display lf-ngp-rep-p3 @1,28 PCNTPIC
+		title concat("New GP " COSTTITLESHORT " P3")
+	display lf-nmk-rep-p3 @1,29 PCNTPIC
+		title concat("New Markup " COSTTITLESHORT " P3")
+	display lf-ngp-wac-p3 @1,30 PCNTPIC
+		title "New GP WAC P3"
+	display lf-nmk-wac-p3 @1,31 PCNTPIC
+		title "New Markup WAC P3"
+	display lf-ogp-rep-p3 @1,32 PCNTPIC
+		title concat("Old GP " COSTTITLESHORT " P3")
+	display lf-omk-rep-p3 @1,33 PCNTPIC
+		title concat("Old Markup " COSTTITLESHORT " P3")
+	display lf-ogp-wac-p3 @1,34 PCNTPIC
+		title "Old GP WAC P3"
+	display lf-omk-wac-p3 @1,35 PCNTPIC
+		title "Old Markup WAC P3"
+	display lf-change-p3 @1,36 PCNTPIC
+		title concat("Diff " sys-price-level-prompt[TITLEOFFSET3])
+end-screen
+
+#define PSTART 6
+#define COL1 1
+#define COL2 20
+#define COL3 40
+#define COL4 60
+// PCOL are to aline the percentages
+#define PCOL2 26
+#define PCOL3 46
+#define PCOL4 66
+
+screen all-the-detail
+parameters
+	lp-stock-code						like stock-code
+	lp-whse-code						like whse-code
+local
+	lf-ngp-rep-p1						type number // new gp for cost on price 1
+	lf-nmk-rep-p1						type number // new Markup for cost on price 1
+	lf-ngp-wac-p1						type number // new gp for WA Cost on price 1
+	lf-nmk-wac-p1						type number // new Markup for WA Cost on price 1
+	lf-ogp-rep-p1						type number // old gp for cost on price 1
+	lf-omk-rep-p1						type number // old Markup for cost on price 1
+	lf-ogp-wac-p1						type number // old gp for WA Cost on price 1
+	lf-omk-wac-p1						type number // old Markup for WA Cost on price 1
+	lf-change-p1						type number // percentage change price 1
+	lf-ngp-rep-p2						type number
+	lf-nmk-rep-p2						type number
+	lf-ngp-wac-p2						type number
+	lf-nmk-wac-p2						type number
+	lf-ogp-rep-p2						type number // old gp for cost on price 1
+	lf-omk-rep-p2						type number // old Markup for cost on price 1
+	lf-ogp-wac-p2						type number // old gp for WA Cost on price 1
+	lf-omk-wac-p2						type number // old margin for WA Cost on price 1
+	lf-change-p2						type number // percentage change price 1
+	lf-ngp-rep-p3						type number
+	lf-nmk-rep-p3						type number
+	lf-ngp-wac-p3						type number
+	lf-nmk-wac-p3						type number
+	lf-ogp-rep-p3						type number // old gp for cost on price 1
+	lf-omk-rep-p3						type number // old Markup for cost on price 1
+	lf-ogp-wac-p3						type number // old gp for WA Cost on price 1
+	lf-omk-wac-p3						type number // old margin for WA Cost on price 1
+	lf-change-p3						type number // percentage change price 1
+	window  @1,1 to @20,80
+		window-position 5
+		title ws-function-title
+	select *
+		lf-ngp-rep-p1 = GP(t0.NEWPRICE1, t2.COST)
+		lf-nmk-rep-p1 = MK(t0.NEWPRICE1 , t2.COST) 
+		lf-ngp-wac-p1 = GP(t0.NEWPRICE1, t3.whse-avg-cost)
+		lf-nmk-wac-p1 = MK(t0.NEWPRICE1 , t3.whse-avg-cost) 
+		lf-ogp-rep-p1 = GP(t1.OLDPRICE1, t2.COST)
+		lf-omk-rep-p1 = MK(t1.OLDPRICE1 , t2.COST) 
+		lf-ogp-wac-p1 = GP(t1.OLDPRICE1, t3.whse-avg-cost)
+		lf-omk-wac-p1 = MK(t1.OLDPRICE1 , t3.whse-avg-cost) 
+		lf-change-p1 =  DIFF(t0.NEWPRICE1,t1.OLDPRICE1)
+		lf-ngp-rep-p2 = GP(t0.NEWPRICE2, t2.COST)
+		lf-nmk-rep-p2 = MK(t0.NEWPRICE2 , t2.COST) 
+		lf-ngp-wac-p2 = GP(t0.NEWPRICE2, t3.whse-avg-cost)
+		lf-nmk-wac-p2 = MK(t0.NEWPRICE2 , t3.whse-avg-cost) 
+		lf-ogp-rep-p2 = GP(t1.OLDPRICE2, t2.COST)
+		lf-omk-rep-p2 = MK(t1.OLDPRICE2 , t2.COST) 
+		lf-ogp-wac-p2 = GP(t1.OLDPRICE2, t3.whse-avg-cost)
+		lf-omk-wac-p2 = MK(t1.OLDPRICE2 , t3.whse-avg-cost) 
+		lf-change-p2 =  DIFF(t0.NEWPRICE2,t1.OLDPRICE2)
+		lf-ngp-rep-p3 = GP(t0.NEWPRICE3, t2.COST)
+		lf-nmk-rep-p3 = MK(t0.NEWPRICE3 , t2.COST) 
+		lf-ngp-wac-p3 = GP(t0.NEWPRICE3, t3.whse-avg-cost)
+		lf-nmk-wac-p3 = MK(t0.NEWPRICE3 , t3.whse-avg-cost) 
+		lf-ogp-rep-p3 = GP(t1.OLDPRICE3, t2.COST)
+		lf-omk-rep-p3 = MK(t1.OLDPRICE3 , t2.COST) 
+		lf-ogp-wac-p3 = GP(t1.OLDPRICE3, t3.whse-avg-cost)
+		lf-omk-wac-p3 = MK(t1.OLDPRICE3 , t3.whse-avg-cost) 
+		lf-change-p3 =  DIFF(t0.NEWPRICE3,t1.OLDPRICE3)
+		from stock-price-list as t0
+		inner join stock-price as t1 on t0.stock-code = t1.stock-code and t0.prclst-region-code = t1.prc-region-code
+		inner join stock-master as t2 on t0.stock-code = t2.stock-code
+		inner join stock-warehouse-detail as t3 on t0.stock-code = t3.stock-code and t3.whse-code = :lp-whse-code
+		where t0.stock-code = :lp-stock-code
+	allowed search md-console md-shipments md-change-price
+	no-prompt-for-search
+before
+	display sys-price-level-prompt[TITLEOFFSET1] @PSTART,COL2
+		foreground prompts
+	display sys-price-level-prompt[TITLEOFFSET2] @PSTART,COL3
+		foreground prompts
+	display sys-price-level-prompt[TITLEOFFSET3] @PSTART,COL4
+		foreground prompts
+	display "New Price" @PSTART + 1, COL1
+	display "Old Price" @PSTART + 2, COL1
+	display concat("New GP " COSTTITLESHORT ".") @PSTART + 3, COL1
+	display concat("Old GP " COSTTITLESHORT ".") @PSTART + 4, COL1
+	display "New GP WAC." @PSTART + 5, COL1
+	display "Old GP WAC." @PSTART + 6, COL1
+	display concat("New Markup " COSTTITLESHORT ".") @PSTART + 7, COL1
+	display concat("Old Markup " COSTTITLESHORT ".") @PSTART + 8, COL1
+	display "New Markup WAC." @PSTART + 9, COL1
+	display "Old Markup WAC." @PSTART + 10, COL1
+	display "Percentage Change" @PSTART + 11, COL1
+detail
+	if screenmode = md-console
+		spl "stk/m4stkconsol" parameters are "-drill" stock-code
+	endif
+	if screenmode = md-shipments
+		do  show-shipments parameters are lp-stock-code
+	endif
+	if screenmode = md-change-price
+		do change-prices correct once parameters are lp-stock-code
+		reselect
+		refresh data
+	endif
+	display stock-code @1,20
+		title "Stock Code"
+	display stk-description @1,40
+	display stk-abc-class @2,20
+		title "ABC"
+	display COST @3,20 
+		title COSTTITLE
+	display whse-avg-cost @3,40
+		title "WAC"
+	display str-concat("(" whse-code ")") @3,58
+		foreground prompts
+	display prclst-date-effective @4,20
+		title "Effective Date"
+	//"New Price" 
+	display NEWPRICE1 @PSTART + 1, COL2
+	display NEWPRICE2 @PSTART + 1, COL3
+	display NEWPRICE3 @PSTART + 1, COL4
+	//"Old Price" 
+	display OLDPRICE1 @PSTART + 2, COL2
+	display OLDPRICE2 @PSTART + 2, COL3
+	display OLDPRICE3 @PSTART + 2, COL4
+	//"New GP Repl." 
+	display lf-ngp-rep-p1 @PSTART + 3 PCOL2 PCNTPIC
+	display lf-ngp-rep-p2 @PSTART + 3 PCOL3 PCNTPIC
+	display lf-ngp-rep-p3 @PSTART + 3 PCOL4 PCNTPIC
+	//"Old GP Repl." 
+	display lf-ogp-rep-p1 @PSTART + 4 PCOL2 PCNTPIC
+	display lf-ogp-rep-p2 @PSTART + 4 PCOL3 PCNTPIC
+	display lf-ogp-rep-p3 @PSTART + 4 PCOL4 PCNTPIC
+	//"New GP WAC." 
+	display lf-ngp-wac-p1 @PSTART + 5 PCOL2 PCNTPIC
+	display lf-ngp-wac-p2 @PSTART + 5 PCOL3 PCNTPIC
+	display lf-ngp-wac-p3 @PSTART + 5 PCOL4 PCNTPIC
+	//"Old GP WAC." 
+	display lf-ogp-wac-p1 @PSTART + 6 PCOL2 PCNTPIC
+	display lf-ogp-wac-p2 @PSTART + 6 PCOL3 PCNTPIC
+	display lf-ogp-wac-p3 @PSTART + 6 PCOL4 PCNTPIC
+	//"New Markup Repl." 
+	display lf-nmk-rep-p1 @PSTART + 7 PCOL2 PCNTPIC
+	display lf-nmk-rep-p2 @PSTART + 7 PCOL3 PCNTPIC
+	display lf-nmk-rep-p3 @PSTART + 7 PCOL4 PCNTPIC
+	//"Old Markup Repl." 
+	display lf-omk-rep-p1 @PSTART + 8 PCOL2 PCNTPIC
+	display lf-omk-rep-p2 @PSTART + 8 PCOL3 PCNTPIC
+	display lf-omk-rep-p3 @PSTART + 8 PCOL4 PCNTPIC
+	//"New Markup WAC." 
+	display lf-nmk-wac-p1 @PSTART + 9 PCOL2 PCNTPIC
+	display lf-nmk-wac-p2 @PSTART + 9 PCOL3 PCNTPIC
+	display lf-nmk-wac-p3 @PSTART + 9 PCOL4 PCNTPIC
+	//"Old Markup WAC." 
+	display lf-omk-wac-p1 @PSTART + 10 PCOL2 PCNTPIC
+	display lf-omk-wac-p2 @PSTART + 10 PCOL3 PCNTPIC
+	display lf-omk-wac-p3 @PSTART + 10 PCOL4 PCNTPIC
+	//"Percentage Change" 
+	display lf-change-p1 @PSTART + 11 PCOL2 PCNTPIC
+	display lf-change-p2 @PSTART + 11 PCOL3 PCNTPIC
+	display lf-change-p3 @PSTART + 11 PCOL4 PCNTPIC
+end-screen
+
+screen show-shipments
+parameters
+	lp-stock-code						like stock-code
+	window @1,1 to @10,60
+		window-position 5
+	title ws-function-title
+	datagrid occurs 8
+	select *
+		from purchase-order-costing as t0
+		where t0.stock-code = :lp-stock-code
+		order by po-received-date desc
+	allowed search md-select
+detail
+	if screenmode = md-select
+		spl "po/m63costs" parameter are "-shipments" "-q" 
+			po-shipment-no stock-code po-order-no 
+			po-backorder-flag po-l-seq
+	endif
+	accept po-shipment-no @1,1 
+		title "Shipment"
+		when screenmode = search
+		show-value
+	display po-order-no @1,2
+		title "Order"
+	display po-received-date @1,3
+		title "Received"
+end-screen
+
+screen change-prices
+parameters
+	lp-stock-code 					like stock-code
+	window @1,1 to @8,50
+		window-position 5
+	title ws-function-title
+	select *
+		from stock-price-list
+		where stock-code = :lp-stock-code
+		and prclst-region-code = spaces
+detail
+	accept NEWPRICE1 @1,15
+		title sys-price-level-prompt[1]
+		help "Value Enn - Add nn percent to existing..." // needs to be alpah!!
+	accept NEWPRICE2 @2,15
+		title sys-price-level-prompt[2]
+	accept NEWPRICE3 @3,15
+		title sys-price-level-prompt[3]
+	accept prclst-date-effective @4,15
+		title "Effective Date"
+end-screen
+
+/*
+  
+not in use yet
+
+
+procedure change-price
+parameters
+	lp-value						type number
+	lp-replacement-cost				type number
+	lp-wac							type number
+	lp-code							pic x(10)
+returning
+	lr-value						type number
+local
+	lp-type							pic x  // E on existing, W on WAC, R on replacement
+	lp-pc							type number // percentage
+	//
+	set lp-type = uppercase(substring,lp-code,1,1)
+	if lp-type not in ("E","W","R")
+		message "Invalid Code"
+		exit 1
+	endif
+	set lp-pc = num(substring(lp-code,2,str-len(lp-code)))
+	if lp-pc = 0
+		message "Percent is zero"
+		exit 1
+	endif
+	//
+	switch on  lp-type
+	case "E"
+		set lr-value = lp-value * (1 + (lp-pc / 100))
+	case "R"
+		set lr-value = lp-replacement-cost * (1 + (lp-pc / 100))
+	case "W"
+		set lr-value = lp-wac * (1 + (lp-pc / 100))
+	end-switch
+end-procedure
+	
+*/
+
+procedure get-app-paras
+local 
+	lf-xml-filename							type string pic x(512)
+	set lf-xml-filename =  PARAXML
+	if file-exists(lf-xml-filename,FALSE)
+		do get-paras-from-xml  parameters are lf-xml-filename
+	else
+		get system-user
+			on index user-id,sys-comp-code
+			key is login-id(), sys-consolidation-division
+		on error ENOREC
+			select ws-whse-for-cost = min(sys-tbl-code) from system-table
+				where sys-tbl-type = "WH"
+			end-select
+		else
+			set ws-whse-for-cost = user-whse
+		endon
+	endif
+end-procedure
+
+procedure get-paras-from-xml
+parameters
+	lp-filename					pic x(512) type string
+local
+	lx-doc						type xml-handle
+	lx-root						type xml-handle
+	lx-node						type xml-handle
+	set lx-doc = xml-parse-file(lp-filename)
+	if lx-doc = 0 
+		exit 1
+	endif
+	set lx-root = xml-get-root-node(lx-doc)
+	if lx-root = 0
+		exit 1
+	endif
+	set ws-whse-for-cost = xml-node-text(xml-get-child-by-name(lx-root,"costwhse",spaces))
+end-procedure
+
+procedure write-paras-to-xml
+local
+	lx-doc						type xml-handle
+	lx-root						type xml-handle
+	set lx-doc = xml-new-document("1.0","root")
+	set lx-root = xml-get-root-node(lx-doc)
+	if lx-root = 0
+		message  "No root node"
+		exit 1
+	endif
+	if xml-add-child-node-text(lx-root,"costwhse",spaces,ws-whse-for-cost) = 0
+		message "Problem "
+		exit 1
+	endif
+	if not xml-save-as-file(lx-doc,PARAXML,xml-get-doc-encoding(lx-doc),2) 
+		message "There was a problem saving the parameters"
+		exit 1
+	endif
+end-procedure
+
+screen set-parameters
+	window @1,1 to @6,50
+		window-position 5
+	title ws-function-title
+detail
+	accept ws-whse-for-cost @1,20
+		title "Warehouse for Cost"
+		uppercase
+	validations
+		get system-table 
+			on index sys-tbl-type sys-tbl-code
+			key is "WH" ws-whse-for-cost
+		on error ENOREC
+			message "Invalid Warehouse"
+			re-enter
+		endon
+	end-validations
+	confirm 
+		auto
+	confirmed
+		do write-paras-to-xml
+	end-confirm 	
+end-screen

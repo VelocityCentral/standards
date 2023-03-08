@@ -1,0 +1,897 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : Set inventory parameters based on supplier
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2019
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: stk/setsupppara.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 27Nov19  rjb 3597    written 
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+#include "../include/m2enqcre.spl"
+#if BMS_DICT_VER < 7600
+#include "../include/i85codes.spl"
+#endif
+#include '../include/bmsdef.spl'
+
+//#define DEBUG(A,B) print B ":" A "=" get-field-value(A)
+ 
+field
+	ws-function-title					type string
+	// Field update selections
+	ws-chg-sup-actual-lead-time			type boolean
+	ws-sup-actual-lead-time				like sup-actual-lead-time
+	ws-chg-sup-lead-time				type boolean // estimated
+	ws-sup-lead-time					like sup-lead-time
+	ws-chg-sup-shipping-method-code		type boolean
+	ws-sup-shipping-method-code			like sup-shipping-method-code
+	ws-chg-sup-priority					type boolean
+	ws-sup-priority						like sup-priority
+	ws-chg-stk-reorder-review			type boolean
+	ws-stk-reorder-review				like stk-reorder-review
+	ws-chg-stk-reorder-policy			type boolean
+	ws-stk-reorder-policy				like stk-reorder-policy
+	ws-chg-stk-reorder-buyer			type boolean
+	ws-stk-reorder-buyer				like stk-reorder-buyer
+	// Generic functions
+	ws-print-errors						type boolean
+	ws-print-updates					type boolean
+	// Stock selections
+	ws-start-group						like stock-group
+	ws-end-group						like stock-group
+	ws-start-stock-code					like stock-code
+	ws-end-stock-code					like stock-code
+
+object selected-suppliers
+	type is memory
+	record is
+		ss-accountcode					like cre-accountcode
+	end-record
+	key is ss-accountcode unique
+
+
+procedure main
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8secabt-check-abort
+		parameters are sys-consolidation-division login-id() "ZVG" "M014"
+		returning ws-function-title 
+	do i8proglog-write-log
+	open selected-suppliers temporary
+	do enter-paras entry once
+end-procedure
+
+
+#if BMS_DICT_VER < 7600
+
+screen enter-paras	
+local
+	lf-selected-supplier-count			type number
+	window @1,1 to @17,70
+		window-position 5
+	form-entry
+	title "Change items by Supplier"
+before 
+	box @1,1 to @9,70
+		title "Actions"
+	box @10,1, to @14,70
+		title "Filters"
+	box @15,1, to @17,70
+		title "Report Options"
+	set ws-start-group = min-value(ws-start-group)
+	set ws-end-group = max-value(ws-start-group)
+	set ws-start-stock-code = min-value(ws-start-stock-code)
+	set ws-end-stock-code = max-value(ws-start-stock-code)
+detail
+	select lf-selected-supplier-count = count(*)
+		from selected-suppliers
+	end-select
+	// --------------------------------------------------
+	check-box ws-chg-sup-actual-lead-time @2,20
+		title "Actual Lead Time"
+		right-coordinate
+		values True False
+		default is False
+		on change
+			refresh ws-sup-actual-lead-time
+		endon
+	end-check-box 
+	accept  ws-sup-actual-lead-time @2,25
+		show-value
+		when ws-chg-sup-actual-lead-time
+	// --------------------------------------------------
+	check-box ws-chg-sup-lead-time @3,20
+		title "Estimated Lead Time"
+		right-coordinate
+		values True False
+		default is FALSE
+		on change
+			refresh ws-sup-lead-time
+		endon
+	end-check-box 
+	accept  ws-sup-lead-time @3,25
+		when ws-chg-sup-lead-time
+		show-value
+	// --------------------------------------------------
+	check-box ws-chg-sup-priority @4,20
+		title "Priority"
+		help "Change the supplier priority"
+		right-coordinate
+		values True False
+		default is FALSE
+		on change
+			refresh ws-sup-priority
+		endon
+	end-check-box 
+	accept  ws-sup-priority @4,25
+		when ws-chg-sup-priority
+		help "Enter a value in the range 1 to 9 (1=High, 9=Low)"
+		show-value
+	// --------------------------------------------------
+	check-box ws-chg-stk-reorder-policy @5,20
+		title "Reorder Policy"
+		right-coordinate
+		values True False
+		default is FALSE
+		on change
+			refresh ws-stk-reorder-policy
+		endon
+	end-check-box 
+	accept  ws-stk-reorder-policy @5,25
+		when ws-chg-stk-reorder-policy
+		help "Reorder Policy : used by the MRP/DRP System only. See [HELP]"
+		help-context "index_CSH.htm" 125024
+		show-value
+		uppercase
+	validations
+		if ws-stk-reorder-policy not in ('N','Y','D','M','X','I','C','K','L','H','1','2','3','4')
+			message "Reorder policy invalid"
+			re-enter
+		endif
+	end-validations
+	// --------------------------------------------------
+	check-box ws-chg-stk-reorder-review @6,20
+		title "Planning Policy"
+		right-coordinate
+		values True False
+		default is FALSE
+		on change
+			refresh ws-stk-reorder-review
+		endon
+	end-check-box 
+	accept  ws-stk-reorder-review @6,25
+		when ws-chg-stk-reorder-review
+		help "Planning Policy : used by the MRP/DRP System only. See [HELP]"
+		help-context "index_CSH.htm" 125024
+		show-value
+		uppercase
+	validations
+		if substring(ws-stk-reorder-review,1,1) not in { 'D', 'W', 'M', 'Y', 'L', 'F', 'A' }
+			message "Frequency code not valid"
+			reenter
+		elseif substring(ws-stk-reorder-review,1,1) = 'D'
+		and substring(ws-stk-reorder-review,2,2) not = ' '
+		and substring(ws-stk-reorder-review,2,2) not between '1' and '7'
+			message "Day number not valid"
+			reenter
+		elseif substring(ws-stk-reorder-review,1,1) = 'W'
+		and substring(ws-stk-reorder-review,2,2) not = ' '
+		and substring(ws-stk-reorder-review,2,2) not between '1' and '4'
+			message "Week number not valid"
+			reenter
+		elseif substring(ws-stk-reorder-review,1,1) = 'M'
+		and substring(ws-stk-reorder-review,2,2) not in { ' ', 'A' }
+			message "Reorder code not valid"
+			reenter
+		elseif substring(ws-stk-reorder-review,1,1) in { 'Y', 'L', 'F' }
+		and substring(ws-stk-reorder-review,2,2) not = ' '
+			message "Reorder code not valid"
+			reenter
+		endif
+	end-validations
+	// --------------------------------------------------
+	check-box ws-chg-stk-reorder-buyer @7,20
+		title "Buyer/Planner"
+		right-coordinate
+		values True False
+		default is FALSE
+		on change
+			refresh ws-stk-reorder-buyer
+		endon
+	end-check-box 
+	accept  ws-stk-reorder-buyer @7,25
+		when ws-chg-stk-reorder-buyer
+		show-value
+	on help-key
+		set sys-tbl-type = "RR"
+		do i85codes-table-help	
+		if sys-tbl-code not = spaces	
+			set ws-stk-reorder-buyer = sys-tbl-code
+		endif
+		refresh ws-stk-reorder-buyer
+		reenter optional
+	endon
+	//
+	validation
+		get system-table
+			on index sys-tbl-type sys-tbl-code
+			key is "RR" ws-stk-reorder-buyer
+		on error ENOREC
+			message "Invalid code. Please re-enter."
+			reenter	
+		endon
+	endvalidation
+	// --------------------------------------------------
+	check-box ws-chg-sup-shipping-method-code @8,20
+		title "Shipping Method"
+		right-coordinate
+		values True False
+		default is FALSE
+		on change
+			refresh ws-sup-shipping-method-code
+		endon
+	end-check-box 
+	accept  ws-sup-shipping-method-code @8,25
+		when ws-chg-sup-shipping-method-code
+		show-value
+	on help-key
+		set sys-tbl-type = "SI"
+		do i85codes-table-help
+		if sys-tbl-code not = spaces
+			set ws-sup-shipping-method-code = sys-tbl-code
+		endif
+		reenter optional
+	endon
+	validation
+		if ws-sup-shipping-method-code != spaces
+			get system-table
+				key is "SI" ws-sup-shipping-method-code
+			on error
+				message "Shipping method not valid " ws-sup-shipping-method-code
+				reenter
+			endon
+		endif
+	endvalidation
+	// -------------Filters----------------------------------------
+	option "Select Suppliers"
+		@11,40
+		help is "Select Suppliers"
+		do selected-supplier-maint
+		select lf-selected-supplier-count = count(*)
+			from selected-suppliers
+		end-select
+		refresh data
+		refresh ws-start-group
+	end-option
+	display lf-selected-supplier-count @11,20 pic "zzz9"
+		foreground prompts
+		title "Selected Suppliers : "
+	accept ws-start-group @12,20
+		title "Group Range"
+		default ws-start-group
+	on change
+		set ws-end-group = max-value(ws-end-group)
+		string ws-end-group replacing rtrim(ws-start-group) at 1
+	endon
+	accept ws-end-group @12,40
+		title "To"
+		default ws-end-group
+		uppercase
+	accept ws-start-stock-code @13,20
+		title "Stock Code Range"
+		default ws-start-stock-code
+	on change
+		set ws-end-stock-code = max-value(ws-end-stock-code)
+		string ws-end-stock-code replacing rtrim(ws-start-stock-code) at 1
+	endon
+	accept ws-end-stock-code @13,40
+		title "To"
+		default ws-end-stock-code
+		uppercase
+	//--------------Print Options-----------------------------------
+	check-box ws-print-errors	@16,20
+		values true false
+		title "Print Errors"
+		right-coordinate
+		default is  TRUE
+	end-check-box 
+	check-box ws-print-updates	@16,40
+		values true false
+		title "Print Updates"
+		right-coordinate
+		default is  FALSE
+	end-check-box 
+	confirm auto
+	before
+		select lf-selected-supplier-count = count(*)
+			from selected-suppliers
+		end-select
+		if lf-selected-supplier-count = 0
+			message-box param-text("<<P1>><<BR>><<p2>>"
+				,"You have not seelcted any suppliers"
+				,"Press OK to exit (no actions) or Retry to select suppliers ")
+				title is ws-function-title
+				message-buttons MSG_BOX_OK + MSG_BOX_RETRY
+				icon MSG_BOX_WARNING
+			if message-status = MSG_BOX_RETRY
+				continue-entry
+			endif
+		endif
+	confirmed
+		do update-data
+	end-confirm
+end-screen
+
+#else // ginger
+
+screen enter-paras	
+local
+	lf-selected-supplier-count			type number
+	window @1,1 to @17,70
+		window-position 5
+	responsive
+	title "Change items by Supplier"
+	allowed entry
+before 
+	set ws-start-group = min-value(ws-start-group)
+	set ws-end-group = max-value(ws-start-group)
+	set ws-start-stock-code = min-value(ws-start-stock-code)
+	set ws-end-stock-code = max-value(ws-start-stock-code)
+detail
+	select lf-selected-supplier-count = count(*)
+		from selected-suppliers
+	end-select
+	screen-group // ---- Actions ----------------------------
+		title "Actions"
+		field-group // ---- Actual Lead Time ----------------------------
+			check-box ws-chg-sup-actual-lead-time 
+				title "Actual Lead Time"
+				values True False
+				default is False
+				on change
+					if screenmode != form-entry-defaults
+						if ws-sup-actual-lead-time = 0 and ws-chg-sup-actual-lead-time
+							set ws-sup-actual-lead-time = 1
+						endif
+						if not ws-chg-sup-actual-lead-time
+							set ws-sup-actual-lead-time = 0
+						endif
+					endif
+					refresh ws-sup-actual-lead-time
+				endon
+			end-check-box 
+			accept  ws-sup-actual-lead-time  pic z(2)
+				no-title
+				help "Enter the lead time in days.  0 will be changed to 99"
+				show-value
+				when ws-chg-sup-actual-lead-time
+			validations
+				if screenmode != form-entry-defaults
+					if ws-sup-actual-lead-time = 0
+						set sup-actual-lead-time = 99
+						re-enter optional
+					endif
+				endif
+			end-validations
+		end-field-group // ---- Actual Lead Time --------------------------------------
+		field-group // ---- Estimated Lead Time ----------------------------
+			check-box ws-chg-sup-lead-time 
+				title "Estimated Lead Time"
+				values True False
+				default is FALSE
+				on change
+					if screenmode != form-entry-defaults
+						if ws-sup-lead-time = 0 and ws-chg-sup-lead-time
+							set ws-sup-lead-time = 1
+						endif
+						if not ws-chg-sup-lead-time
+							set ws-sup-lead-time = 0
+						endif
+					endif
+					refresh ws-sup-lead-time
+				endon
+			end-check-box 
+			accept  ws-sup-lead-time 
+				no-title
+				when ws-chg-sup-lead-time
+				help "Enter the lead time in days.  0 will be changed to 99"
+				show-value
+			validations
+				if screenmode != form-entry-defaults
+					if ws-sup-lead-time = 0
+						set sup-lead-time = 99
+						re-enter optional
+					endif
+				endif
+			end-validations
+		end-field-group // ---- Estimated Lead Time --------------------------------------
+		field-group // ---- Supplier Priority ----------------------------
+			check-box ws-chg-sup-priority 
+				title "Priority"
+				help "Change the supplier priority"
+				right-coordinate
+				values True False
+				default is FALSE
+				on change
+					refresh ws-sup-priority
+				endon
+			end-check-box 
+			accept  ws-sup-priority 
+				no-title
+				when ws-chg-sup-priority
+				help "Enter a value in the range 1 to 9 (1=High, 9=Low)"
+				show-value
+			validations
+				if ws-sup-priority < 1 or ws-sup-priority > 9
+					message-box param-text("<<P1>><<BR>><<p2>>"
+						,"The value number a number between 1 and 9"
+						,"1 is a high priroty, 9 is a low priority")
+						title is ws-function-title
+						message-buttons  MSG_BOX_OK
+						icon MSG_BOX_STOP
+					re-enter
+				endif
+			end-validations
+		end-field-group // ---- Supplier Priority --------------------------------------
+		field-group // ---- Reorder Policy ----------------------------
+			check-box ws-chg-stk-reorder-policy 
+				title "Reorder Policy"
+				right-coordinate
+				values True False
+				default is FALSE
+				on change
+					refresh ws-stk-reorder-policy
+				endon
+			end-check-box 
+			accept  ws-stk-reorder-policy 
+				no-title
+				when ws-chg-stk-reorder-policy
+				help "Reorder Policy : used by the MRP/DRP System only. See [HELP]"
+				help-context "index_CSH.htm" 125024
+				show-value
+				uppercase
+				drop-down
+					width 25
+					concat-title
+					"N" title "Never reorder."
+					"Y" title "Normal reorder based on minimum/maximum levels and cover."
+					"D" title "Normal reorder plus an allowance for daily demand requirements."
+					"M" title "Reorder to minimum level if available stock is less than minimum."
+					"X" title "Reorder to maximum level if available stock is less than or at minimum."
+					"I" title "Reorder to maximum level if available stock is less than maximum."
+					"C" title "Reorder to commitment level if commitments present and available stock is negative."
+					"K" title "Reorder to commitment or maximum level, whichever is greater, if commitments present and available stock is negative."
+					"L" title "Reorder to commitment or maximum level, whichever is greater, if commitments present and available stock is less than minimum."
+					"H" title "Reorder based on order history."
+					"1" title "Reorder to minimum plus commitments if below minimum or commitments exist."
+					"2" title "Reorder to minimum plus commitments if below maximum or commitments exist."
+					"3" title "Reorder to maximum plus commitments if below minimum or commitments exist."
+					"4" title "Reorder to maximum plus commitments if below maximum or commitments exist."
+				end-drop-down
+			validations
+				if ws-stk-reorder-policy not in ('N','Y','D','M','X','I','C','K','L','H','1','2','3','4')
+					message "Reorder policy invalid"
+					re-enter
+				endif
+			end-validations
+		end-field-group
+		field-group // ---- Planning Policy ----------------------------
+			check-box ws-chg-stk-reorder-review 
+				title "Planning Policy"
+				right-coordinate
+				values True False
+				default is FALSE
+				on change
+					refresh ws-stk-reorder-review
+				endon
+			end-check-box 
+			accept  ws-stk-reorder-review 
+				no-title
+				when ws-chg-stk-reorder-review
+				help "Planning Policy : used by the MRP/DRP System only. See [HELP]"
+				help-context "index_CSH.htm" 125024
+				show-value
+				uppercase
+				drop-down
+					width 25
+					concat-title
+					"D" title "Daily"
+					"D1" title "Sunday"
+					"D2" title "Monday"
+					"D3" title "Tuesday"
+					"D4" title "Wednesday"
+					"D5" title "Thursday"
+					"D6" title "Friday"
+					"D7" title "Saturday"
+					"W" title "Weekly"
+					"W1" title "Monthly Week 1"
+					"W2" title "Monthly Week 2"
+					"W3" title "Monthly Week 3"
+					"W4" title "Monthly Week 4"
+					"M" title "Monthly"
+					"MA" title "Monthly in Advance"
+					"Y" title "Yearly"
+					"L" title "Lot by Lot"
+					"F" title "Forecast only - Actual orders ignored"
+					"A" title "Alternate Component - not processed separately by MRP"
+				end-drop-down
+			validations
+				if substring(ws-stk-reorder-review,1,1) not in { 'D', 'W', 'M', 'Y', 'L', 'F', 'A' }
+					message "Frequency code not valid"
+					reenter
+				elseif substring(ws-stk-reorder-review,1,1) = 'D'
+				and substring(ws-stk-reorder-review,2,2) not = ' '
+				and substring(ws-stk-reorder-review,2,2) not between '1' and '7'
+					message "Day number not valid"
+					reenter
+				elseif substring(ws-stk-reorder-review,1,1) = 'W'
+				and substring(ws-stk-reorder-review,2,2) not = ' '
+				and substring(ws-stk-reorder-review,2,2) not between '1' and '4'
+					message "Week number not valid"
+					reenter
+				elseif substring(ws-stk-reorder-review,1,1) = 'M'
+				and substring(ws-stk-reorder-review,2,2) not in { ' ', 'A' }
+					message "Reorder code not valid"
+					reenter
+				elseif substring(ws-stk-reorder-review,1,1) in { 'Y', 'L', 'F' }
+				and substring(ws-stk-reorder-review,2,2) not = ' '
+					message "Reorder code not valid"
+					reenter
+				endif
+			end-validations
+		end-field-group // ---- Planning Policy --------------------------------------
+		field-group // ---- Buyer/Planner ----------------------------
+			check-box ws-chg-stk-reorder-buyer 
+				title "Buyer/Planner"
+				right-coordinate
+				values True False
+				default is FALSE
+				on change
+					refresh ws-stk-reorder-buyer
+				endon
+			end-check-box 
+			accept  ws-stk-reorder-buyer 
+				no-title
+				when ws-chg-stk-reorder-buyer
+				show-value
+				drop-down
+					width 25
+					concat-title
+					select sys-tbl-code, sys-description, 0 , 
+								,if-then-else(sys-tbl-inactive-date = ZERO_DATE_TIME,TRUE,FALSE)
+						from system-table 
+						where sys-tbl-type = "RR"
+				end-drop-down
+		end-field-group // ---- Buyer/Planner --------------------------------------
+		field-group // ---- Shipping Method ----------------------------
+			check-box ws-chg-sup-shipping-method-code 
+				title "Shipping Method"
+				right-coordinate
+				values True False
+				default is FALSE
+				on change
+					refresh ws-sup-shipping-method-code
+				endon
+			end-check-box 
+			accept  ws-sup-shipping-method-code 
+				no-title
+				when ws-chg-sup-shipping-method-code
+				show-value
+				drop-down
+					width 25
+					concat-title
+					select sys-tbl-code, sys-description, 0 , 
+								,if-then-else(sys-tbl-inactive-date = ZERO_DATE_TIME,TRUE,FALSE)
+						from system-table 
+						where sys-tbl-type = "SI"
+				end-drop-down
+		end-field-group // ---- Shipping Method --------------------------------------
+	end-screen-group // ---- Actions --------------------------------------
+	screen-group // ---- Filters ----------------------------
+		title "Filters"
+		option "Select Suppliers"
+			help is "Select Suppliers"
+			do selected-supplier-maint
+			select lf-selected-supplier-count = count(*)
+				from selected-suppliers
+			end-select
+			refresh data
+			refresh ws-start-group
+		end-option
+		field-group // ---- supplier message ----------------------------
+			when lf-selected-supplier-count = 0
+			display "No Suppliers Selected" colour red  prompts
+		end-field-group // ---- supplier message --------------------------------------
+		field-group // ---- supplier message ----------------------------
+			when lf-selected-supplier-count > 0
+			display concat(str(lf-selected-supplier-count) " Suppliers(s) selected") colour green prompts
+		end-field-group // ---- supplier message --------------------------------------
+		field-group // ---- Group Range ----------------------------
+			title "Group Range"
+			accept ws-start-group 
+				title "From"
+				default ws-start-group
+			on change
+				set ws-end-group = max-value(ws-end-group)
+				string ws-end-group replacing rtrim(ws-start-group) at 1
+			endon
+			accept ws-end-group 
+				title "To"
+				default ws-end-group
+				uppercase
+		end-field-group // ---- Group Range --------------------------------------
+		field-group // ---- Stock Code Range ----------------------------
+			title "Stock Code Range"
+			accept ws-start-stock-code 
+				title "From"
+				default ws-start-stock-code
+			on change
+				set ws-end-stock-code = max-value(ws-end-stock-code)
+				string ws-end-stock-code replacing rtrim(ws-start-stock-code) at 1
+			endon
+			accept ws-end-stock-code 
+				title "To"
+				default ws-end-stock-code
+				uppercase
+		end-field-group // ---- Stock Code Range --------------------------------------
+	end-screen-group // ---- Filters --------------------------------------
+	screen-group // ---- Print Options ----------------------------
+		title "Print Options"
+		//--------------Print Options-----------------------------------
+		check-box ws-print-errors	
+			values true false
+			title "Print Errors"
+			right-coordinate
+			default is  TRUE
+		end-check-box 
+		check-box ws-print-updates	
+			values true false
+			title "Print Updates"
+			right-coordinate
+			default is  FALSE
+		end-check-box 
+	end-screen-group // ---- Print Options --------------------------------------
+	confirm auto
+	before
+		select lf-selected-supplier-count = count(*)
+			from selected-suppliers
+		end-select
+		if lf-selected-supplier-count = 0
+			message-box param-text("<<P1>><<BR>><<p2>>"
+				,"You have not seelcted any suppliers"
+				,"Press OK to exit (no actions) or Retry to select suppliers ")
+				title is ws-function-title
+				message-buttons MSG_BOX_OK + MSG_BOX_RETRY
+				icon MSG_BOX_WARNING
+			if message-status = MSG_BOX_RETRY
+				continue-entry
+			endif
+		endif
+	confirmed
+		do update-data
+	end-confirm
+end-screen
+
+#endif
+
+screen selected-supplier-maint
+	window @1,1 to @15,30
+		window-position 5
+		title "Enter selected Supplier Codes"
+	datagrid occurs 12
+	primary selected-suppliers
+	allowed entry remove search
+detail
+	get cre-master
+		on index cre-accountcode
+		key is ss-accountcode
+	on error
+		set cr-shortname = "Invalid"
+	endon
+	accept ss-accountcode @1,1
+		help "Select Supplier"
+		title "Code"
+		default ss-accountcode
+	on help-key
+		do m2enqcre-enquire-on-creditors
+			parameters ss-accountcode SPACES SPACES
+			returning ss-accountcode
+		re-enter ss-accountcode
+	endon
+	validations
+		get cre-master
+			on index cre-accountcode
+			key is ss-accountcode
+		on error
+			message "Invalid supplier"
+			re-enter
+		endon
+	end-validations
+	display cr-shortname @1,2
+		title "Name"
+end-screen
+
+procedure report-heading
+	print company-name 
+		"Bulk Supplier Update Error Report" col 50
+		today() col 90
+		tod() col 105
+		"Page" col 120
+		page-no pic "zzz9" 
+	skip
+end-procedure
+
+procedure update-data
+window
+local
+	lf-commit								type boolean
+	lf-records-updated						type number
+	lf-records-failed						type number
+	transaction begin
+	set lf-commit = TRUE
+	//
+	// Start report
+	//
+	report "Bulk Update Error Report"
+		no-message
+		heading report-heading
+	page
+	// 
+	// Stock Supplier updates
+	//
+	if ws-chg-sup-actual-lead-time
+	or ws-chg-sup-lead-time
+	or ws-chg-sup-priority
+	or ws-chg-sup-shipping-method-code
+		select * from selected-suppliers
+		detail
+			select t0.stock-code
+				t0.cre-accountcode
+				from stock-supplier as t0
+				inner join stock-master as t1 on t0.stock-code = t1.stock-code
+			where
+				t1.stock-code between ws-start-stock-code and ws-end-stock-code
+				and t1.stock-group between ws-start-group and ws-end-group
+				and t0.cre-accountcode = :ss-accountcode
+				and stk-stock-status in ( 'M', 'I', 'R', 'S' )
+			detail
+				// get for update
+				get stock-supplier
+					on index stock-code cre-accountcode
+					key is stock-code cre-accountcode
+					lock
+				on error
+					set lf-records-failed += 1
+					if ws-print-errors
+						print "Failed to lock record for update" stock-code cre-accountcode error-description(file-status())
+					endif
+				else
+					// check and apply each field
+					if ws-chg-sup-actual-lead-time
+						set sup-actual-lead-time = ws-sup-actual-lead-time
+					endif
+					if ws-chg-sup-lead-time
+						set sup-lead-time = ws-sup-lead-time
+					endif
+					if ws-chg-sup-priority
+						set sup-priority = ws-sup-priority
+					endif
+					if ws-chg-sup-shipping-method-code
+						set sup-shipping-method-code = ws-sup-shipping-method-code
+					endif
+					update stock-supplier
+					on error
+						set lf-commit = FALSE
+						set lf-records-failed += 1
+						if ws-print-errors
+							print stock-code cre-accountcode "Update failed" error-description(file-status())
+						endif
+					else
+						set lf-records-updated += 1
+						if ws-print-updates
+							print stock-code cre-accountcode "Supplier record updated"
+						endif
+					endon
+				endon
+			end-select
+		end-select
+	endif
+	//
+	// Stock Master updates
+	//
+	if ws-chg-stk-reorder-review
+	or ws-chg-stk-reorder-buyer
+
+		print "updating stock"
+
+		select * from selected-suppliers
+		detail
+#ifdef DEBUG
+			DEBUG("ss-accountcode","A")
+#endif
+			select t0.stock-code
+				t0.cre-accountcode
+				from stock-supplier as t0
+				inner join stock-master as t1 on t0.stock-code = t1.stock-code
+			where
+				t1.stock-code between ws-start-stock-code and ws-end-stock-code
+				and t1.stock-group between ws-start-group and ws-end-group
+				and t0.cre-accountcode = :ss-accountcode
+				and stk-stock-status in ( 'M', 'I', 'R', 'S' )
+			detail
+				// get lock for update
+#ifdef DEBUG
+			DEBUG("stock-code","B")
+#endif
+				get stock-master 
+					on index stock-code
+					key is stock-code
+					lock
+				on error
+					set lf-commit = FALSE
+					set lf-records-failed += 1
+					if ws-print-errors
+						print "Unable to lock record for update" stock-code error-description(file-status())
+					endif
+				else
+					//
+					// Apply updates
+					//
+					if ws-chg-stk-reorder-policy
+						set stk-reorder-policy = ws-stk-reorder-policy
+					endif
+					if ws-chg-stk-reorder-review
+						set stk-reorder-review = ws-stk-reorder-review
+					endif
+					if ws-chg-stk-reorder-buyer
+						set stk-reorder-buyer = ws-stk-reorder-buyer
+					endif
+					update stock-master
+					on error
+						set lf-commit = FALSE
+						set lf-records-failed += 1
+						if ws-print-errors
+							print "Update failed" stock-code error-description(file-status())
+						endif
+					else
+						set lf-records-updated += 1
+						if ws-print-updates
+							print "Update successful" stock-code 
+						endif
+					endon
+				endon
+			end-select
+		end-select
+	endif
+	//
+	if lf-commit
+		transaction commit
+		message-box param-text("There were <<P1>> records updated"
+			,str(lf-records-updated) )
+			title is ws-function-title
+			message-buttons MSG_BOX_OK
+			icon MSG_BOX_INFORMATION
+			optional
+	else
+		transaction rollback
+		message-box param-text("<<P1>><<BR>><<p2>>"
+			, concat("There were " str(lf-records-failed) " failed updates during this process")
+			,"All changes were reversed (including successful ones).  See Report for details")
+			title is ws-function-title
+			message-buttons MSG_BOX_CANCEL
+			icon MSG_BOX_STOP
+	endif
+	report finished
+end-procedure
+

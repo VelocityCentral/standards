@@ -1,0 +1,247 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : rf main menu
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2011
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: vglrfpick.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 13Jan11	rayb		written
+////////////////////////////////////////////////////////////////////////////////
+//
+
+#include "../include/i8secabt.spl" 
+#include "../include/i8secok.spl" 
+#include "../include/i8proglog.spl" 
+
+#define DO_BMSMENU(A,B) \
+	spl "bmsmenu" parameters are "-execute" A B
+
+#define SET_SECURITY(A,B,C) \
+	do i8secok-check-ok parameters \
+		sys-consolidation-division login-id() A B \
+		returning C
+
+//link "vglrf/vglrfclib"
+
+field
+	ws-function-title						type string
+	ws-WHSE-M013							type boolean
+	ws-WHSE-T007							type boolean
+	ws-WHSE-T036							type boolean
+	ws-WHSE-T051							type boolean
+	ws-WHSE-T002							type boolean
+	ws-WHSE-T004							type boolean
+	ws-WHSE-M010							type boolean
+	ws-WHSE-E001							type boolean
+	ws-WHSE-M019							type boolean
+	ws-RF-X005								type boolean
+	ws-ZUSR-E003							type boolean
+	ws-WHSE-T006							type boolean
+	ws-WHSE-T001							type boolean
+	ws-WHSE-T003							type boolean
+	ws-RF-M001								type boolean
+	ws-RF-M002								type boolean
+	ws-RF-M003								type boolean
+	ws-RF-M005								type boolean
+	ws-RF-M006								type boolean
+	//
+	ws-MANU-M001							type boolean
+	ws-MANU-M002							type boolean
+	ws-MANU-M004							type boolean
+	ws-MANU-M006							type boolean
+	ws-MANU-M010							type boolean
+	ws-MANU-M011							type boolean
+
+procedure main
+local
+	lf-coy-path							like sys-comp-path
+	get system-control first 
+	on error
+		abort "No Control Record"
+	endon
+	do i8secabt-check-abort
+		parameters are sys-consolidation-division login-id() "ZVRF" "M001"
+		returning ws-function-title 
+	do i8proglog-write-log
+	// Stock Enquiry
+	SET_SECURITY("WHSE","M013",ws-WHSE-M013)
+	SET_SECURITY("WHSE","T007",ws-WHSE-T007)
+	SET_SECURITY("WHSE","T036",ws-WHSE-T036)
+	SET_SECURITY("WHSE","T051",ws-WHSE-T051)
+	SET_SECURITY("WHSE","T002",ws-WHSE-T002)
+	SET_SECURITY("WHSE","T004",ws-WHSE-T004)
+	SET_SECURITY("WHSE","M010",ws-WHSE-M010)
+	SET_SECURITY("WHSE","E001",ws-WHSE-E001)
+	SET_SECURITY("WHSE","M019",ws-WHSE-M019)
+	SET_SECURITY("RF","X005",ws-RF-X005)
+	SET_SECURITY("ZUSR","E003",ws-ZUSR-E003)
+	SET_SECURITY("WHSE","T006",ws-WHSE-T006)
+	SET_SECURITY("WHSE","T001",ws-WHSE-T001)
+	SET_SECURITY("WHSE","T003",ws-WHSE-T003)
+	SET_SECURITY("RF","M001",ws-RF-M001)
+	SET_SECURITY("RF","M002",ws-RF-M002)
+	SET_SECURITY("RF","M003",ws-RF-M003)
+	SET_SECURITY("RF","M005",ws-RF-M005)
+	SET_SECURITY("RF","M006",ws-RF-M006)
+	SET_SECURITY("MANU","M001",ws-MANU-M001)
+	SET_SECURITY("MANU","M002",ws-MANU-M002)
+	SET_SECURITY("MANU","M004",ws-MANU-M004)
+	SET_SECURITY("MANU","M006",ws-MANU-M006)
+	SET_SECURITY("MANU","M010",ws-MANU-M010)
+	SET_SECURITY("MANU","M011",ws-MANU-M011)
+	do rf-menu
+end-procedure
+
+menu rf-menu
+	no-hide
+before
+	clear
+detail
+	option "1. Pick" @1,1
+		when ws-WHSE-M013
+		DO_BMSMENU("WHSE", "M013")
+	option "2. Receipt " @2,1
+		do receipt-menu
+		refresh
+	option "3. Putaway" @3,1
+		do putaway-menu
+		refresh
+	option "4. Replenish" @4,1
+		do replen-menu
+		refresh
+	option "5. Inventory Menu" @5,1
+		do inventory-menu
+		refresh
+	option "6. Stocktake Counts" @6,1
+		when ws-RF-X005
+		DO_BMSMENU('RF','X005') 
+	option "7. Production Receipt" @7,1
+		do production-receipt
+		refresh
+	option "0. Exit" @8,1
+		exit
+endmenu
+
+menu replen-menu
+	no-hide
+before
+	clear
+detail
+	option "1. Top Up Replen" @1,1
+		when ws-WHSE-T007
+		DO_BMSMENU( "WHSE","T007")
+	option "2. Real Time Top up" @2,1
+		when ws-WHSE-T036
+		DO_BMSMENU( "WHSE","T036")
+	option "3. Manual Top Ups" @3,1
+		when ws-WHSE-T051
+		DO_BMSMENU( "WHSE","T051")
+	option "0. Exit" @4,1
+		exit     
+endmenu
+
+menu putaway-menu
+	no-hide
+before
+	clear
+detail
+	option "1. Manual Putaway" @1,1
+		when ws-WHSE-T002
+		DO_BMSMENU('WHSE', 'T002')
+	option "2. Auto Putaway" @2,1
+		when ws-WHSE-T004
+		DO_BMSMENU('WHSE', 'T004')
+	option "3. Manual by Stk" @3,1
+		when ws-WHSE-T006
+		DO_BMSMENU('WHSE', 'T006')
+	option "3. Manual PutRepl" @4,1
+		when ws-WHSE-T001
+		DO_BMSMENU('WHSE', 'T001')
+	option "3. Manual StkRepl" @5,1
+		when ws-WHSE-T003
+		DO_BMSMENU('WHSE', 'T003')
+	option "0. Exit" @3,1
+		exit     
+endmenu
+
+menu inventory-menu
+	no-hide
+before
+	clear
+detail
+	option "1. Location Transfer" @1,1
+		when ws-WHSE-M010
+		DO_BMSMENU( "WHSE","M010")
+	option "2. Location Enquiry" @2,1
+		when ws-WHSE-E001
+		DO_BMSMENU( "WHSE","E001")
+	option "3. GTIN Enquiry" @3,1
+		when ws-ZUSR-E003
+		DO_BMSMENU( "ZUSR","E003")
+	option "4. Stock Take" @4,1
+		when ws-RF-X005
+		DO_BMSMENU( "RF","X005")
+	option "5. Warehouse Change" @5,1
+		when ws-WHSE-M019
+		DO_BMSMENU( "WHSE","M019")
+	option "0. Exit" @7,1
+		exit     
+endmenu
+
+menu receipt-menu
+	no-hide
+before
+	clear
+detail
+	option "1. By PO" @1,1
+		when ws-RF-M001
+		DO_BMSMENU('RF','M001')
+	option "2. By Item" @2,1
+		when ws-RF-M002
+		DO_BMSMENU('RF','M002')
+	option "3. By Shipment" @3,1
+		when ws-RF-M006
+		DO_BMSMENU('RF', 'M006')
+	option "4. SO Transfer Receipt" @4,1
+		WHEN ws-RF-M005
+		DO_BMSMENU('RF', 'M004')
+	option "5. Update/Putaway PO" @5,1
+		when ws-RF-M003
+	option "0. Exit" @6,1
+		exit
+end-menu
+
+menu production-receipt
+	no-hide
+before
+	clear
+detail
+	option "1. Employee 8*20" @1,1
+		when ws-MANU-M001
+		DO_BMSMENU("MANU","M001")
+	option "2. Employee 16*20" @2,1
+		when ws-MANU-M002
+		DO_BMSMENU("MANU","M002")
+	option "3. WorkOrder 8*20" @3,1
+		when ws-MANU-M004
+		DO_BMSMENU("MANU","M004")
+	option "4. WorkOrder 16*20" @4,1
+		when ws-MANU-M006
+		DO_BMSMENU("MANU","M006")
+	option "5. WorkCentre 8*20" @5,1
+		when ws-MANU-M010
+		DO_BMSMENU("MANU","M010")
+	option "6. WorkCentre 16*20" @6,1
+		when ws-MANU-M011
+		DO_BMSMENU("MANU","M011")
+	option "0. Exit" @7,1
+		exit
+end-menu
+	

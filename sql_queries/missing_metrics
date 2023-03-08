@@ -1,0 +1,31 @@
+
+/* This query lists all the module and function codes
+   That the user does not have access to in the company 
+   selected */
+select
+	distinct
+	t1.cm_node_name
+--	t1.cm_group_name,
+--	t1.cm_value_name
+from cusmetrics t1
+where exists
+(
+select 
+	distinct
+	s0.cm_group_name,
+	s0.cm_value_name
+from cusmetrics s0
+	where s0.cm_group_name not in ('AUDIT','FILESYSTEMS','FREE_DBSPACE','GLTRANS','STKMOV')
+	
+	
+MINUS
+select
+	distinct
+	s1.cm_group_name,
+	s1.cm_value_name
+	from cusmetrics s1
+	where s1.cm_group_name not in ('AUDIT','FILESYSTEMS','FREE_DBSPACE','GLTRANS','STKMOV')
+	and s1.cm_node_name = t1.cm_node_name
+)
+	
+	

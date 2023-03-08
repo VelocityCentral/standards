@@ -1,0 +1,764 @@
+#define STD_PLT_VOLUME 1.728 // 1.2*1.2*1.2
+
+#define ADDONECTN(A,B,C,D,F) \
+	set cv-seq = A \
+	set cv-width = B \
+	set cv-length = C \
+	set cv-height = D \
+	set cv-qty = F \
+	set cv-cubes = B * C * D \
+	set cv-weight = F / 2 \
+	insert ctnvolumes 
+
+field
+	ws-last-error						pic x(1024) type string
+	ws-user-whse						like wu-whse-code
+
+object ctnvolumes
+	type is memory
+	record
+		cv-seq							pic 999
+		cv-width						type number
+		cv-length						type number
+		cv-height						type number
+		cv-cubes						type number
+		cv-qty							type number
+		cv-weight						type number
+	end-record
+	key is cv-seq
+
+
+mode md-entry
+	prompt "Entry"
+
+mode md-add-defaults
+	prompt "Add Defaults"
+
+procedure main
+local
+	lf-dummy							type number
+	// seed the random function
+	set lf-dummy = random(tod())
+	get warehouse-user-access
+		on index wu-user-id
+		key is login-id
+	on error ENOREC
+		message "User not assigned to warehouse"
+		exit 1
+	else set ws-user-whse = wu-whse-code
+	endon
+	report "Audit"
+	do advwhse-menu
+end-procedure
+
+
+menu advwhse-menu
+	window
+detail
+	option "Create Std Cartons" @1,1
+		open ctnvolumes temporary
+		do crt-std-ctns
+		message "Std Cartons Complete"
+	option "Create stock Storage Details" @2,1
+		do crt-stk-stg
+		do integ
+		message "Stock Storage Details Complete"
+	option "Create Extra Locations" @3,1
+		// if you want to demo adv whse there probably won't be enough
+		// space for the stock you need to create so get some more.
+		do copy-aisles
+		message "Copy Aisles Complete"
+//	option "Assign Pick Locations" @4,1
+//		do pick-locations
+//		message "Pick Locations Complete"
+	option "Assign & review Pick Locations Manually" @5,1
+		do stock-locations
+end-menu
+
+//procedure pick-locations
+//	select *
+//		from stock-master
+//		where stock-code like 'EQ%'
+//	detail
+//		select * from stock-location
+//			where stock-code = :stock-code
+//		detail
+//			get warehouse-location
+//end-procedure
+
+screen stock-locations
+local
+	lf-location						like sl-location-code
+	window
+	title "Assign Pick Locations for Stock Items"
+	datagrid
+	select 
+		t0.stock-code
+		t0.sl-location-code
+		t0.sl-reference-lot
+		t0.sl-qty-on-hand
+		t0.sl-qty-due-out
+		t0.sl-qty-due-in
+		t0.sl-qty-on-hold
+		t0.sl-location-type
+		t1.stk-description
+		t2.location-description
+		from stock-location as t0
+		inner join stock-master as t1
+			on t0.stock-code = t1.stock-code
+		inner join warehouse-location-types as t2 
+			on t2.location-type = t0.sl-location-type
+		where t0.whse-code = :ws-user-whse
+		and t0.sl-location-code not in ('ZINVOICE' '00000000' 'LOST' )
+		order by t0.stock-code t0.sl-location-code
+	allowed search md-entry remove md-add-defaults
+detail
+	if screenmode = md-entry
+		do insert-one-location parameters are stock-code
+		reselect
+		refresh review
+	endif
+	if screenmode = md-add-defaults
+		/*
+		select * from default-pick-locations
+		detail
+			do add-default-pick-location parameters
+				dpl-stock-code dpl-location
+		end-select
+		*/
+		select * from stock-master
+			where stock-code like 'EQ%' or stock-code like 'DC%'
+		detail
+			do get-next-default-pick-location parameters are stock-code
+				returning lf-location
+			if lf-location != spaces
+				do add-default-pick-location parameters
+					stock-code lf-location
+			endif
+		end-select
+		reselect
+		refresh review
+	endif
+	if screen-mode  = remove
+		if sl-qty-on-hand != 0
+		or sl-qty-due-out != 0
+		or sl-qty-due-in != 0
+		or sl-qty-on-hold != 0
+			message "Stock in location, unable to remove"
+			continue
+		endif
+	endif
+	accept stock-code col 1
+		when screen-mode = search
+		title "Stock Code"
+	display stk-description col 2
+	display sl-location-code col 3
+	display sl-location-type col 4
+	display location-description col 5
+	display sl-qty-on-hand col 6
+	display sl-qty-due-out col 7
+	display sl-qty-due-in col 8
+	display sl-qty-on-hold col 9
+end-screen
+
+screen insert-one-location
+parameters
+	lp-stock-code					like stock-code
+local
+	lf-location						like sl-location-code
+	lf-stock-code					like stock-code
+	lf-exists						type boolean
+	window
+		window-position 5
+	responsive
+	allowed entry-once
+detail
+	screen-group // ---- data ----------------------------
+		title "data"  // The title is optional
+		accept  lf-stock-code 
+			default lp-stock-code
+			title "Stock Code"
+		drop-down
+			width 38
+			dynamic
+			concat-title
+			select stock-code, stk-description
+				from stock-master 
+		end-drop-down
+		Validations
+			get stock-master
+				on index stock-code
+				key is lf-stock-code
+			on error ENOREC
+				message "Invalid Stock Code"
+				reenter
+			endon
+		end-validations
+		accept lf-location 
+			title "Location Code"
+			default lf-location
+		drop-down
+			width 38
+			concat-title
+			dynamic
+			select t0.sl-location-code, t1.location-description
+				from warehouse-valid-locations  as t0
+				inner join warehouse-location-types as t1 
+					on t1.location-type = t0.location-type
+				inner join system-table as t2
+					on t2.sys-tbl-type = 'WZ' 
+					// Be very careful:  location-storage-type-flag is nothing
+					// to do with storage types - it is the ZONE!!!!!
+					and t2.sys-tbl-code = t1.location-stock-storage-type
+				where whse-code = ws-user-whse
+				and t1.location-dedicated = YES
+				and t2.sys-tbl-alpha-1 = :stk-storage-type-flag
+				and t0.location-in-use = spaces
+				and t1.default-min-pick-unit-x < 3
+		end-drop-down
+		before-accept 
+			do get-next-default-pick-location
+				parameters are lp-stock-code
+				returning lf-location
+		/*
+			select t0.sl-location-code, t1.location-description
+				from warehouse-valid-locations  as t0
+				inner join warehouse-location-types as t1 
+					on t1.location-type = t0.location-type
+				inner join system-table as t2
+					on t2.sys-tbl-type = 'WZ' 
+					// Be very careful:  location-storage-type-flag is nothing
+					// to do with storage types - it is the ZONE!!!!!
+					and t2.sys-tbl-code = t1.location-stock-storage-type
+				where whse-code = ws-user-whse
+				and t1.location-dedicated = YES
+				and t2.sys-tbl-alpha-1 = :stk-storage-type-flag
+				and t0.location-in-use = spaces
+				and t1.default-min-pick-unit-x < 3
+				order by t0.sl-location-code
+			detail
+				// choose the first one in the list
+				set lf-location = sl-location-code
+				break
+			end-select
+		*/
+		end-before-accept
+	end-screen-group // ---- data --------------------------------------
+	confirm
+	confirmed
+			// Check there is not already pick location
+			do chk-rtn-pick-location parameters are lf-stock-code
+				returning lf-location lf-exists
+			if lf-exists
+				message "Item already in pick location " lf-location
+				re-enter lf-stock-code
+			endif
+			do add-default-pick-location parameters
+				lf-stock-code lf-location
+			if exit-status > 0
+				message ws-last-error
+			endif
+	end-confirm
+end-screen
+
+procedure get-next-default-pick-location
+parameters are 
+	lp-stock-code						like stock-code
+returning 
+	lr-location-code					like sl-location-code
+	//
+	save stock-master
+	get stock-master
+		on index stock-code
+		key is lp-stock-code
+	on error
+	endon
+	//
+	select t0.sl-location-code, t1.location-description
+		from warehouse-valid-locations  as t0
+		inner join warehouse-location-types as t1 
+			on t1.location-type = t0.location-type
+		inner join system-table as t2
+			on t2.sys-tbl-type = 'WZ' 
+			// Be very careful:  location-storage-type-flag is nothing
+			// to do with storage types - it is the ZONE!!!!!
+			and t2.sys-tbl-code = t1.location-stock-storage-type
+		where whse-code = ws-user-whse
+		and t1.location-dedicated = YES
+		and t2.sys-tbl-alpha-1 = :stk-storage-type-flag
+		and t0.location-in-use = spaces
+		and t1.default-min-pick-unit-x < 3
+		order by t0.sl-location-code
+	detail
+		// choose the first one in the list
+		set lr-location-code = sl-location-code
+		break
+	end-select
+	restore stock-master
+end-procedure
+
+procedure add-default-pick-location
+parameters are 
+	lp-stock-code						like stock-code
+	lp-location-code					like sl-location-code
+local
+	lf-commit							type boolean
+	//
+	set ws-last-error = spaces
+	// check this location doesn't have something else in it.
+	select * from stock-location
+		where stock-code != :lp-stock-code
+		and whse-code = ws-user-whse
+		and sl-location-code = lp-location-code
+	detail
+		set ws-last-error = "Location already has something else in it"
+		exit 1
+	end-select
+	// get current on stock master
+	get stock-master 
+		on index stock-code 
+		key is lp-stock-code
+	on error ENOREC
+		set ws-last-error = concat("Invalid Stock Code" lp-stock-code)
+		exit 1
+	endon
+	// get current on valid locations in order to get type
+	get warehouse-valid-locations
+		on index whse-code sl-location-code
+		key is ws-user-whse lp-location-code
+	on error ENOREC
+		set ws-last-error = concat("Invalid location:" lp-location-code)
+		exit 1
+	endon
+	if location-in-use = YES
+		set ws-last-error = concat(lp-location-code, " Already in use")
+		exit 1
+	endif
+	// get current on type in order to get picking preferenceA
+	get warehouse-location-types
+		on index whse-code location-type
+		key is ws-user-whse location-type
+	on error ENOREC
+		get warehouse-location-types
+			on index whse-code location-type
+			key is spaces location-type
+		on error ENOREC
+			set ws-last-error = concat("Invalid Location Type " location-type)
+			exit 1
+		endon
+	endon
+	// chekc its a pick location
+	if default-min-pick-unit-x >= 3
+		set ws-last-error = "Location is not a pick location"
+		exit 1
+	endif
+	// Check the storage type
+	get system-table 
+		on index sys-tbl-type sys-tbl-code
+		key is "WZ" location-stock-storage-type
+	on error ENOREC
+		set ws-last-error = concat("Zone Not defined" location-stock-storage-type)
+		exit 1
+	endon
+	if sys-tbl-alpha-1 != stk-storage-type-flag
+		set ws-last-error = concat("Zone " location-stock-storage-type 
+			"Storage type " sys-tbl-alpha-1
+			"does not match stock-master" stk-storage-type-flag)
+		exit 1
+	endif
+	// All is well.  Add it
+	set lf-commit = TRUE
+	transaction begin
+	initialise stock-location
+	set whse-code =  ws-user-whse
+	set sl-location-code = lp-location-code
+	set stock-code = lp-stock-code
+	set sl-picking-preference = location-preference
+	set sl-location-type = location-type
+	insert stock-location
+	on error 
+		set ws-last-error = concat("Could not insert location record"
+			error-description(file-status()))
+		set lf-commit = FALSE
+	endon
+	get warehouse-valid-locations
+		on index whse-code sl-location-code
+		key is ws-user-whse lp-location-code
+		lock
+	on error ENOREC
+		set ws-last-error = "Went to update valid location but it disappeared"
+		set lf-commit =  FALSE
+	else
+		set location-in-use = YES
+		update warehouse-valid-locations
+		on error 
+			set ws-last-error = "Unable to flag location as in use"
+			set lf-commit = FALSE
+		endon
+	endon
+	if lf-commit 
+		transaction commit
+	else
+		transaction rollback
+		exit 1
+	endif
+end-procedure
+
+procedure chk-rtn-pick-location
+parameters
+	lp-stock-code						like stock-code
+returning
+	lr-location-code					like sl-location-code
+	lr-exists							type boolean // true if lr-location is already exists
+	//
+	// check if the stock is already in a pick location
+	//
+	select t0.sl-location-code
+	from stock-location as t0
+	inner join warehouse-location-types as t1 
+		on t1.location-type = t0.sl-location-type
+	inner join system-table as t2
+		on t2.sys-tbl-type = 'WZ' 
+		// Be very careful:  location-storage-type-flag is nothing
+		// to do with storage types - it is the ZONE!!!!!
+		and t2.sys-tbl-code = t1.location-stock-storage-type
+	where whse-code = ws-user-whse
+	and stock-code = :lp-stock-code
+	and t1.location-dedicated = YES
+	and t2.sys-tbl-alpha-1 = :stk-storage-type-flag
+	and t1.default-min-pick-unit-x < 3
+	detail
+		// 
+		// Just need to find the first one and then exit
+		//
+		set lr-location-code = sl-location-code
+		set lr-exists = TRUE
+		exit
+	end-select
+	//
+	// If we get to here then there are no pick face locations so find 
+	// the next available
+	//
+	select t0.sl-location-code
+	from warehouse-valid-locations  as t0
+	inner join warehouse-location-types as t1 
+		on t1.location-type = t0.location-type
+	inner join system-table as t2
+		on t2.sys-tbl-type = 'WZ' 
+		// Be very careful:  location-storage-type-flag is nothing
+		// to do with storage types - it is the ZONE!!!!!
+		and t2.sys-tbl-code = t1.location-stock-storage-type
+	where whse-code = ws-user-whse
+	and t1.location-dedicated = YES
+	and t2.sys-tbl-alpha-1 = :stk-storage-type-flag
+	and t0.location-in-use = spaces
+	and t1.default-min-pick-unit-x < 3
+	detail
+		// 
+		// Just need to find the first one and then exit
+		//
+		set lr-location-code = sl-location-code
+		set lr-exists = FALSE
+		exit
+	end-select
+end-procedure
+
+
+procedure integ
+local
+	lf-weight							type number
+	lf-ctn-qty							type number
+	lf-plt-qty							type number
+	lf-ctn-cube							type number
+	lf-ctn-weight						type number
+	page
+	print "Integ"
+	select 
+		* 
+		from stock-master
+		where stk-stock-status in ( 'I', 'S', 'M' ,'R' )
+		for update
+	detail
+		print stock-code stk-description
+		get stock-unit-conversion
+			on index stock-code suc-unit-desc
+			key is stock-code 'EACH'
+		on error
+		else
+			set lf-weight = suc-weight
+		endon
+		//
+		// get all the plt records and update the weight
+		select * from stock-unit-conversion
+			where  stock-code = :stock-code
+			and suc-unit-desc <> 'EACH'
+			for update
+		detail
+			set suc-weight = lf-weight * suc-unit-conversion
+			update stock-unit-conversion
+			if suc-unit-desc = 'PLT'
+				set lf-plt-qty = suc-unit-conversion
+				if suc-weight > 1000
+					print "Warning Pallet weight exceeds one tonne"
+				endif
+				if suc-weight <= 1
+					print "Warning Pallet weight is less than 1 kilo"
+				endif
+			endif
+			if suc-unit-desc = 'CTN'
+				set lf-ctn-qty = suc-unit-conversion
+				set lf-ctn-cube = suc-width * suc-length * suc-height
+				set lf-ctn-weight = suc-weight
+			endif
+		end-select
+		// set the pack-qty to the ctn qty
+		set stk-pack-qty = lf-ctn-qty
+		// set the pack-wieght to the ctn weight 
+		set stk-pack-weight = lf-ctn-weight
+		// set the pack-cube to the ctn cube.
+		set stk-pack-cubic-size = lf-ctn-cube
+		update stock-master
+		// set the whse min stock equal to the pallet qty
+		get stock-warehouse-detail
+			on index stock-code whse-code
+			key is stock-code ws-user-whse
+			lock
+		on error
+			initialise stock-warehouse-detail
+				leaving stock-code whse-code
+			set whse-drp-replenish-multiple = 1
+			if whse-min-stock = 0
+				set whse-min-stock = lf-plt-qty
+			endif
+			insert stock-warehouse-detail
+		else
+			if whse-min-stock = 0
+				set whse-min-stock = lf-plt-qty
+			endif
+			update stock-warehouse-detail
+		endon
+		// wsm
+		get warehouse-stock-master
+			on index stock-code wsm-whse-code
+			key is stock-code spaces
+			lock
+		on error
+		else
+			set unit-volume = lf-ctn-cube / lf-ctn-qty
+			set unit-weight = lf-ctn-weight / lf-ctn-qty
+			update warehouse-stock-master
+		endon
+	end-select
+end-procedure
+
+
+procedure crt-std-ctns
+	ADDONECTN(1,0.3,0.3,0.8,10)
+	ADDONECTN(2,0.4,0.4,0.6,20)
+	ADDONECTN(3,0.45,0.3,0.75,24)
+	ADDONECTN(4,0.6,0.4,0.6,8)
+	ADDONECTN(5,0.4,0.4,0.3,16)
+	ADDONECTN(6,0.4,0.4,0.6,12)
+	ADDONECTN(7,0.3,0.3,0.3,24)
+end-procedure
+
+
+procedure crt-stk-stg
+local 
+	l-counter				type number
+	select * from stock-master
+		where stk-stock-status in ( 'I', 'S', 'M' ,'R' )
+		for update
+	detail
+		print "Stock Code :" stock-code stk-description stk-pack-qty stk-pack-cubic-size stk-pack-weight
+		set l-counter += 1
+		get warehouse-stock-master
+			on index stock-code wsm-whse-code
+			key is stock-code spaces
+		on error
+			print 'Adding storage records'
+			initialise warehouse-stock-master
+				leaving stock-code wsm-whse-code
+			set pick-unit-name[1] = "EACH"
+			set pick-unit-name[2] = "CTN"
+			set pick-unit-name[3] = "PLT"
+			set wsm-zone-preference[1] = "B"
+			set wsm-zone-preference[2] = "P"
+			insert warehouse-stock-master
+			on error
+			endon
+			switch l-counter % 6
+			case 0
+				do select-ctn parameters are 1
+			case 1
+				do select-ctn parameters are 2
+			case 2
+				do select-ctn parameters are 3
+			case 3
+				do select-ctn parameters are 4
+			case 4
+				do select-ctn parameters are 5
+			case 5
+				do select-ctn parameters are 6
+			case 6
+				do select-ctn parameters are 7
+			endswitch
+		else
+		endon
+		// may 2022 - set storage type on inv master correctly - don't change!
+//		set stk-storage-type-flag = 'M'
+//		update stock-master
+//		on error
+//		endon
+	end-select
+end-procedure
+
+procedure select-ctn
+// assume current on stock-master
+parameters
+	lp-ctn-no							pic 999
+//
+local
+	lf-ctn-qty							pic 9999
+	lf-unit-weight						type number
+	lf-plt-qty							pic 9999
+	lf-last-cubes						like cv-cubes
+	lf-ctns-per-pallet					pic 9999
+	lf-found							type boolean
+	get ctnvolumes
+		on index cv-seq
+		key is lp-ctn-no
+	//
+	do suc parameters are stock-code "EACH" 1
+	if stk-pack-qty  <> 0 or stk-pack-cubic-size = 0
+		set  lf-ctn-qty  = cv-qty
+	else
+		set lf-ctn-qty = stk-pack-qty
+	// try to determine ctn size from nearest
+		select * from ctnvolumes
+			order by cv-cubes 
+		detail
+			if stk-pack-cubic-size < cv-cubes
+			and stk-pack-cubic-size > lf-last-cubes
+				// this is the one to use so break
+				break
+			endif
+			set lf-last-cubes = cv-cubes
+		end-select
+	endif
+	// now do something similar with weight  
+	sql-update stock-unit-conversion
+		set suc-weight = 1
+		where stock-code = :stock-code
+		and suc-unit-desc in ( 'KG', 'KG2' )
+	if stk-unit-desc = 'KG' or stk-unit-desc = 'KG2'
+		set lf-unit-weight = 1
+		print "Weight from KG Uom"
+	else
+		if stk-pack-weight <> 0
+			if stk-pack-qty = 0
+				set lf-unit-weight = stk-pack-weight 
+			else
+				set lf-unit-weight = stk-pack-weight / stk-pack-qty
+			endif
+			print "Weight from pack defn"
+		else
+			// last chance - check and see if there are any weights recorded
+			set lf-found = false
+			select * from stock-unit-conversion
+			detail
+				if suc-weight <> 0
+					set lf-unit-weight = suc-weight / suc-unit-conversion
+					set lf-found = true
+					print "Weight from other suc record"
+				endif
+			end-select
+			if not lf-found
+				set lf-unit-weight = integer((random(0) / 32767) * 1000) / 100  // ensures a number between 1 and 10 to 2 dp
+				print "Weight set to random " lf-unit-weight
+			endif
+		endif
+	endif
+	get stock-unit-conversion 
+		on index stock-code suc-unit-desc
+		key is stock-code 'EACH'
+		lock
+	on error
+	else
+		set suc-weight = lf-unit-weight
+		update stock-unit-conversion
+	endon
+	do suc parameters are stock-code "CTN" lf-ctn-qty
+	//
+	// Now determine how many will fit on a pallet
+	//
+	// I'm current on volume
+	set lf-ctns-per-pallet = (STD_PLT_VOLUME / cv-cubes) 
+	// should not be a prime (otherwise it won't stack on a pallet) - but that's too hard so we'll just go with even
+	// numbers
+	if lf-ctns-per-pallet % 2  = 1
+		set lf-ctns-per-pallet -= 1
+	endif
+	set lf-plt-qty = lf-ctn-qty * lf-ctns-per-pallet
+	do suc parameters are stock-code "PLT" lf-plt-qty
+end-procedure
+
+procedure suc
+// assume current on ctnvolumes
+parameters are 
+	lp-stock-code 			like stock-code
+	lp-uom					like suc-unit-desc
+	lp-qty					type number
+	get stock-unit-conversion
+		on index stock-code suc-unit-desc
+		key is lp-stock-code lp-uom
+	on error
+		print "Adding SUC" suc-unit-desc lp-qty
+		initialise stock-unit-conversion leaving stock-code suc-unit-desc
+		set suc-length = cv-length
+		set suc-width = cv-width
+		set suc-height = cv-height
+		set suc-unit-conversion = lp-qty
+		set suc-price-per = 1
+		insert stock-unit-conversion
+		on error endon
+	endon
+end-procedure
+
+procedure copy-aisles
+local
+	lf-start-aisle				type number
+	lf-end-aisle				type number
+	i							type number
+	report "Aisle creation report"
+		no-message
+	set lf-start-aisle = asc("E")
+	set lf-end-aisle = ASC("P")
+	for i = lf-start-aisle to lf-end-aisle
+		do copy-one-aisle parameters are 	
+			ws-user-whse "PC" " 1" concat("P",ascii-char(i))
+		do copy-one-aisle parameters are 	
+			ws-user-whse "PC" " 2" concat("P",ascii-char(i))
+	end-for
+end-procedure
+
+procedure copy-one-aisle
+parameters
+	lp-from-whse				like whse-code
+	lp-from-aisle				like pfl-zone-aisle
+	lp-from-start				like pfl-start-bin
+	lp-to-aisle					like pfl-zone-aisle
+	print "Copying " lp-from-whse lp-from-aisle lp-from-start " to " lp-to-aisle
+	get warehouse-profile
+		on index  whse-code pfl-zone-aisle pfl-start-bin
+		key is lp-from-whse lp-from-aisle lp-from-start 
+	on error
+		print "No such profile"
+	else
+		set pfl-zone-aisle = lp-to-aisle
+		insert warehouse-profile
+		on error
+			print "Cant insert" error-description(file-status)
+		endon
+	endon
+end-procedure

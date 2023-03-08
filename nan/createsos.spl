@@ -1,0 +1,428 @@
+
+
+#define MAX_ORDS_PER_CUSTOMER	4
+
+#include "../include/bmsdef.spl"  // for version
+
+//
+// create random sales orders from budgets - note that this builds OPEN orders
+// NOT the archive orders from stock momvements for history purposes.  That is
+// crtstkmovso
+//
+
+/*
+
+Nice to haves for future development
+
+Prompt to determine whether to consume all the stock or not - i.e. should backorders be generated?
+*/
+
+#include "../so/i50loadso.spl"
+
+#define RANDOM_BETWEEN(A,B) \
+	(((RANDOM(0) / 32767) * (B - A)) + A)
+
+object customers
+	type is memory
+	record is 
+		c-accountcode					like accountcode
+		c-number-of-orders				type number
+	end-record
+	key is c-accountcode
+
+field
+	ws-processing-date					type date
+	ws-select-serial					type boolean
+	ws-select-lot						type boolean
+	ws-select-rm						type boolean
+	ws-select-kit						type boolean
+	ws-maximum-ords-per-customer		type number
+	ws-maximum-orders					type number
+	ws-start-whse						like whse-code
+	ws-end-whse							like whse-code
+	ws-start-stock-code					like stock-code
+	ws-end-stock-code					like stock-code
+	ws-wms-orders-created				type boolean
+	ws-start-customer					like accountcode
+	ws-end-customer						like accountcode
+
+procedure main
+local
+	lf-dummy							type number
+	get system-control first
+	// seed the random number generator
+	set lf-dummy =  random(tod())
+	do get-parameters entry once
+end-procedure
+
+screen get-parameters
+local
+	lf-notes						pic x(16000) type varchar
+	lf-inserted-lines				type number
+	lf-cust-desc					like shortname
+	window 
+	title "Create Orders"
+	responsive
+before
+	set ws-processing-date = today
+	set ws-select-serial = FALSE
+	set ws-select-lot = FALSE
+	set ws-select-rm = FALSE
+	set ws-select-kit = TRUE
+	set ws-maximum-ords-per-customer = MAX_ORDS_PER_CUSTOMER
+	set ws-maximum-orders = 9999
+	set ws-start-whse = "W01"
+	set ws-end-whse = "W03"
+	set ws-start-stock-code  = "EQ" //spaces
+	set ws-end-stock-code = max-value(ws-end-stock-code)
+	string ws-end-stock-code replacing "EQ199" at 1
+	set lf-notes = "This program will create sales orders ready for processing."
+	string lf-notes appending "  This is done via m50loadso.  They are open orders."
+	string lf-notes appending ascii-char(13)
+	string lf-notes appending "THIS IS NOT THE SO ARCHIVE GENERATION PGM"
+	string lf-notes appending ascii-char(13)
+	string lf-notes appending "The products, customers and qtys are based on configurable budget"
+	string lf-notes appending " No 2."
+detail
+	screen-group // ---- Notes ----------------------------
+		title "Notes"  // The title is optional
+		width 12
+		accept lf-notes 
+			no-title
+			default lf-notes
+			rows 5
+			columns 80
+			multi-line 
+			read-only
+	end-screen-group // ---- Notes --------------------------------------
+	screen-group // ---- options ----------------------------
+		title "Options"  // The title is optional
+		accept ws-processing-date 
+			title "Processing Date"
+			default ws-processing-date
+		check-box ws-select-serial 
+			title "Select Serial Items" right-coordinate
+			default ws-select-serial
+		end-check-box
+		check-box ws-select-lot 
+			title "Select Lot Items" right-coordinate
+			default ws-select-lot
+		end-check-box
+		check-box ws-select-rm 
+			title "Select Raw Materials" right-coordinate
+			default ws-select-rm
+			help "not implemented - intended if stk-stock-status <> r but item on a non-kit bom"
+		end-check-box
+		accept ws-maximum-ords-per-customer  pic z(4)
+			title "Max Orders per Customer:"
+			default ws-maximum-ords-per-customer
+		accept ws-maximum-orders pic z(4)
+			title "Maximum orders for this invocation"
+			default ws-maximum-orders
+		check-box ws-select-kit 
+			title "Select kit parent items" right-coordinate
+			default ws-select-kit
+		end-check-box
+	end-screen-group // ---- options --------------------------------------
+	screen-group // ---- Ranges ----------------------------
+		title "Ranges"  // The title is optional
+		field-group // ---- Warehouse Range ----------------------------
+			title "Warehouse Range"  // Title is optional
+			accept ws-start-whse 
+				title "From"
+				default ws-start-whse
+				uppercase
+			accept ws-end-whse 
+				title "To"
+				default ws-end-whse
+				uppercase
+		end-field-group // ---- Warehouse Range --------------------------------------
+		field-group // ---- Stock Range ----------------------------
+			title "Stock Range"  // Title is optional
+			accept ws-start-stock-code 
+				title "From"
+				default ws-start-stock-code
+				uppercase
+			accept ws-end-stock-code 
+				title "To"
+					default ws-end-stock-code
+				uppercase
+		end-field-group // ---- Stock Range --------------------------------------
+		field-group // ---- Customer Range ----------------------------
+			title "Customer Range"  // Title is optional
+			accept ws-start-customer 
+				title "From"
+				default ws-start-customer
+				drop-down
+					width 38
+					concat-title
+					select accountcode, lf-cust-desc = concat(rtrim(shortname), "-" warehouse)
+						from deb-master 
+				end-drop-down
+			before-accept
+				if screenmode = form-entry-defaults
+					set ws-start-customer = "C0002"
+				endif
+			end-before-accept	
+			accept ws-end-customer 
+				title "To"
+				default ws-end-customer
+				drop-down
+					width 38
+					concat-title
+					select accountcode, lf-cust-desc = concat(rtrim(shortname), "-" warehouse)
+						from deb-master 
+				end-drop-down
+			before-accept
+				set ws-end-customer = str-concat(ws-start-customer,max-value(ws-end-customer))
+				set ws-end-customer = "C0004"
+			end-before-accept
+		end-field-group // ---- Customer Range --------------------------------------
+	end-screen-group // ---- Ranges --------------------------------------
+	confirm 
+		do build-the-orders 
+			returning lf-inserted-lines
+		if lf-inserted-lines > 1
+			spl "sys/m85major" parameter are "-soextload"
+			get system-control first
+			while ws-wms-orders-created and sys-status-def-from-external = "3"
+				message-box
+					param-text("There are WMS Orders in the file<<BR>>You must not load these as ready to print invoice")
+					title "Check Major Function Flag"
+					message-buttons MSG_BOX_RETRY
+					icon MSG_BOX_STOP
+				spl "sys/m85major" parameter are "-soextload"
+				get system-control first
+			endwhile
+			spl "so/m50loadso" parameters are "-std" "test1" "N"
+		else
+			message "no lines were inserted"
+		endif
+	end-confirm
+end-screen
+
+procedure build-the-orders
+window no-hide
+	title "Building orders"
+returning
+	lr-inserted-lines					type number
+local 
+	i									type number
+	l-random							type number
+	l-first-time						type boolean
+	l-po-number							type number
+	l-offset							type number
+	l-qty								type number
+	l-counter							type number
+	//
+	// open and store the temp file
+	//
+	//
+	report "Created Sales orders for import"
+		no-message
+		no-xml
+	set l-offset = month(ws-processing-date)
+	open std-sales-order-and-lines
+		file is "test1"
+		create truncate permanent
+	open customers
+		temporary
+	// build a list of customers that are in the selected warehosue
+	select unique bws-field-2 from budget-work-space
+		where bws-field-2 between :ws-start-customer and :ws-end-customer
+		and bd-id = 2
+		order by bws-field-2
+	before
+		print "--------------------Selected Customers--------------------"
+		print "Customer"
+			"Order Count" col 50
+	detail
+		get deb-master
+			on index accountcode
+			key is bws-field-2
+		on error endon
+		initialise customers
+		if warehouse < ws-start-whse or warehouse > ws-end-whse
+			continue
+		endif
+		set c-accountcode = accountcode
+		set c-number-of-orders = integer(RANDOM_BETWEEN(0, ws-maximum-ords-per-customer))
+		insert customers
+		print accountcode 
+			shortname 
+			warehouse  col 40
+			c-number-of-orders  col 50
+	end-select
+	// build orders for those customers
+	print "--------------------Inserted Orders--------------------"
+	print "Processing Date" ws-processing-date
+	if ws-select-lot
+		print "Lot Control Acceptable"
+	endif
+	if ws-select-serial
+		print "Serial items acceptable"
+	endif
+	if ws-select-kit
+		print "Kit Items acceptable"
+	endif
+	print " From " ws-start-stock-code " to " ws-end-stock-code
+	print "Maximum orders per customer " ws-maximum-ords-per-customer
+	print "Maximum orders" ws-maximum-orders
+	set l-counter = 0 
+	select * from customers
+	detail
+		print "number of orders for customer : " c-accountcode "will be" c-number-of-orders
+		for i = 1 to c-number-of-orders
+			if l-counter >= ws-maximum-orders
+				print l-counter " exceeds maximum orders of " ws-maximum-orders
+				break
+			endif
+			select * from budget-work-space
+				order by bd-id bws-field-2 bws-field-1
+				where bws-field-2 = :c-accountcode
+				and bd-id = 2
+			before bws-field-2
+				print "Customer :" bws-field-2 
+				get deb-master
+					on index accountcode
+					key is bws-field-2
+				on error endon
+				set l-first-time = TRUE
+				display bws-field-2 @11,10
+				set accountcode = bws-field-2
+			detail
+//				do get-random parameters are 0.6 1 returning l-random
+//				set l-random += 0.2 // to give a number between 0.8 and 1.2
+				//
+				set l-random = RANDOM_BETWEEN(8,12) / 10
+				set l-qty = integer((bws-num[l-offset] / c-number-of-orders) 
+					* l-random)
+				if l-qty <= 0
+					continue
+				endif
+				if bws-field-1 < ws-start-stock-code or bws-field-1 > ws-end-stock-code
+					continue
+				endif
+				get stock-master
+					on index stock-code key is bws-field-1
+				if stk-serialized-flag = "Y" and not ws-select-serial
+					continue // dont do serial tracked stock
+				endif
+				if stk-serialized-flag = "L" and not ws-select-lot
+					continue // dont do serial tracked stock
+				endif
+				if stk-stock-status = "R"
+					continue
+				endif
+				if stk-stock-status = "K" and not ws-select-kit
+					continue
+				endif
+				initialise std-sales-order-and-lines
+				if l-first-time
+					set l-counter += 1
+					if not ws-wms-orders-created
+						get system-table
+							on index sys-tbl-type sys-tbl-code
+							key is "WH" warehouse
+						on error
+						else
+							if sys-tbl-sales-mtd = 3
+								set ws-wms-orders-created = TRUE
+							endif
+						endon
+					endif
+					set l-first-time = FALSE
+					set std-record-type = "H"
+					set std-so-cust-code = accountcode
+					set std-so-whse-code = warehouse
+					set std-addr1 = spaces
+					set std-addr2 = spaces
+					set std-addr3 = spaces
+					set std-addr4 = spaces
+					set std-addr5 = spaces
+					set std-phone-no = spaces
+					set std-fax-no = spaces
+					set std-postcode = spaces
+					set std-tax-exemption-no = spaces
+					do get-random parameters are 0 1 returning l-random
+					set l-po-number = 10000 * l-random
+					set std-so-cust-reference = concat("PO",str(l-po-number))
+					set std-so-rep-code = rep-code
+					//
+					do get-random parameters are 0 (days-in-month(month(ws-processing-date),year(ws-processing-date)) / 10)
+						returning l-random
+					set l-random *= 10
+					set std-so-order-date = format-picture(
+						julian(l-random,month(ws-processing-date),year(ws-processing-date))
+						,"YYMMDD")
+					set std-so-delivery-date = std-so-order-date
+				else
+					set std-record-type = "L"
+				endif
+				set std-stock-code = bws-field-1
+				set std-sol-line-desc = stk-description
+				set std-sol-ordered-qty = str(l-qty)
+				set std-sol-item-price = spaces // str(deb-sales-hist-budget-price[l-offset])
+				set std-sol-stk-unit-desc =  spaces
+				set std-custom-format-code =  spaces
+				set std-filler =  spaces
+				set std-header-invoice-no =  spaces
+				set std-header-carrier-code =  spaces
+				set std-header-status-flag =  spaces
+				set std-header-payment-flag =  spaces
+				set std-cost-centre =  spaces
+				set std-so-credit-note-no =  0
+				set std-so-order-type =  spaces
+				set std-so-consignment-note =  spaces
+				set std-price-code =  spaces
+				set std-sol-disc-percent =  0
+				set std-notional-line-amount = 0
+				set std-instr1 =  spaces
+				set std-instr2 =  spaces
+				set std-instr3 =  spaces
+				set std-instr4 =  spaces
+				set std-instr5 =  spaces
+				insert std-sales-order-and-lines
+				on error
+				else
+					print std-record-type
+						accountcode
+						stock-code
+						str(l-qty)
+						str(lr-inserted-lines + 1)
+					set lr-inserted-lines += 1
+				endon
+			end-select
+		end-for
+	end-select
+	report finished
+end-procedure
+
+
+procedure get-random
+parameters are 
+	l-start							type number
+	l-end							type number
+returning
+	l-value							type number
+	if l-start < 0 
+		set l-start = 0
+	endif
+	if l-end > 1
+		set l-end = 1
+	endif
+	repeat
+		// random returns a number between 0 and 32767
+		set l-value = random(0)
+		// ensure the number is even spread between 0.0001 and +1
+		// 1. drop and amount > 10,000 ( to ensure we deal with an even range)
+		if l-value > 10000
+			set l-value = l-value - (integer(l-value / 10000) * 10000) + 1
+		endif
+		// now have a number between 0 and 9999
+		// divide by 10000 to get numbers between 0 and 0.9999
+		set l-value = l-value / 10000
+	until l-value between l-start and l-end
+	end-repeat
+end-procedure
+

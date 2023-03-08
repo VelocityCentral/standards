@@ -1,0 +1,402 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : attempt to determine dictionary from tar file
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2021
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: nan/determine_dict.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 18Feb21  rjb         written 
+// The idea of this program is that you specify a tar file
+// and the program wades through the object definitions of all the
+// dictionaries on the system and attempts to determine which version the
+// files in the tar file came from by looking at the verison numbers.
+//
+//   ************************************************************************
+//   *                                                                      *
+//   * This is waste of time.  All you need to do is to extract             *
+//   * SYSCTRL1.dif from the tar file and then execute the following        *
+//   * command:                                                             *
+//   *                                                                      *
+//   *     cut -d "," -f 241 SYSCTRL1.dif                                   *
+//   *                                                                      *
+//   ************************************************************************
+//
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+
+mode md-select
+	prompt "Select"
+ 
+field
+	ws-function-title						type string
+
+object dbs-systables
+	type is db-sequential
+	file is "/bms/informix.systables"
+	record is
+		st_tabname						pic x(128) type varchar db-column-name "tabname"
+		st_owner						pic x(32) db-column-name "owner"
+		st_partnum						type number db-column-name "partnum"
+		st_tabid						type number db-column-name "tabid"
+		st_rowsize						type number db-column-name "rowsize"
+		st_ncols						type number db-column-name "ncols"
+		st_nindexes						type number db-column-name "nindexes"
+		st_nrows						type number db-column-name "nrows"
+		st_created						type date db-column-name "created"
+		st_version						type number db-column-name "version"
+		st_tabtype						pic x(1) db-column-name "tabtype"
+		st_locklevel					pic x(1) db-column-name "locklevel"
+		st_npused						type number db-column-name "npused"
+		st_fextsize						type number db-column-name "fextsize"
+		st_nextsize						type number db-column-name "nextsize"
+		st_flags						type number db-column-name "flags"
+		st_site							pic x(128) type varchar db-column-name "site"
+		st_dbname						pic x(128) type varchar db-column-name "dbname"
+		st_type_xid						type number db-column-name "type_xid"
+		st_am_id						type number db-column-name "am_id"
+		st_pagesize						type number db-column-name "pagesize"
+		st_ustlowts						type datetime db-column-name "ustlowts"
+		st_secpolicyid					type number db-column-name "secpolicyid"
+		st_protgranularity				pic x(1) db-column-name "protgranularity"
+		st_statchange					type number db-column-name "statchange"
+		st_statlevel					pic x(1) db-column-name "statlevel"
+	end-record
+	no-rowid
+
+object objects
+	type is db-sequential
+//	file is "/bms/pronto.bms760_2o5"
+	record is
+		row_id							type number db-column-name "row_id" // NOT NULL
+		obj_name						pic x(30) db-column-name "obj_name"
+		obj_id							type number db-column-name "obj_id"
+		obj_old_id						type number db-column-name "obj_old_id"
+		obj_doc							pic x(40) type varchar db-column-name "obj_doc"
+		obj_sec							type number db-column-name "obj_sec"
+		obj_file						pic x(40) type varchar db-column-name "obj_file"
+		obj_version						pic x(1) db-column-name "obj_version"
+		obj_type						pic x(1) db-column-name "obj_type"
+		obj_sep							pic x(1) db-column-name "obj_sep"
+		obj_flags						type number db-column-name "obj_flags"
+		obj_audit						pic x(1) db-column-name "obj_audit"
+		obj_app_lock					pic x(1) db-column-name "obj_app_lock"
+		obj_num_flds					type number db-column-name "obj_num_flds"
+		obj_date_time					type datetime db-column-name "obj_date_time"
+		obj_user						pic x(30) db-column-name "obj_user"
+	end-record
+	no-rowid
+
+
+object installed-versions
+	type is memory
+	record is
+		iv-vsn							type string
+		iv-count-wrong-vsn				type number
+		iv-count-missing				type number
+	end-record
+	key is iv-vsn
+
+object tar-files
+	type is memory
+	record is
+		tf-filename						type string
+	end-record
+	key is tf-filename
+
+object text-file
+	type is text
+	record is
+		tf-text							pic x(512) type string
+	end-record
+
+object tar-file-list
+	type is memory
+	record is
+		tfl-filename					pic x(128) type string
+		tfl-obj							pic x(64) type string
+		tfl-vsn-char					pic x
+	end-record
+	key is tfl-filename
+
+object version-object
+	type is memory
+	record is 
+		vo-object						pic x(64) type string
+		vo-version						pic x
+		vo-bms-version					pic x(20) type string
+	end-record
+	key is vo-object vo-version vo-bms-version
+	key is vo-bms-version vo-object vo-version
+
+object object-status
+	type is memory
+	record is
+		os-vsn							pic x(20) type string
+		os-filename						pic x(128) type string // as per tar file
+		os-status						pic x(20) type string
+	end-record
+	key is os-vsn os-filename
+
+
+procedure main
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8secabt-check-abort
+		parameters are sys-consolidation-division login-id() "ZUSR" "R004"
+		returning ws-function-title 
+	do i8proglog-write-log
+	do start-screen entry
+	do build-installed-versions
+	do build-version-object
+//	do display-installed-versions
+	do select-tar-file
+end-procedure
+
+screen start-screen
+	window
+		window-position 5
+	responsive
+before
+	screen-group // ---- Group Title ----------------------------
+		display "This program first builds a list of all the tables and version characters in all the dictionaries"
+			foreground prompts
+		display "loaded on this system.  This step will take a few minutes."
+			foreground prompts
+		display "After that it will display a list of tar files in the current directory."
+			foreground prompts
+		display "It is ASSUMED the tar files contain dif files resulting from a procopy -x"
+			colour RED
+			foreground prompts
+		display "Once a tar file is selected it will list all the dictionaries and the number of tables that either"
+			foreground prompts
+		display "do not exist in the dictionary or have an incorrect version character."
+			foreground prompts
+		display "Rows where both of these numbers are zero indicate the bms version that the dif files were created from"
+			foreground prompts
+		display "and therefore the dictionary that will be required to restore them"
+			foreground prompts
+		display "Close this screen to start the process"
+			colour green
+			foreground prompts
+		display "ALTERNATIVELY:  extract SYSCTRL1.dif from the tar file and execute the following:"
+			colour red on yellow
+			foreground prompts
+		display 'cut -d "," -f 241 SYSCTRL1.dif'
+			bold
+			colour red on yellow
+			foreground prompts
+	end-screen-group
+after
+	pause
+end-screen
+
+screen select-tar-file
+	window
+	datagrid
+	title "TAR files in current folder"
+	responsive
+	select * from tar-files
+	allowed md-select search
+before
+	close tar-files and remove
+	open tar-files temporary
+	if start-dir-search(dir(),"tar")
+		repeat
+			set tf-filename = next-dir-entry
+		until tf-filename = spaces
+			insert tar-files
+		end-repeat
+	endif
+	if finish-dir-search() endif
+detail
+	if screenmode = md-select
+		do build-tar-file-list parameters are tf-filename
+		do build-comparison
+	endif
+	screen-group // ---- Group Title ----------------------------
+		title "Group Title"
+		accept tf-filename  @1,1
+			title "Filename"
+	end-screen-group // ---- Group Title --------------------------------------
+end-screen
+
+procedure build-tar-file-list
+parameters
+	lp-tar-file							pic x(128) type string
+local
+	lf-command							pic x(512) type string
+	close tar-file-list and remove
+	open tar-file-list temporary
+	set lf-command = concat("tar -tvf " lp-tar-file " > /tmp/tarfile.txt")
+	command "sh" parameters are "-c" lf-command
+	open text-file
+		file is "/tmp/tarfile.txt"
+		read-only
+	select *
+		from text-file
+	detail
+		while pattern(tf-text," ")
+			string tf-text deleting 1 to pattern(tf-text, " ")
+		end-while
+		initialise tar-file-list
+		set tfl-filename = uppercase(tf-text)
+		string tfl-filename deleting pattern(tf-text,".") to str-len(tfl-filename)
+		set tfl-obj = substring(tfl-filename,1,str-len(tfl-filename) - 1)
+		set tfl-vsn-char = substring(tfl-filename,str-len(tfl-filename), str-len(tfl-filename))
+		insert tar-file-list
+	end-select
+	report "here they are"
+	select * from tar-file-list
+	detail
+		print tfl-filename 
+			tfl-obj in col 20
+			tfl-vsn-char in col 35
+	end-select
+	report finished
+end-procedure
+
+procedure build-comparison
+local
+	lf-found					type boolean
+	report "debug"
+	close object-status and remove
+	open object-status temporary
+	select * from installed-versions
+		for update
+	detail
+		set iv-count-wrong-vsn = 0
+		set iv-count-missing = 0
+		select * from tar-file-list
+		detail
+			initialise object-status
+			set os-vsn = iv-vsn
+			set os-filename = tfl-obj
+			print tfl-obj tfl-vsn-char
+			set lf-found = FALSE
+			select * from version-object
+				where vo-bms-version = :iv-vsn
+				and vo-object = :tfl-obj
+			detail
+				if vo-version != tfl-vsn-char
+					print "wrong vsn" col 10 vo-version vo-object vo-bms-version
+					set iv-count-wrong-vsn += 1
+					set os-status = "Wrong Version"
+				endif
+				set lf-found = TRUE
+			end-select
+			if not lf-found 
+				set iv-count-missing += 1
+				set os-status = "Missing"
+			endif
+			if os-status = spaces
+				set os-status = "Found"
+			endif
+			insert object-status
+		end-select
+		update installed-versions
+	end-select
+	do display-installed-versions
+end-procedure
+
+procedure build-version-object
+	close version-object and remove
+	open version-object
+		temporary
+	report "dict lists"
+	select * from installed-versions
+	detail
+		// for each version compare the objects with the file list
+		open objects 
+			file is str-concat("/bms/pronto.bms" iv-vsn "o5")
+		select * from objects
+			where obj_name < "~"
+		detail
+			print iv-vsn obj_name obj_file obj_version
+			initialise version-object
+			set vo-bms-version = iv-vsn
+			set vo-version = obj_version
+			set vo-object = uppercase(obj_file)
+			while pattern(vo-object,"/")
+				string vo-object deleting 1 to pattern(vo-object,"/")
+			end-while
+			insert version-object
+		end-select
+	end-select
+	report finished
+end-procedure
+			
+
+procedure build-installed-versions
+local
+	lf-vsn							type string
+	close installed-versions
+	open installed-versions temporary
+	select * from dbs-systables
+		where st_tabname like '%o5'
+	detail
+		set lf-vsn = st_tabname
+		string lf-vsn deleting 1 to 3
+		string lf-vsn deleting 6 to str-len(lf-vsn)
+		get installed-versions
+			on index iv-vsn
+			key is lf-vsn
+		on error ENOREC
+			set iv-vsn = lf-vsn
+			insert installed-versions
+		endon
+	end-select
+end-procedure
+
+screen display-installed-versions
+	window
+	datagrid
+	select * from installed-versions
+		allowed search md-select
+detail
+	if screenmode = md-select
+		do display-object-status
+			parameters are iv-vsn
+	endif
+	display iv-vsn @1,1
+		title "Version"
+	display iv-count-wrong-vsn @1,2
+		title "Wrong Version"
+	display iv-count-missing @1,3
+		title "Missing Tables"
+end-screen
+
+screen display-object-status
+parameters
+	lp-vsn					like os-vsn
+	window
+	title "Ojbect Status"
+	datagrid
+	select * from object-status
+		where os-vsn = :lp-vsn
+	allowed search
+detail
+	accept  os-filename @1,1
+		title "Object"
+		when screenmode = search
+		show-value
+	display os-status @1,2
+		title "Status"
+end-screen
+
+
+
+		
+
+
+

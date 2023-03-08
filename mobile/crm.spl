@@ -1,0 +1,874 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : CRM Mobile.
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2020
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: mobile/cmr.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 05Jun20  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/i8secabt.spl"
+#include "../include/bmsdef.spl"
+#include "../include/i8proglog.spl"
+
+link 'mobile/clibmob'
+link 'clib/clibvwp'
+
+//#define RTITLE(ONE,TWO,THREE) param-text('{"title1":"<<p1>>","title2":"<<p2>>","title3":"<<p3>>"}',ONE,TWO,THREE)
+
+#define SYSTBLDD(A) \
+	drop-down \
+		width 38 \
+		concat-title \
+		select sys-tbl-code, sys-description \
+			from system-table \
+			where sys-tbl-type = A \
+	end-drop-down
+
+link 'clib/clibsearch'
+ 
+field
+	ws-function-title						type string
+
+mode md-select
+	prompt "Select"
+mode md-add
+	prompt "Add New"
+mode md-remove
+	prompt "Remove"
+mode md-new-order
+	prompt "New"
+mode md-orders
+	prompt "Orders"
+	when accountcode != spaces
+
+
+procedure main
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	get mailer-control first
+	on error
+		abort "No mailer control record"
+	endon
+	do i8secabt-check-abort
+		parameters are sys-consolidation-division login-id() "ZMOB" "M002"
+		returning ws-function-title 
+	do i8proglog-write-log
+	do ent-search-crm entry
+end-procedure
+
+// ------------------------------------------------------------------------------
+//          Searching functions
+// ------------------------------------------------------------------------------
+
+screen ent-search-crm
+local
+	lf-search							type string
+	lf-query-id							like scr-query-id
+	lf-context-list						type string
+	lf-error-found						type boolean
+	lf-error-message					type string
+	lf-success-message					type string
+	lf-context							like scr-result-context
+	lf-key								like scr-result-object-key
+	lf-item								like mailer-item-number
+	lf-count							type number
+	window @1,1 to @6,50
+		title "Search"
+		window-position 5
+	responsive
+	//
+detail
+	screen-group
+	accept  lf-search
+		title "Key Word"
+	validations
+		set lf-context-list = "4|11|12" // only look for customers and crm
+		do clibsearch-keyword-search									
+			parameter 
+				zero
+				lf-search
+				login-id()
+				lf-context-list
+				'N'
+				'N'
+			returning 
+				lf-query-id
+				lf-error-found
+				lf-error-message
+				lf-success-message
+		if lf-error-found
+			message-box 
+				lf-error-message
+				title is ws-function-title
+				message-buttons  MSG_BOX_CANCEL
+				icon MSG_BOX_STOP
+			re-enter
+		else
+			// check how many
+			select lf-count = count(*)
+				from search-central-results
+				where search-central-results.scr-query-id = :lf-query-id
+			end-select
+			if lf-count = 0
+				message "No Items found"
+				reenter lf-search
+			elseif lf-count > 1
+				do select-item parameters are 
+					lf-query-id, lf-search, spaces
+					returning lf-context lf-key
+				if lf-key = spaces
+					// nothing selected
+					re-enter lf-search
+				endif
+			else
+				select lf-key = max(scr-result-object-key)
+					from search-central-results
+					where search-central-results.scr-query-id = :lf-query-id
+				end-select
+			endif
+			do find-crm-key
+				parameters are lf-context lf-key
+				returning lf-item
+			// check it
+			get mailer-master lookup
+				on index mailer-item-number
+				key is lf-item
+			on error ENOREC
+				message "No item found"
+				re-enter lf-search
+			endon
+			do crm-detail parameters are lf-item
+			exit
+		endif
+	end-validations
+	end-screen-group
+end-screen
+
+screen select-item
+parameter
+	lp-query-id							like scr-query-id
+	lp-search-term						type string pic x(250)
+	lp-current-lang						type string
+returning 
+	lr-context							like scr-result-context
+	lr-key								like scr-result-object-key
+	//
+	window @1,1 to @29,115
+		window-position 5
+	title concat("Keyword Search Results for ", upper-case(lp-search-term))
+	select *
+	from 
+		search-central-context-desc
+	inner join 
+		search-central-results
+		on search-central-results.scr-result-context = search-central-context-desc.ssct-context-id and
+			search-central-context-desc.ssct-context-language = lp-current-lang
+	where 
+		lp-query-id = search-central-results.scr-query-id
+	order by 
+		search-central-results.scr-result-object-key
+	//
+	allowed search md-select
+	datagrid occurs 28
+before	
+detail
+	if screenmode = md-select
+		//  Need to work out the CRM key from the searched data
+		set lr-context = scr-result-context
+		set lr-key = scr-result-object-key
+		exit
+	endif
+	accept	scr-result-object-key @1,1 pic x(25)
+		title 'Code'
+	display	scr-result-description @1,2 pic x(25)
+		title 'Description'	
+endscreen
+
+procedure find-crm-key
+parameters
+	lp-context							like scr-result-context
+	lp-key								like scr-result-object-key
+returning
+	lr-item								like mailer-item-number
+local
+	lf-cf-num							like mailer-name-seq
+//
+	switch lp-context
+	case 11
+		set lr-item = num(lp-key)
+	case 12
+		set lf-cf-num = num(lp-key)
+		select lr-item = max(mailer-item-number)
+			from crm-account-contacts
+			where mailer-name-seq = :lf-cf-num
+		end-select
+	case 4
+		select lr-item = max(mailer-item-number)
+			from mailer-master
+			where accountcode = lp-key
+		end-select
+	end-switch
+end-procedure
+
+// ------------------------------------------------------------------------------
+//          CRM detail
+// ------------------------------------------------------------------------------
+
+
+screen crm-detail
+parameters
+	lp-item								like mailer-item-number
+	window
+		title RTITLE(ws-function-title,mailer-item-number,mailer-name-index)
+	select *
+		from mailer-master
+		where mailer-item-number = lp-item
+	responsive
+before
+	screen-section
+		title "C&ontacts"
+		do sg-crm-contacts no-wait
+	end-screen-section
+	screen-section
+		do sg-crm-transactions no-wait parameters are mailer-item-number
+	end-screen-section
+	screen-section
+		when accountcode != spaces
+		do existing-orders-for-customer no-wait parameters are accountcode
+	end-screen-section
+detail
+	refresh title
+	screen-group
+		width 12
+		field-group
+			horizontal
+			accept mailer-item-number
+				title "Code"
+			accept mailer-name-index
+				title "Name"
+		end-field-group
+	end-screen-group
+	screen-group
+		title "Address"
+		accept mail-address[1] 
+		accept mail-address[2] 
+		accept mail-address[3] 
+		accept mail-address[4] 
+		accept mail-address[5] 
+	end-screen-group
+	screen-group
+		title "Details"
+		accept rep-code
+			title "Rep"
+			drop-down
+				width 38
+				concat-title
+				select rep-code, rep-description,0,
+					if-then-else(rep-end-date = 0,true,false)
+					from rep-master
+			end-drop-down
+		accept mailer-field
+			title "Type"
+			SYSTBLDD("M1")
+		accept mailer-region
+			title "Region"
+			SYSTBLDD("M8")
+	end-screen-group
+end-screen
+
+screen sg-crm-contacts
+local
+	lf-name								pic x(100) type string
+	lf-mobile							pic x(40) type string
+	lf-cf-sck-key						like sck-object-key
+	window
+		title 'Contacts'
+	datagrid occurs 5
+	select *
+		lf-name = concat(rtrim(mailer-name-first)," ", mailer-name-surname)
+		lf-mobile = concat(rtrim(mn-mobile-phone-area), mailer-name-mobile-phone)
+		from crm-account-contacts as t0
+			mailer-names as t1
+		where t0.mailer-item-number = :mailer-item-number
+		and t0.mailer-name-seq = t1.mailer-name-seq
+		order by t0.cac-seq
+	allowed search md-select md-add md-remove
+	no-prompt-for-search
+detail
+	if screenmode = md-select
+		do maintain-contact correct once parameters are mailer-name-seq
+	endif
+	if screenmode = md-add
+		do maintain-contact entry once no-sections parameters are mailer-name-seq
+		reselect
+		refresh data
+	endif
+	accept cac-seq @1,1
+		title "Seq"
+	display lf-name @1,2 pic x(20)
+		title "Name"
+	display mailer-name-position @1,3
+		title "Posn"
+	display lf-mobile @1,4
+		title "Phone"
+	confirm 
+		when screenmode = remove
+		prompt "Confirm Removal"
+		default is yes
+	before 
+	confirmed
+		if screenmode = md-remove
+			set lf-cf-sck-key = str(mailer-name-seq)
+			sql-delete search-central-keywords
+				where sck-context = 12
+				and sck-object-key = :lf-cf-sck-key
+			sql-delete crm-account-contacts
+				where mailer-item-number = :mailer-item-number
+				and mailer-name-seq = :mailer-name-seq
+			sql-delete mailer-names 
+				where mailer-name-seq = :mailer-name-seq
+			reselect
+			refresh
+		endif
+	end-confirm 
+end-screen
+
+screen maintain-contact
+parameters
+	lp-mailer-name-seq					like mailer-name-seq
+local
+	lf-count							type number
+	lf-tags-count						type number
+	i 									type number
+	window
+		title "Contact Details"
+		window-position ifthenelse(screen-mode = entry,5,0)
+	select *
+		from mailer-names 
+		where mailer-name-seq = :lp-mailer-name-seq
+	responsive
+before
+	for i = 1 to occurrence(mailer-name-tag-prompts)
+		if mailer-name-tag-prompts[i] != spaces
+			set lf-tags-count += 1
+		endif
+	endfor
+	refresh whens
+detail
+	screen-group
+		title "Name"
+	accept mailer-name-title 
+		title "Title"
+		SYSTBLDD("NR")
+	accept mailer-name-first
+		title "First Name"
+	accept mn-name-middle
+		title "Middle Name"
+	accept mailer-name-surname
+		title "Surname"
+	accept mailer-name-position
+		title "Position"
+	field-group
+		Title "Gender"
+		Wrap
+		radio-button mn-gender
+			"M" title  "Male"
+			"F" title  "Female"
+			" " title  "Not Specified"
+			default "M"
+		end-radio-button 
+	end-field-group
+	end-screen-group
+	screen-group
+		title "Phones"
+		field-group
+			title "Business"
+		accept mn-phone-country
+			help "Country"
+		accept mn-phone-area
+			help "Area Code"
+		accept mailer-name-phone
+			help "Phone Number"
+		end-field-group
+		field-group
+			title "Home"
+		accept mn-home-phone-country
+			help "Country"
+		accept mn-home-phone-area
+			help "Area"
+		accept mailer-name-home-phone
+			help "Phone"
+		end-field-group
+		field-group
+			title "Mobile"
+		accept mn-mobile-phone-country
+			help "Country"
+		accept mn-mobile-phone-area
+			help "Area"
+		accept mailer-name-mobile-phone
+			help "Phone"
+		end-field-group
+	end-screen-group
+	screen-group
+		title "Email"
+		accept mailer-name-email
+	end-screen-group
+	screen-group // ---- tags ----------------------------
+		title "Tags"  // The title is optional
+		when lf-tags-count > 0
+		check-box mailer-name-tags[1]
+			values YES NO
+			title mailer-name-tag-prompts[1]
+			default is mailer-name-tags[1]
+			help "Select this box to make the field true"
+			when mailer-name-tag-prompts[1] != spaces
+			before-check-box
+				if screenmode = form-entry-defaults
+					set mailer-name-tags[1] = NO
+				endif
+			end-before-check-box
+		end-check-box 
+		check-box mailer-name-tags[2]
+			values YES NO
+			title mailer-name-tag-prompts[2]
+			default is mailer-name-tags[2]
+			help "Select this box to make the field true"
+			when mailer-name-tag-prompts[2] != spaces
+			before-check-box
+				if screenmode = form-entry-defaults
+					set mailer-name-tags[2] = NO
+				endif
+			end-before-check-box
+		end-check-box 
+		field-group // ---- Group Title ----------------------------
+			when mailer-name-tag-prompts[3] != spaces
+			check-box mailer-name-tags[3]
+				values YES NO
+				title mailer-name-tag-prompts[3]
+				default is mailer-name-tags[3]
+				help "Select this box to make the field true"
+				when mailer-name-tag-prompts[3] != spaces
+				before-check-box
+					if screenmode = form-entry-defaults
+						set mailer-name-tags[3] = NO
+					endif
+				end-before-check-box
+			end-check-box 
+		end-field-group // ---- Group Title --------------------------------------
+		field-group // ---- Group Title ----------------------------
+			when mailer-name-tag-prompts[4] != spaces
+			check-box mailer-name-tags[4]
+				values YES NO
+				title mailer-name-tag-prompts[4]
+				default is mailer-name-tags[4]
+				help "Select this box to make the field true"
+				when mailer-name-tag-prompts[4] != spaces
+				before-check-box
+					if screenmode = form-entry-defaults
+						set mailer-name-tags[4] = NO
+					endif
+				end-before-check-box
+			end-check-box 
+		end-field-group // ---- Group Title --------------------------------------
+		field-group // ---- Group Title ----------------------------
+			when mailer-name-tag-prompts[5] != spaces
+			check-box mailer-name-tags[5]
+				values YES NO
+				title mailer-name-tag-prompts[5]
+				default is mailer-name-tags[5]
+				help "Select this box to make the field true"
+				when mailer-name-tag-prompts[5] != spaces
+				before-check-box
+					if screenmode = form-entry-defaults
+						set mailer-name-tags[5] = NO
+					endif
+				end-before-check-box
+			end-check-box 
+		end-field-group // ---- Group Title --------------------------------------
+		field-group // ---- Group Title ----------------------------
+			when mailer-name-tag-prompts[6] != spaces
+			check-box mailer-name-tags[6]
+				values YES NO
+				title mailer-name-tag-prompts[6]
+				default is mailer-name-tags[6]
+				help "Select this box to make the field true"
+				when mailer-name-tag-prompts[6] != spaces
+				before-check-box
+					if screenmode = form-entry-defaults
+						set mailer-name-tags[6] = NO
+					endif
+				end-before-check-box
+			end-check-box 
+		end-field-group // ---- Group Title --------------------------------------
+		field-group // ---- Group Title ----------------------------
+			when mailer-name-tag-prompts[7] != spaces
+			check-box mailer-name-tags[7]
+				values YES NO
+				title mailer-name-tag-prompts[7]
+				default is mailer-name-tags[7]
+				help "Select this box to make the field true"
+				when mailer-name-tag-prompts[7] != spaces
+				before-check-box
+					if screenmode = form-entry-defaults
+						set mailer-name-tags[7] = NO
+					endif
+				end-before-check-box
+			end-check-box 
+		end-field-group // ---- Group Title --------------------------------------
+		field-group // ---- Group Title ----------------------------
+			when mailer-name-tag-prompts[8] != spaces
+			check-box mailer-name-tags[8]
+				values YES NO
+				title mailer-name-tag-prompts[8]
+				default is mailer-name-tags[8]
+				help "Select this box to make the field true"
+				when mailer-name-tag-prompts[8] != spaces
+				before-check-box
+					if screenmode = form-entry-defaults
+						set mailer-name-tags[8] = NO
+					endif
+				end-before-check-box
+			end-check-box 
+		end-field-group // ---- Group Title --------------------------------------
+		field-group // ---- Group Title ----------------------------
+			when mailer-name-tag-prompts[9] != spaces
+			check-box mailer-name-tags[9]
+				values YES NO
+				title mailer-name-tag-prompts[9]
+				default is mailer-name-tags[9]
+				help "Select this box to make the field true"
+				when mailer-name-tag-prompts[9] != spaces
+				before-check-box
+					if screenmode = form-entry-defaults
+						set mailer-name-tags[9] = NO
+					endif
+				end-before-check-box
+			end-check-box 
+		end-field-group // ---- Group Title --------------------------------------
+		field-group // ---- Group Title ----------------------------
+			when mailer-name-tag-prompts[10] != spaces
+			check-box mailer-name-tags[10]
+				values YES NO
+				title mailer-name-tag-prompts[10]
+				default is mailer-name-tags[10]
+				help "Select this box to make the field true"
+				when mailer-name-tag-prompts[10] != spaces
+				before-check-box
+					if screenmode = form-entry-defaults
+						set mailer-name-tags[10] = NO
+					endif
+				end-before-check-box
+			end-check-box 
+		end-field-group // ---- Group Title --------------------------------------
+	end-screen-group // ---- tags --------------------------------------
+	confirm 
+		auto
+	before 
+		//  Get sequence numbers
+		if screenmode = entry
+			do get-next-mailer-name-key
+				returning mailer-name-seq
+		endif
+	confirmed
+		// insert the crm-account-contacts
+		if screenmode = entry
+			select lf-count = count(*)
+				from crm-account-contacts
+				where mailer-item-number = :mailer-item-number
+			end-select
+			initialise crm-account-contacts
+				leaving mailer-item-number mailer-name-seq 
+			if lf-count = 0
+				set cac-seq  = 1 // primary
+			else
+				set cac-seq = 9 // other
+			endif
+			insert crm-account-contacts
+		endif
+	end-confirm 
+end-screen
+
+procedure get-next-mailer-name-key
+returning
+	lr-next-no					like mailer-name-seq
+local
+	lf-counter					type number
+	//
+	// whats' in the seq - note this is a sequnce not A YY entry even though
+	// it is in the YY table
+	repeat
+		do clibserial-next-serial-number
+			parameters "MAILNAMENO"
+			returning lr-next-no
+		// check it
+		get mailer-names lookup
+			on index mailer-name-seq
+			key is lr-next-no
+		on error ENOREC
+			break // all is good
+		endon
+	until lf-counter > 1000
+		set lf-counter += 1
+	end-repeat
+end-procedure
+
+screen sg-crm-transactions
+parameters
+	lp-mailer-item-number				like mailer-item-number
+local
+	lf-rep-name							like rep-description
+	lf-notes							pic x(16000) type varchar
+	window
+		title 'Transactions'
+	datagrid occurs 5
+	select *
+		lf-rep-name = if-then-else(t2.rep-description is null, "No Rep" t2.rep-description)
+		from mailer-campaign-transactions as t0
+		left join system-table as t1 
+			on  t1.sys-tbl-type = 'MQ' and t1.sys-tbl-code = t0.mc-trans-type
+		left outer join rep-master as t2
+			on t2.rep-code = t0.mc-rep-code
+		left outer join mailer-notes as t3
+			on t3.mailer-item-number = :lp-mailer-item-number
+			and t3.mailer-notes-type = t0.mc-trans-type
+			and t3.mailer-notes-date = t0.mc-trans-date
+			and t3.mailer-notes-machine-code = spaces
+			and t3.mailer-notes-trans-no = t0.mc-trans-no
+			and t3.mailer-notes-seq = 1 // first line only
+		where t0.mailer-item-number = :mailer-item-number
+		and mailer-campaign-code = spaces
+		and mc-machine-code = spaces
+		order by t0.mc-trans-date t0.mc-trans-time
+	allowed search md-select md-add md-remove
+	no-prompt-for-search
+detail
+	if screenmode = md-select
+		do maintain-transaction correct once parameters are mailer-item-number mc-trans-no 
+		reselect
+		refresh review
+	endif
+	if screenmode = md-add
+		do maintain-transaction entry once no-sections parameters lp-mailer-item-number 0 
+//		do add-new-transaction parameters are mailer-item-number
+		reselect
+		refresh review
+	endif
+	accept mc-trans-no @1,1
+		title "Seq"
+		when screenmode = search
+		show-value
+	display mc-trans-date @1,2
+		title "Date"
+	display mc-trans-time @1,3
+		title "Time"
+	display sys-description @1,4
+		title "Type"
+	display lf-rep-name @1,5
+		title "Rep"
+	display notes @1,6
+		title "Description"
+	confirm 
+		when screenmode = md-remove
+		prompt "Remove Transasction?"
+		default is yes
+	confirmed
+		if screenmode = md-remove
+			sql-delete mailer-campaign-transactions
+				where mailer-item-number = :lp-mailer-item-number
+				and mc-trans-date  = :mc-trans-date
+				and mc-trans-time = :mc-trans-time
+				and mc-trans-no  = :mc-trans-no
+				and mc-trans-type = :mc-trans-type
+			sql-delete mailer-notes
+				where mailer-item-number = :lp-mailer-item-number
+				and mailer-notes-date  = :mc-trans-date
+				and mailer-notes-machine-code = spaces
+				and mailer-notes-trans-no  = :mc-trans-no
+				and mailer-notes-type = :mc-trans-type
+			reselect 
+			refresh
+		end-if
+	end-confirm 
+end-screen
+
+screen maintain-transaction
+parameters
+	lp-mailer-item-number				like mailer-item-number
+	lp-trans-seq						like mc-trans-no
+local
+	lf-notes							pic x(16000) type varchar
+	lf-default-rep						like rep-code
+	lf-last-trans-no					like mc-trans-no
+	lf-cf-login							type string
+	lf-update-notes						type boolean
+	window
+		title "Transaction Details"
+		window-position ifthenelse(screen-mode = entry,5,0)
+	select *
+		from mailer-campaign-transactions 
+		where mailer-campaign-code = spaces
+		and mailer-item-number = :mailer-item-number
+		and mc-machine-code = spaces
+	responsive
+before
+	set lf-update-notes = FALSE
+detail
+	if screenmode = entry
+		set lf-cf-login = login-id()
+		select lf-default-rep = max(rep-code)
+			from rep-master
+			where rep-login-id = :lf-cf-login
+		database-sql
+		end-select
+	endif
+	if screenmode = correct
+		if lf-notes = spaces
+			select *
+				from mailer-notes
+				where mailer-item-number = :mailer-item-number
+				and mailer-notes-type = :mc-trans-type
+				and mailer-notes-date = :mc-trans-date
+				and mailer-notes-machine-code = spaces
+				and mailer-notes-trans-no  = :mc-trans-no
+			detail
+				if lf-notes = spaces
+					set lf-notes = notes
+				else
+					string lf-notes appending concat(" " notes)
+				endif
+			end-select
+			refresh lf-notes
+		endif
+	endif
+	screen-group
+		accept mc-trans-type
+			title "Type"
+			SYSTBLDD("MQ")
+		accept mc-trans-date
+			title "Date"
+			default today()
+		accept mc-trans-time
+			title "Time"
+			default tod()
+		accept mc-rep-code
+			title "Rep"
+			default lf-default-rep
+			drop-down
+				width 38
+				concat-title
+				select rep-code, rep-description,0,
+					if-then-else(rep-end-date = 0,true,false)
+					from rep-master
+			end-drop-down
+	end-screen-group
+	screen-group // ---- notes ----------------------------
+		accept lf-notes
+			title "Notes"
+			help "Type your notes here"
+			multi-line
+			default lf-notes
+			rows 5
+		on change
+			set lf-update-notes = TRUE
+		endon
+	end-screen-group // ---- notes --------------------------------------
+	confirm auto
+	before 
+		if screenmode = entry
+			set mailer-item-number = lp-mailer-item-number
+			select lf-last-trans-no = max(mc-trans-no)
+				from mailer-campaign-transactions
+				where mailer-item-number = :lp-mailer-item-number
+				and mailer-campaign-code = spaces
+				and mc-trans-date = :mc-trans-date
+				and mc-machine-code = spaces
+			end-select
+			set mc-trans-no = lf-last-trans-no + 1					
+		endif
+	confirmed
+		// add the notes
+		sql-delete mailer-notes
+			where mailer-item-number = :lp-mailer-item-number
+			and mailer-notes-date  = :mc-trans-date
+			and mailer-notes-machine-code = spaces
+			and mailer-notes-trans-no  = :mc-trans-no
+			and mailer-notes-type = :mc-trans-type
+		set mailer-notes-seq = 0
+		repeat
+			do clibvwp-break-to-line parameters are lf-notes size-of(notes) 
+				returning notes lf-notes
+		until notes = spaces
+			// Do whatever is required to insert the line here
+			set mailer-notes-seq += 1
+			initialise mailer-notes
+				leaving mailer-item-number mailer-notes-seq notes
+			set mailer-notes-type = mc-trans-type
+			set mailer-notes-date = mc-trans-date
+			set mailer-notes-machine-code = spaces
+			set mailer-notes-trans-no = mc-trans-no
+			set mailer-user-name = login-id()
+			set mailer-notes-rep = mc-rep-code
+			set mailer-notes-date-time-stamp = gmt()
+			insert mailer-notes
+		end-repeat
+		//------------------------------------------------------------------------------
+end-confirm 
+end-screen
+
+screen existing-orders-for-customer
+parameters
+	lp-customer							like accountcode
+	window @1,1 to @12,40
+		window-position 5
+	title "Orders"
+	select *
+		from sales-order as t0
+		inner join sales-order-status-desc as t1 on t0.so-order-status = t1.sosd-status and t1.sosd-language = spaces
+		inner join deb-master as t2 on t2.accountcode = t0.so-cust-code
+		where t0.so-cust-code = :lp-customer
+		and t0.so-order-status < "40"
+	datagrid occurs 10
+	allowed search md-select md-new-order
+before
+	refresh title
+detail
+	if screenmode = md-new-order
+		spl "mobile/sales" parameters are "-customer" lp-customer
+		reselect
+		refresh review
+	endif
+	if screenmode = md-select
+		spl "mobile/sales" parameters are "-order" so-order-no so-bo-suffix
+		reselect
+		refresh review
+	endif
+	accept so-order-no @1,1
+		title "Order"
+		when screenmode = search
+		show-value
+	accept so-bo-suffix @1,2
+		title "BO"
+		when screenmode = search
+		show-value
+	display sosd-description @1,3
+		title "Status"
+	display so-cust-reference @1,4
+		title "PO"
+	display so-order-total-shipped-amount @1,5
+		title "Value"
+	display so-order-date @1,6
+		title "Date"
+	display so-delivery-date @1,7
+		title "Delivery"
+end-screen

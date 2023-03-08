@@ -1,0 +1,24 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : GDR Generics
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2017
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: include/igdr.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 09Oct17  rjb         written 
+// All references to apliserve fields
+////////////////////////////////////////////////////////////////////////////////
+
+#ifndef IDEMO
+#define IDEMO
+
+#define IDEMO_ORDER_EDI_RECEIPT so-user-only-num1
+
+#endif

@@ -1,0 +1,911 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : stock Label Printing
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2008
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: so/vglstklabel.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 30Sep11  rjb 		written
+////////////////////////////////////////////////////////////////////////////////
+
+//mode md-archive
+//	prompt "Archive"
+mode md-select
+	prompt "Select"
+	help "Select this item"
+mode md-print
+	prompt "Print"
+	help "Print all Labels"
+
+#include "../include/i8param.spl"
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+#include "../include/i85labdefn.spl"
+#define M4ENQSTKKEY_INC_STOCK
+#include "../include/m4enqstkkey.spl"
+#include "../include/m4enqstk.spl"
+
+field
+	ws-function-title					type string
+	ws-label-format						like label-code
+	ws-label-printer					type string
+	ws-spool-file-open					type boolean
+	//stock-master
+	ws-lab-APN							type string // Global Trade Item Number - from stock- master
+	ws-lab-AUPN							type string // Global Trade Item Number - from stock-unit-conversion
+	ws-lab-AUDS							type string // Alternate unit Description
+	ws-lab-LOTquestion					type string // Is stock item lot tracked?
+	ws-lab-PDES							type string // Pack description
+	ws-lab-PWGT							type string // Pack weight
+	ws-lab-S1plus2						type string // 1st+2nd line description
+	ws-lab-S123							type string // 1st+2nd+3rd line description
+	ws-lab-SBRN							type string // Item Brand
+	ws-lab-SERquestion					type string // Is stock item serialized?
+	ws-lab-SGRP							type string // Item Group
+	ws-lab-SORT							type string // Stock Sort Analysis Code
+	ws-lab-STCC							type string // Item condition code
+	ws-lab-STK0							type string // Item description
+	ws-lab-STK2							type string // 2nd line description
+	ws-lab-STK3							type string // 3rd line description
+	ws-lab-STKA							type string // Item Desc, Chars:1-20
+	ws-lab-STKB							type string // Item Desc, Chars:21-30
+	ws-lab-STKC							type string // Item code
+	ws-lab-STKF							type string // Stock conversion factor
+	ws-lab-STKU							type string // Stock unit description
+	ws-lab-STPG							type string // Item Product group
+	//stock-supplier
+	ws-lab-CREA							type string // Supplier accountcode
+	ws-lab-CRNA							type string // Supplier Short Name
+	ws-lab-SUPC							type string // Supplier
+	ws-lab-SUSC							type string // Supplier Item Code
+	ws-lab-SUSD							type string // Supplier Item Description
+	ws-lab-SUSG							type string // Supplier Item Group
+	ws-lab-PQTY							type string // Pack quantity
+	//stock-warehouse-detail
+	ws-lab-BINB							type string // Bulk location
+	ws-lab-BINL							type string // Bin location
+	ws-lab-STMN							type string // Minimum stock Level
+	ws-lab-STMX							type string // Maximum stock level
+	ws-lab-WHSE							type string // Warehouse
+	//stock-price
+	ws-lab-RRPT							type string // R.R.P including tax
+	ws-lab-SRRP							type string // Suggested R.R.P
+	ws-lab-SU01							type string // Base Price UOM Description
+	ws-lab-SU02							type string // Base Price UOM Qty
+	ws-lab-SU03							type string // Item Price UOM Qty
+	ws-lab-SU04							type string // Unit Pricing Amount, incl tax
+	ws-lab-SU05							type string // Unit Pricing Amount, excl tax
+	// PO Related
+	ws-lab-RQTY							type string // Purchase Received Qty
+	ws-lab-RECD							type string // Goods received date
+	ws-lab-PINW							type string // Purchase inwards number
+	ws-lab-PONO							type string // Purchase order number
+	//mosc
+	ws-lab-DATE							type string // Date entered
+	ws-lab-HHMM							type string // Time entered
+	ws-lab-DOW							type string // Day of the week
+	ws-lab-TIME							type string // Current time (12-hour format)
+	ws-lab-WDAY							type string // Day Name
+	//
+
+object stock-comms type is external
+	record is
+		sc-stock-code					like stock-code
+		sc-label-code					like label-code
+		sc-label-count					type number
+		sc-whse-code					like whse-code  // can be blank - will default from user
+		sc-supplier						like cre-accountcode // can be blank will default max priority supplier
+		// The following can all be left blank - in which cas no PO
+		// information will be available.
+		sc-po-order-no					like po-order-no
+		sc-po-bo-suffix					like po-backorder-flag
+		sc-po-l-seq						like po-l-seq
+	endrecord
+
+object mem-label 
+	type is memory
+	record is
+		mem-stock-code					like stock-code
+		mem-label-count					type number
+		mem-whse-code					like whse-code  // can be blank - will default from user
+		mem-supplier					like cre-accountcode // can be blank will default max priority supplier
+		// The following can all be left blank - in which cas no PO
+		// information will be available.
+		mem-po-order-no					like po-order-no
+		mem-po-backorder-flag				like po-backorder-flag
+		mem-po-l-seq					like po-l-seq
+		mem-label-code					like label-code
+	endrecord
+	key is mem-stock-code
+	key is mem-label-code
+
+
+procedure main
+	get system-control first
+	on error
+		abort "No system control record"
+	endon
+	do i8secabt-check-abort parameters
+		sys-consolidation-division login-id() "ZVG" "R002"
+		returning ws-function-title
+	do i8proglog-write-log
+	set ws-lab-DATE = format-picture(today(),"dd-mmm-yy") // Date entered
+	set ws-lab-HHMM = format-picture(tod(),"HH:MM") // Time entered
+	set ws-lab-DOW =  str(dow(today())) // Day of the week
+	set ws-lab-TIME = format-picture(tod(),"HH:MM:SS")  // Current time (12-hour format)
+	set ws-lab-WDAY = day-name(today()) // Day Name
+	set ws-label-printer = get-env('LABEL')
+	switch get-param(1)
+	case '-comms'
+		do load-mem-from-comms parameters are get-param(2)
+		do labels-dg
+	case '-commsquiet'
+		do load-mem-from-comms parameters are get-param(2)
+		do print-mem-file
+	else
+		open mem-label temporary
+		do labels-dg
+	endswitch
+end-procedure
+
+procedure process-file
+	do load-mem-from-comms parameters are get-param(2)
+	if get-param(3) = '-quiet'
+		do print-mem-file
+	else
+		do labels-dg
+	endif
+end-procedure
+
+procedure public-get-default-whse export
+parameters are 
+	lp-stock-code						like stock-code
+returning
+	lr-whse-code						like whse-code
+//
+	set lr-whse-code = sys-default-whse
+end-procedure
+
+procedure public-get-default-supplier export
+parameters are 
+	lp-stock-code						like stock-code
+returning
+	lr-supplier							like cre-accountcode
+local
+	lf-supplier							like cre-accountcode
+	lf-max-supplier-priority			like sup-priority
+//
+	set lf-max-supplier-priority = min-value(sup-priority)
+	select * 
+		from stock-supplier
+		where stock-code = lp-stock-code
+		order by stock-code cre-accountcode
+	detail
+		if sup-priority > lf-max-supplier-priority
+			set lf-max-supplier-priority = sup-priority
+			set lf-supplier = cre-accountcode
+		endif
+	end-select
+	set lr-supplier = lf-supplier
+end-procedure
+
+procedure public-determine-label-factor export
+parameters are
+	lp-stock-code						like stock-code
+returning
+	lr-factor							type number
+// 
+//  Use this routine to determine a factor which is multipled
+//  by the number of labels to determine the final qty to print.
+//  This can be used to return 0 to stop labels being printed
+//  for a particular item.
+//	
+	set lr-factor = 1
+end-procedure
+
+screen get-parameters
+local
+	lf-stock-code						like stock-code
+	lf-supplier							like cre-accountcode
+	lf-whse-code						like whse-code
+	lf-count							type number
+//
+	window @1,1 to @24,80
+	title ws-function-title
+	no-ok-cancel
+	form-entry
+detail
+	accept lf-stock-code @2,15 
+		prompt "Stock Code:"
+		optional
+		help "Enter the stock code"
+	on up-arrow
+		get stock-master
+			previous
+		on error
+		else
+			set lf-stock-code = stock-code
+			display stk-description @2,40
+			re-enter optional
+		endon
+	endon
+	on down-arrow
+		get stock-master
+			next
+		on error
+		else
+			set lf-stock-code = stock-code
+			display stk-description @2,40
+			re-enter optional
+		endon
+	endon
+	on help-key
+		do m4enqstk-enquire-on-stock
+			parameters stock-code SPACES SPACES
+			returning lf-stock-code
+		reenter	//mandatory re-entry as select is not really valid
+	endon
+	validations
+		get stock-master
+			on index stock-code
+			key is lf-stock-code
+		on error
+			do m4enqstkkey-enquire-on-stock-with-key-words
+				parameters
+					lf-stock-code 				// 1. Stock Code/Keyword
+					M4ENQDEF_KEYWORD_LOOKUP // 2. Literal "-keyword"
+					'Y' 			// 3. direct-lookup
+					SPACES			// 4. display-key-word
+					FALSE 			// 5. show-boms-only (boolean)
+					TRUE 			// 6. no-review-for-one (boolean)
+					SPACES 			// 7. display "not found message"
+					lf-stock-code 		// 8. Stock-key-word. x(15)
+				returning lf-stock-code
+				re-enter lf-stock-code optional
+		else
+			display stk-description @2,40
+		endon
+	end-validations
+	accept lf-count @3,15 pic z(7)
+		prompt "Label Count:"
+		help "Enter the numberof labels you want to print"
+		optional 
+		default 1
+	accept ws-label-format @4,15
+		optional
+		prompt "Format:"
+		default ws-label-format
+		help "Enter the format code for this label <help>"
+	on help-key
+		do label-lookup
+			returning ws-label-format
+		re-enter ws-label-format optional
+	endon
+	validations
+		if ws-label-format = spaces
+			do public-determine-label-code
+				parameters are lf-stock-code
+				returning ws-label-format
+			re-enter ws-label-format
+		endif
+		get system-label
+			on index label-code
+			key is ws-label-format
+		on error
+			message "Invalid Label Code"
+			re-enter ws-label-format
+		else
+			display label-name @4,40
+		endon
+	end-validations
+	accept lf-whse-code @5,15
+		optional
+		help "Whse Code"
+		default sys-default-whse
+		prompt "Whse:"
+	on help-key
+		do whse-lookup returning lf-whse-code
+		re-enter lf-whse-code optional
+	endon
+	validations
+		get system-table
+			on index sys-tbl-type sys-tbl-code
+			key is 'WH' lf-whse-code
+		on error
+			message "Invalid Whse"
+			re-enter lf-whse-code
+		endon
+	end-validations
+	accept lf-supplier @6,15
+		optional
+		prompt "Supplier:"
+		help "Supplier Code"
+	on help-key
+		do stk-supp-lookup parameters are lf-stock-code
+			returning lf-supplier
+		re-enter lf-supplier 
+			optional
+	endon
+	before-accept
+		if lf-supplier = spaces
+			do public-get-default-supplier
+				parameters are lf-stock-code
+				returning lf-supplier
+		endif
+	end-before-accept
+	validations
+		get stock-supplier 
+			on index stock-code cre-accountcode
+			key is lf-stock-code lf-supplier
+		on error
+			message "Invalid Supplier"
+			re-enter lf-supplier
+		endon
+	end-validations
+	option "Print <br> Label<br>(F8)" @21,30 to @23,40
+		hot-key 8
+		text-position 15
+		help "(F8) Print one label for each stock item on the order"
+	detail
+		do print-one-zebra parameters are lf-stock-code lf-whse-code lf-supplier 
+			0 spaces 0 
+			lf-count
+		message "Labels Printed" 
+	end-option
+	option "Exit <br> (F12)" @21,50 to @23,60
+		HOT-KEY 12
+		text-position 15
+		help "(F12)"
+	detail
+		exit
+	end-option
+after
+	back-to-detail
+end-screen
+
+
+procedure print-one-zebra
+parameters are
+	lp-stock-code						like stock-code
+	lp-warehouse						like whse-code
+	lp-supplier							like cre-accountcode
+	lp-po-order-no						like po-order-no
+	lp-po-backorder-flag				like po-backorder-flag
+	lp-po-l-seq							like po-l-seq
+	lp-label-qty						type number
+local
+	lf-factor							type number
+	do public-determine-label-factor parameters are lp-stock-code
+		returning lf-factor
+	set lp-label-qty *= lf-factor
+	if lp-label-qty > 0
+	do initialise-label-fields
+	do get-fields parameters are lp-stock-code lp-warehouse lp-supplier
+		lp-po-order-no lp-po-backorder-flag lp-po-l-seq
+	do initialise-zebra
+	I85LABDEFN_PRINT_ONE_LABEL(ws-label-format,lp-label-qty)
+	do finalise-zebra
+	endif
+end-procedure
+
+
+procedure initialise-zebra
+	// set cartons here
+	if ws-label-printer = SPACES
+		report str-concat("Labels-", ws-label-format)
+			no-message
+			no-xml
+			width 132
+	else
+		report str-concat("Labels", ws-label-format)
+			no-message
+			no-xml
+			width 132
+			direct to ws-label-printer
+	endif
+	set ws-spool-file-open = TRUE
+	// then I must have an accountcode
+	I85LABDEFN_INITIALISE_LABEL_PRINTER(ws-label-format)
+end-procedure
+
+procedure finalise-zebra
+	I85LABDEFN_FINISH_LABEL_PRINTING(ws-label-format)
+	report finished
+	set ws-spool-file-open = FALSE
+end-procedure
+
+//------------------------------------------------------------
+//  Field Setting
+//------------------------------------------------------------
+
+procedure get-fields
+parameters
+	lp-stock-code					like stock-code
+	lp-warehouse					like whse-code
+	lp-supplier						like cre-accountcode
+	lp-po-order-no					like po-order-no
+	lp-po-backorder-flag			like po-backorder-flag
+	lp-po-l-seq						like po-l-seq
+//
+	do initialise-label-fields
+	initialise stock-master 
+		leaving stock-code	
+	initialise stock-warehouse-detail
+		leaving stock-code 
+	initialise stock-supplier 
+		leaving stock-code
+	initialise stock-price
+		leaving stock-code
+	initialise purchase-order
+	initialise purchase-order-line
+	get stock-master
+		on index stock-code
+		key is lp-stock-code
+	on error
+	else
+		if lp-warehouse <> spaces
+			get stock-warehouse-detail
+				on index stock-code whse-code
+				key is lp-stock-code lp-warehouse
+			on error
+			endon
+		endif
+		if lp-supplier <> spaces
+			get stock-supplier
+				on index stock-code cre-accountcode
+			on error
+			endon
+		endif
+		get stock-price
+			on index stock-code prc-region-code
+			key is lp-stock-code spaces
+		on error
+		endon
+		if lp-po-order-no <> 0
+			get purchase-order
+				on index po-order-no po-backorder-flag
+				key is lp-po-order-no lp-po-backorder-flag
+			on error
+			else
+				if lp-po-l-seq <> 0
+					get purchase-order-line
+						on index po-order-no po-backorder-flag po-l-seq
+						key is lp-po-order-no lp-po-backorder-flag lp-po-l-seq
+					on error
+					endon
+				endif
+			endon
+		endif
+	endon
+	//stock-master
+	set ws-lab-APN = stk-apn-number // Global Trade Item Number
+	set ws-lab-AUDS = stk-alt-unit-desc // Alternate unit Description
+	if stk-serialized-flag = "L"
+		set ws-lab-LOTquestion = YES // Is stock item lot tracked?
+	endif
+	if stk-serialized-flag = "Y"
+		set ws-lab-SERquestion = YES // Is stock item serialized?
+	endif
+	set ws-lab-PDES = stk-pack-desc // Pack description
+	set ws-lab-PWGT = str(stk-pack-weight) // Pack weight
+	set ws-lab-S1plus2 = concat(str-concat(stk-description)," ",str-concat(stk-desc-line-2)) // 1st+2nd line description
+	set ws-lab-S123 = concat(str-concat(stk-description)," "
+		,str-concat(stk-desc-line-2)," "
+		,str-concat(stk-desc-line-3))  // 1st+2nd+3rd line description
+	set ws-lab-SBRN = stk-brand // Item Brand
+	set ws-lab-SGRP = stock-group // Item Group
+	set ws-lab-SORT = stk-sort-analysis-code // Stock Sort Analysis Code
+	set ws-lab-STCC = stk-condition-code // Item condition code
+	set ws-lab-STK0 = stk-description // Item description
+	set ws-lab-STK2 = stk-desc-line-2 // 2nd line description
+	set ws-lab-STK3 = stk-desc-line-3 // 3rd line description
+	set ws-lab-STKA = substring(stk-description,1,20) // Item Desc, Chars:1-20
+	set ws-lab-STKB = substring(stk-description,21,30) // Item Desc, Chars:21-30
+	set ws-lab-STKC = stock-code // Item code
+	set ws-lab-STKF = str(stk-conversion-factor) // Stock conversion factor
+	set ws-lab-STKU = stk-unit-desc // Stock unit description
+	get system-table
+		on index sys-tbl-type sys-tbl-code
+		key is "PG" stock-group
+	on error
+		set ws-lab-STPG = spaces // Item Product group
+	else
+		set ws-lab-STPG = substring(sys-tbl-alpha-1,3,2) // Item Product group
+	endon
+	// stock-unit-conversion
+	select * from stock-unit-conversion
+		where stock-code = :stock-code
+		and suc-unit-desc = :stk-unit-desc
+	detail
+		set ws-lab-AUPN = suc-trade-unit-no // Global Trade Item Number
+		break
+	end-select
+	//stock-supplier
+	set ws-lab-CREA = cre-accountcode // Supplier accountcode
+	get cre-master
+		on index cre-accountcode
+		key is cre-accountcode
+	on error
+		set ws-lab-CRNA =  spaces// Supplier Short Name
+	else
+		set ws-lab-CRNA =  cr-shortname // Supplier Short Name
+	endon
+	set ws-lab-SUPC = cre-accountcode // Supplier
+	set ws-lab-SUSC = sup-stock-code // Supplier Item Code
+	set ws-lab-SUSD = sup-stk-description // Supplier Item Description
+	set ws-lab-SUSG = sup-item-group // Supplier Item Group
+	set ws-lab-PQTY = str(sup-pack-qty) // Pack quantity
+	//stock-warehouse-detail
+	set ws-lab-BINB = whse-bulk-location // Bulk location
+	set ws-lab-BINL = whse-bin-location // Bin location
+	set ws-lab-STMN = str(whse-min-stock) // Minimum stock Level
+	set ws-lab-STMX = str(whse-max-stock) // Maximum stock level
+	set ws-lab-WHSE = whse-code // Warehouse
+	//stock-price
+	set ws-lab-RRPT = str-concat(format-picture(prc-recommend-retail-inc-tax,"s(7).99")) // R.R.P including tax
+	set ws-lab-SRRP = str-concat(format-picture(prc-recommend-retail,"s(7).99")) // Suggested R.R.P
+	set ws-lab-SU01 = stk-unit-desc // Base Price UOM Description
+	set ws-lab-SU02 = spaces // Base Price UOM Qty
+	set ws-lab-SU03 = spaces // Item Price UOM Qty
+	set ws-lab-SU04 = str-concat(format-picture(prc-wholesale-price,"s(7).99")) // Unit Pricing Amount, incl tax
+	set ws-lab-SU05 = spaces // Unit Pricing Amount, excl tax
+	// PO Related
+	set ws-lab-RQTY =  fstr(po-received-qty,6,2) // Purchase Received Qty
+	set ws-lab-RECD =  julian2date(po-received-date) // Goods received date
+	set ws-lab-PINW =  po-inwards-no // Purchase inwards number
+	set ws-lab-PONO =  concat(str(po-order-no),po-backorder-flag) // Purchase order number
+end-procedure
+
+procedure get-labfld-value											
+//
+// This is a key routine.  This is called by the label print program when it
+// wants to get the value of the field to print.
+//
+	parameter
+		lp-code		pic x(4)
+	returning
+		lr-value	pic x(50)
+// some field codes cannot be represented as a variable name so we need to
+// trap these separately
+	switch lp-code
+	case "S1+2"
+		set lr-value = ws-lab-S1plus2
+	case "LOT?"
+		set lr-value = ws-lab-LOTquestion
+	case "SER?"
+		set lr-value = ws-lab-SERquestion
+	else
+		set lr-value = get-field-value(concat("ws-lab-",lowercase(lp-code)))
+	endswitch
+end-procedure
+
+procedure initialise-label-fields
+	//stock-master
+	set ws-lab-APN = spaces // Global Trade Item Number
+	set ws-lab-AUPN = spaces // Global Trade Item Number
+	set ws-lab-AUDS = spaces // Alternate unit Description
+	set ws-lab-LOTquestion = spaces // Is stock item lot tracked?
+	set ws-lab-PDES = spaces // Pack description
+	set ws-lab-PWGT = spaces // Pack weight
+	set ws-lab-S1plus2 = spaces // 1st+2nd line description
+	set ws-lab-S123 = spaces // 1st+2nd+3rd line description
+	set ws-lab-SBRN = spaces // Item Brand
+	set ws-lab-SERquestion = spaces // Is stock item serialized?
+	set ws-lab-SGRP = spaces // Item Group
+	set ws-lab-SORT = spaces // Stock Sort Analysis Code
+	set ws-lab-STCC = spaces // Item condition code
+	set ws-lab-STK0 = spaces // Item description
+	set ws-lab-STK2 = spaces // 2nd line description
+	set ws-lab-STK3 = spaces // 3rd line description
+	set ws-lab-STKA = spaces // Item Desc, Chars:1-20
+	set ws-lab-STKB = spaces // Item Desc, Chars:21-30
+	set ws-lab-STKC = spaces // Item code
+	set ws-lab-STKF = spaces // Stock conversion factor
+	set ws-lab-STKU = spaces // Stock unit description
+	set ws-lab-STPG = spaces // Item Product group
+	//stock-supplier
+	set ws-lab-CREA = spaces // Supplier accountcode
+	set ws-lab-CRNA = spaces // Supplier Short Name
+	set ws-lab-SUPC = spaces // Supplier
+	set ws-lab-SUSC = spaces // Supplier Item Code
+	set ws-lab-SUSD = spaces // Supplier Item Description
+	set ws-lab-SUSG = spaces // Supplier Item Group
+	set ws-lab-PQTY = spaces // Pack quantity
+	//stock-warehouse-detail
+	set ws-lab-BINB = spaces // Bulk location
+	set ws-lab-BINL = spaces // Bin location
+	set ws-lab-STMN = spaces // Minimum stock Level
+	set ws-lab-STMX = spaces // Maximum stock level
+	set ws-lab-WHSE = spaces // Warehouse
+	//stock-price
+	set ws-lab-RRPT = spaces // R.R.P including tax
+	set ws-lab-SRRP = spaces // Suggested R.R.P
+	set ws-lab-SU01 = spaces // Base Price UOM Description
+	set ws-lab-SU02 = spaces // Base Price UOM Qty
+	set ws-lab-SU03 = spaces // Item Price UOM Qty
+	set ws-lab-SU04 = spaces // Unit Pricing Amount, incl tax
+	set ws-lab-SU05 = spaces // Unit Pricing Amount, excl tax
+	// PO Related
+	set ws-lab-RQTY = spaces // Purchase Received Qty
+	set ws-lab-RECD = spaces // Goods received date
+	set ws-lab-PINW = spaces // Purchase inwards number
+	set ws-lab-PONO = spaces // Purchase order number
+end-procedure
+
+//------------------------------------------------------------
+//  Lookups for help
+//------------------------------------------------------------
+
+screen label-lookup
+returning 
+	lr-label-code							like label-code
+	window @1,1 to @10,40
+		relative to @5,10
+	title ws-function-title
+	datagrid occurs 8
+	select * from system-label
+	allowed search md-select
+detail
+	if screen-mode = md-select
+		set lr-label-code = label-code
+		exit
+	endif
+	accept  label-code @1,1
+		title "Code"
+		when screenmode = search
+		show-value
+	display label-name @1,2
+		title "Description"
+end-screen
+
+screen whse-lookup
+returning 
+	lr-whse-code							like whse-code
+	window @1,1 to @10,40
+		relative to @5,10
+	title ws-function-title
+	datagrid occurs 8
+	select * from system-table
+		where sys-tbl-type = "WH"
+	allowed search md-select
+detail
+	if screen-mode = md-select
+		set lr-whse-code = sys-tbl-code
+		exit
+	endif
+	accept  sys-tbl-code @1,1
+		title "Code"
+		when screenmode = search
+		show-value
+	display sys-description @1,2
+		title "Description"
+end-screen
+
+screen stk-supp-lookup
+parameters
+	lp-stock-code							like stock-code
+returning 
+	lr-accountcode							like cre-accountcode
+	window @1,1 to @10,40
+		relative to @5,10
+	title ws-function-title
+	datagrid occurs 8
+	select * from stock-supplier
+		where stock-code = lp-stock-code
+	allowed search md-select
+detail
+	if screen-mode = md-select
+		set lr-accountcode = cre-accountcode
+		exit
+	endif
+	accept  cre-accountcode @1,1
+		title "Code"
+		when screenmode = search
+		show-value
+	display sup-stock-code @1,2
+		title "Supplier Code"
+end-screen
+
+//------------------------------------------------------------
+//  Memory File Processing
+//------------------------------------------------------------
+
+procedure load-mem-from-comms
+parameters
+	lp-comms-file-name						pic x(256) type string
+	open stock-comms
+		file is lp-comms-file-name
+	on error
+		message "Could not open comms file"
+	endon
+	open mem-label
+		temporary
+	on error
+		message "Could not open memory file"
+		exit
+	endon
+	select * from stock-comms
+	detail
+		initialise mem-label
+		set mem-stock-code = sc-stock-code
+		set mem-label-count = sc-label-count
+		set mem-whse-code = sc-whse-code
+		set mem-supplier = sc-supplier
+		set mem-po-order-no = sc-po-order-no
+		set mem-po-backorder-flag = sc-po-bo-suffix
+		set mem-po-l-seq = sc-po-l-seq
+		set mem-label-code = sc-label-code
+		if mem-label-code = spaces
+			do public-determine-label-code
+				parameters are mem-stock-code
+				returning mem-label-code
+		endif
+		insert mem-label
+	end-select
+end-procedure
+
+procedure public-determine-label-code export
+parameters are 
+	lp-stock-code							like stock-code
+returning
+	lr-label-code							like label-code
+//
+	set lr-label-code = spaces
+	// either add code here or override with export routine
+	// use this routine to have different labels for different stock codes.
+end-procedure
+
+screen labels-dg
+	window	
+	title  ws-function-title
+	datagrid occurs 20
+	select * from mem-label
+	allowed search entry correct remove md-print
+detail
+	if screenmode = md-print 
+		do print-mem-file
+		exit
+	end
+	accept mem-stock-code @1,1
+		title "Stock Code"
+		help "Enter the Stock Code"
+	on up-arrow
+		get stock-master
+			previous
+		on error
+		else
+			set mem-stock-code = stock-code
+			display stk-description @21,05
+				foreground prompts
+			re-enter optional
+		endon
+	endon
+	on down-arrow
+		get stock-master
+			next
+		on error
+		else
+			set mem-stock-code = stock-code
+			display stk-description @21,05
+				foreground prompts
+			re-enter optional
+		endon
+	endon
+	on help-key
+		do m4enqstk-enquire-on-stock
+			parameters stock-code SPACES SPACES
+			returning mem-stock-code
+		reenter	mem-stock-code optional //mandatory re-entry as select is not really valid
+	endon
+	validations
+		if screenmode in { entry correct }
+			get stock-master
+				on index stock-code
+				key is mem-stock-code
+			on error
+				do m4enqstkkey-enquire-on-stock-with-key-words
+					parameters
+						mem-stock-code 				// 1. Stock Code/Keyword
+						M4ENQDEF_KEYWORD_LOOKUP // 2. Literal "-keyword"
+						'Y' 			// 3. direct-lookup
+						SPACES			// 4. display-key-word
+						FALSE 			// 5. show-boms-only (boolean)
+						TRUE 			// 6. no-review-for-one (boolean)
+						SPACES 			// 7. display "not found message"
+						mem-stock-code 		// 8. Stock-key-word. x(15)
+					returning mem-stock-code
+					re-enter mem-stock-code optional
+			else
+				display stk-description @21,05
+			endon
+		endif
+		do public-determine-label-code
+			parameters are mem-stock-code
+			returning mem-label-code
+	end-validations				
+	accept mem-label-code @1,2
+		title "Label"
+		default mem-label-code
+		help "The label to use for this stock code"
+	validations
+		if mem-label-code = spaces
+			do public-determine-label-code
+				parameters are mem-stock-code
+				returning mem-label-code
+			re-enter mem-label-code
+		endif
+		get system-label
+			on index label-code
+			key is mem-label-code
+		on error
+			message "Invalid Label Code"
+			re-enter mem-label-code
+		endon
+	end-validations
+	accept mem-label-count @1,3
+		title "Count"
+		help "The number of labels to print"
+	accept mem-whse-code @1,4
+		title "Whse"
+		optional
+		help "Optional - if blank no details will be printed on label"
+	accept mem-supplier @1,5
+		title "Supplier"
+		optional
+		help "Optional - if blank no details will be printed on label"
+	accept mem-po-order-no @1,6
+		title "PO Number"
+		optional
+		help "Optional - if blank no details will be printed on label"
+	accept mem-po-backorder-flag @1,7
+		title "PO Sufx"
+		optional
+		help "Optional - if blank no details will be printed on label"
+	accept mem-po-l-seq @1,8
+		title "PO Line"
+		optional
+		help "Optional - if blank no details will be printed on label"
+end-screen
+
+procedure print-mem-file
+	select * 
+		from mem-label
+	before mem-label-code
+		if ws-spool-file-open
+			report finished
+		endif
+		set ws-label-format = mem-label-code
+		do initialise-zebra
+	detail
+		do initialise-label-fields
+		if mem-whse-code = spaces
+			do public-get-default-whse 
+				parameters are mem-stock-code
+				returning mem-whse-code
+		endif
+		if mem-supplier = spaces
+			do public-get-default-supplier 
+				parameters are mem-stock-code 
+				returning mem-supplier
+		endif
+		do get-fields parameters are 
+			mem-stock-code
+			mem-whse-code
+			mem-supplier
+			mem-po-order-no 
+			mem-po-backorder-flag 
+			mem-po-l-seq
+		I85LABDEFN_PRINT_ONE_LABEL(ws-label-format,mem-label-count)
+	after mem-label-code
+		do finalise-zebra
+	end-select
+end-procedure
+
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                

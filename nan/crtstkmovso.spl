@@ -1,0 +1,353 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program :  create stock movements for the sales order.
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2018
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: nan/crtstkmovso.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 09Jan18  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+ 
+#define RANDOM_BETWEEN(A,B) \
+	(((RANDOM(0) / 32767) * (B - A)) + A)
+
+field
+	ws-function-title						type string
+	ws-tax-rate								type number
+
+link "clib/clibtaxso"
+link "clib/clibserial"
+
+object like-stock-movements  like stock-movements
+
+procedure main
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+//	do i8secabt-check-abort
+//		parameters are sys-consolidation-division login-id() "ZUSR" "R004"
+//		returning ws-function-title 
+	do i8proglog-write-log
+	set ws-tax-rate = 15
+	confirm
+		prompt "ok to build sos?"
+	confirmed
+		do doit
+		message-box param-text("<<P1>><<BR>><<p2>>"
+			,"All sales order created"
+			,"Prss ok to continue")
+			title is ws-function-title
+			message-buttons MSG_BOX_OK
+			icon MSG_BOX_INFORMATION
+	end-confirm
+end-procedure
+
+procedure doit
+	window @1,1 to @22,80
+	no-hide
+local
+	lf-commit							type boolean
+	lf-ok								type boolean
+	lf-line-no							type number
+	lf-total-cost						type number
+	lf-total-value						type number
+	lf-inv-archive						like so-invoice-no
+	lf-inv								like so-invoice-no
+	lf-archive							like sys-money-value
+	lf-so								like sys-money-value
+	Display "Please Wait" @1,10
+		colour RED 
+		scale 150
+	report "Create orders from stock-movements"
+		no-message
+	open sales-order-archive truncate
+	open sales-order-line-archive truncate
+	select
+		*
+		from stock-movements
+		where stk-trans-type = 'SO'
+		and stk-trans-ref3 = spaces
+		order by stk-trans-ref1, stock-code
+	before stk-trans-ref1
+		set lf-commit = true
+		do create-new-order
+			returning lf-ok
+		if not lf-ok 
+			set lf-commit = false
+		endif
+		set lf-line-no = 0
+		set lf-total-cost = 0
+		set lf-total-value = 0
+	detail
+		set lf-line-no += 1
+		set lf-total-cost += stk-trans-cost
+		set lf-total-value += stk-trans-value
+		do create-line
+			parameters are lf-line-no
+			returning lf-ok
+		if not lf-ok 
+			set lf-commit = false
+		endif
+	after stk-trans-ref1
+		do build-totals
+			parameters are lf-total-cost lf-total-value
+			returning lf-ok
+		if not lf-ok 
+			set lf-commit = false
+		endif
+		if lf-commit = true
+			transaction commit
+		else
+			transaction rollback
+			print "Failed to add trans-ref1" stk-trans-ref1
+		endif
+	end-select
+	// update the next so no
+	select lf-archive = max(so-order-no)
+		from sales-order-archive
+	end-select
+	select lf-so = max(so-order-no)
+		from sales-order
+	end-select	
+	if lf-so > lf-archive
+		set lf-archive = lf-so
+	endif
+	get system-table lock
+		on index sys-tbl-type sys-tbl-code
+		key is "YY" "SO"
+	on error
+	else
+		set  sys-money-value = lf-archive + 1
+		update system-table
+	endon
+	select lf-inv-archive = max(so-invoice-no)
+		from sales-order-archive
+	end-select
+	select lf-inv = max(so-invoice-no)
+		from sales-order
+	end-select	
+	if lf-inv > lf-inv-archive
+		set lf-inv-archive = lf-inv
+	endif
+	get system-table lock
+		on index sys-tbl-type sys-tbl-code
+		key is "YY" "IN"
+	on error
+	else
+		set  sys-money-value = num(lf-inv-archive) + 1
+		update system-table
+	endon
+end-procedure
+
+procedure create-new-order
+// assumes currency on stock-movements
+returning
+	lr-ok								type boolean
+	set lr-ok = true
+	initialise sales-order-archive
+	do clibserial-next-serial-number parameters "SO"
+		returning so-order-no
+	set so-cust-code = stk-accountcode
+	get deb-master
+		on index accountcode
+		key is so-cust-code
+	on error
+		set lr-ok = false
+	endon
+	set so-order-date = stk-trans-date - RANDOM_BETWEEN(0,4)
+	set so-delivery-date = stk-trans-date
+	do get-actual-delivery parameters are so-delivery-date returning so-actual-delivery-date
+	set so-order-status = '90'
+	set so-whse-code = stk-trans-whse
+	set so-territory-code = stk-trans-territory
+	set so-cust-type = dr-cust-type
+	set so-rep-code = stk-trans-rep-code
+	set so-cust-reference = concat("DEM" str(integer(RANDOM_BETWEEN(10000,90000))))
+	set so-invoice-no = stk-trans-ref1
+	set so-invoice-date = stk-trans-date
+	set so-processing-date = stk-trans-date
+	set so-order-priority = 5
+	set so-part-shipment-allowed = YES
+	set so-date-stamp = stk-trans-date
+	set so-time-stamp = RANDOM_BETWEEN(28800,64800) // some time between 0800 and 1800
+	set so-user-id-code = login-id()
+	set so-order-source = "S"
+	set so-batch-ref  = stk-batch-ref
+	set so-tax-calc-level = "O"
+	insert sales-order-archive
+	on error
+		set lr-ok = FALSE
+	endon
+end-procedure
+
+procedure create-line
+// assumes currency on stock-movements
+parameters
+	lp-line-no							like sol-line-seq
+returning
+	lr-ok								type boolean
+local
+	lf-price-as-per-stock-movement		like stk-trans-value
+	set lr-ok = true
+	initialise sales-order-line-archive
+		leaving so-order-no stock-code
+	get stock-master
+		on index stock-code
+		key is  stock-code
+	on error
+		set lr-ok = false
+	endon
+	get stock-price
+		on index stock-code prc-region-code
+		key is stock-code spaces
+	on error ENOREC
+		initialise stock-price
+			leaving stock-code
+	endon
+	set sol-line-seq = lp-line-no
+	set sol-line-type = "SN"
+	set sol-chg-type = "S"
+	set sol-stk-unit-desc = stk-unit-desc
+	set sol-stk-unit-conversion = 1
+	set sol-price-uom = 1
+	set sol-price-overide-flag = YES
+	set sol-tax-rate = ws-tax-rate
+	set sol-item-cost = stk-trans-cost / (0 - stk-trans-qty)
+	set sol-line-cost = stk-trans-cost
+	set sol-ordered-line-cost = stk-trans-cost
+	set lf-price-as-per-stock-movement = stk-trans-value / (0 - stk-trans-qty)
+	if prc-wholesale-price = 0 or lf-price-as-per-stock-movement >= prc-wholesale-price
+		set sol-item-price = stk-trans-value / (0 - stk-trans-qty)
+		set sol-shipped-discount-amt = 0
+		set sol-line-amount = stk-trans-value
+		set sol-item-wholesale-price = stk-trans-value / ( 0 - stk-trans-qty)
+	else
+		set sol-item-price = prc-wholesale-price
+		set sol-shipped-discount-amt = (prc-wholesale-price * (0 - stk-trans-qty)) - stk-trans-value
+		set sol-ordered-disc-amt = sol-shipped-discount-amt
+		set sol-item-wholesale-price = prc-wholesale-price
+	endif
+	set sol-shipped-amount = stk-trans-value
+	set sol-line-amount = stk-trans-value
+//
+	set sol-ordered-qty = 0 - stk-trans-qty
+	set sol-shipped-qty = 0 - stk-trans-qty
+	set sol-date-stamp = so-date-stamp
+	set sol-time-stamp = so-time-stamp
+	set sol-user-only-num1 = stk-batch-trans-no
+	insert sales-order-line-archive
+	on error
+		set lr-ok = FALSE
+	endon
+	//
+	save stock-movements
+	get like-stock-movements
+		on index stk-batch-ref stk-batch-trans-no
+		key is stk-batch-ref stk-batch-trans-no
+		lock
+	on error
+		set lr-ok = FALSE
+	else
+		set stk-document-type = "SO"
+		set stk-document-no = right-justify(str(so-order-no),size-of(stk-document-no))
+		set stk-document-suffix = spaces
+		set stk-document-seq = lp-line-no
+		set stk-trans-ref3 = right-justify(str(so-order-no),size-of(so-order-no))
+		update stock-movements
+		on error
+			set lr-ok = FALSE
+		endon
+	endon
+	restore stock-movements
+end-procedure
+
+procedure build-totals
+parameters
+	lp-total-cost						type number
+	lp-total-value						type number
+returning
+	lr-ok								type boolean
+local
+	lf-tax-code							like sot-tax-code
+	lf-tax-rate							like sot-tax-effective-rate
+	set lr-ok = true
+	do clibtaxso-get-sales-order-tax-code-and-rate
+		parameters are sales-order-archive.*
+		returning  lf-tax-code lf-tax-rate
+	get sales-order-archive
+		on index so-order-no so-bo-suffix
+		key is so-order-no so-bo-suffix
+		lock
+	on error
+		set lr-ok = false
+	else
+		set so-order-total-amount = lp-total-value
+		set so-ordered-total-cost = lp-total-cost
+		set so-order-total-tax = lp-total-value * lf-tax-rate / 100
+		set so-order-total-shipped-amount = lp-total-value
+		set so-order-total-shipped-tax = so-order-total-tax
+		set so-order-total-shipped-cost = lp-total-cost
+		update sales-order-archive
+		on error
+			set lr-ok = FALSE
+		endon
+	endon
+end-procedure
+
+procedure get-actual-delivery
+parameters are
+	lp-req-date							type date // requested delivery date
+returning
+	lr-act-del							type date // actual delivery date
+local
+	lf-days-ago							type number
+/*
+	The latest date generated by nan will be the last day of the previous month.
+
+	We want orders older than 6 months to have a 25% chance of being late
+	from then on, we want to see a slight increase in performance - 3% per month,
+	which should give us a 25% - 18% = 8% of orders recently.
+
+*/
+	set lf-days-ago = today() - lp-req-date
+	if lf-days-ago > 6 * 30
+		// 25% of orders are late
+		do  date-from-probablilty parameters are lp-req-date 25 returning lr-act-del
+	elseif lf-days-ago > 5 * 30
+		do  date-from-probablilty parameters are lp-req-date 19 returning lr-act-del
+	elseif lf-days-ago > 4 * 30
+		do  date-from-probablilty parameters are lp-req-date 16 returning lr-act-del
+	elseif lf-days-ago > 3 * 30
+		do  date-from-probablilty parameters are lp-req-date 13 returning lr-act-del
+	elseif lf-days-ago > 2 * 30
+		do  date-from-probablilty parameters are lp-req-date 10 returning lr-act-del
+	elseif lf-days-ago > 1 * 30
+		do  date-from-probablilty parameters are lp-req-date 7 returning lr-act-del
+	else
+		do  date-from-probablilty parameters are lp-req-date 4 returning lr-act-del
+	endif
+end-procedure
+
+procedure date-from-probablilty
+parameters are
+	lp-req-date							type date // requested delivery date
+	lp-late-probability					type number
+returning
+	lr-act-del							type date // actual delivery date
+	if RANDOM_BETWEEN(0,100) < lp-late-probability 
+		set lr-act-del = lp-req-date + RANDOM_BETWEEN(0,4)
+	else
+		set lr-act-del = lp-req-date 
+	endif
+end-procedure

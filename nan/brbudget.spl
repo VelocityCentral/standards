@@ -1,0 +1,150 @@
+#include "../include/bmsdef.spl"  // for version
+
+//
+// browse budget used for excel export.
+//
+
+object budget-value
+	type is isam
+	record
+		bv-stock-code				like stock-code
+		bv-stk-description			like stk-description
+		bv-stk-stock-status			like stk-stock-status
+		bv-whse-code				like whse-code
+		bv-accountcode				like accountcode
+		bv-shortname				like shortname
+		bv-territory				like territory
+		bv-stock-group				like stock-group
+		bv-period					type number
+		bv-value					type number 
+		bv-cost						type number 
+		bv-gp						type number 
+		bv-qty						type number 
+	end-record
+	key is bv-stock-code bv-whse-code bv-accountcode bv-territory
+
+#if BMS_DICT_VER > 7501
+procedure main
+	message "pgm retired use configurable budgets"
+end-procedure
+
+#else
+
+procedure main
+	get system-control first
+	on error
+		abort "no control"
+	endon
+	do build-file
+	do display-screen
+end-procedure
+
+procedure build-file
+local i type number
+	l-found type boolean
+	l-cost type number
+	open budget-value temporary
+	select * from deb-sales-history-budget-2
+		where deb-budget-status = "F0"
+	detail
+		get stock-master 	
+			on index stock-code 
+			key is dsh-stock-key
+		on error
+		endon
+		get stock-warehouse-detail
+			on index stock-code whse-code
+			key is dsh-stock-key warehouse
+		on error
+		endon
+		if whse-avg-cost = 0
+			set l-cost = stk-std-cost
+		else
+			set l-cost = whse-avg-cost
+		endif
+		get deb-master
+			on index accountcode
+			key is accountcode
+		on error
+		endon
+		initialise budget-value
+		set bv-stk-description = stk-description
+		set bv-shortname = shortname
+		set bv-accountcode = accountcode
+		set bv-stock-code = dsh-stock-key
+		set bv-whse-code = warehouse
+		set bv-territory = territory
+		set bv-stock-group = stock-group
+		set bv-stk-stock-status = stk-stock-status
+		for i = 1 to 12
+			set bv-period = i
+			set bv-value = deb-sales-hist-budget-qty[i]
+				* deb-sales-hist-budget-price[i]
+			set bv-qty = deb-sales-hist-budget-qty[i]
+			set bv-cost = deb-sales-hist-budget-qty[i]
+				* l-cost
+			set bv-gp = bv-value - bv-cost
+			insert budget-value
+		endfor
+	endselect
+	//
+	// the following code is added to find stock items
+	// that have not been budgetted.
+	//
+	select * from stock-master
+		where stk-stock-status in { "S" "M" "K" "I" }
+	detail
+		set l-found = false
+		select * from budget-value
+			where bv-stock-code = :stock-code
+		detail
+			set l-found = true
+			break
+		end-select
+		if not l-found
+			initialise budget-value
+			set bv-stk-description = stk-description
+			set bv-stock-code = stock-code
+			set bv-stk-stock-status = stk-stock-status
+			set bv-stock-group = stock-group
+			set bv-period = 1
+			insert budget-value
+		endif
+	end-select
+end-procedure
+
+screen display-screen
+	window
+	datagrid occurs 20
+	select * from budget-value
+detail
+	accept bv-stock-code @1,1
+		title "stock"
+	accept bv-accountcode @1,2
+		title "Customer"
+	accept bv-whse-code @1,3
+		title "Warehouse"
+	accept bv-territory @1,4
+		title "Territory"
+	accept bv-stock-group @1,5
+		title "Group"
+	accept bv-stk-stock-status @1,6
+		title "Status"
+	accept bv-stk-description @1,7
+		title "Description"
+	accept bv-shortname @1,8
+		title "Shortname"
+	accept bv-period @1,9
+		title "period"
+	accept bv-value @1,10
+		title "Value"
+	accept bv-cost @1,11
+		title "Cost"
+	accept bv-gp @1,12
+		title "gp"
+	accept bv-qty @1,13
+		title "Qty"
+end-screen
+		
+
+#endif

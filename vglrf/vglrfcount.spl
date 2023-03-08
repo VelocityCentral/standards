@@ -1,0 +1,753 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : Stock Take counts via RF
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2011
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: c:\usr\pronto\cus\sample\rayb\vglrfcount.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 26Mar15	rjb Log SER	Upgrade to provide serialised item support
+// 24Mar11	rayb		written
+////////////////////////////////////////////////////////////////////////////////
+//  Be Careful:
+//  ===========
+//  This program needs to run on both vt100 type dumb devices as well as
+//  proclient.  
+//  Remember: proclient will allow display / accepts on the last line of a
+//  screen but vt100 type terminals do not.  Therefore if the screen supports
+//  8 lines, you can only use 7.
+//  Other points to consider with dumb terminals
+//  - Must use the WINDOW statement
+//  - Must use "clear" as the first command in the before section of screens.
+//  - Menus must have no-hide clause specified to ensure they do not use tree
+//  menus
+//	- Proclient supports proportional fonts whereas dumb terminals do not.
+//	Therefore care should be taken on menus and prompts to ensure they do not
+//	overflow the available space - they will look ok on proclient but not the
+//	dumb terminals
+//
+//	        *******************************************************
+//	        *  You must test on both kinds of devices             *
+//	        *  Use PuTTY for vt100 testing.  Set TERM=vt100       *
+//	        *******************************************************
+//
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/i8secabt.spl" 
+#include "../include/i8proglog.spl" 
+#include "../include/i8rsstdf.spl" 
+#define WINDOWSIZE @1,1 to @ws-max-lines,ws-max-columns
+
+link 'vglrf/vglrfclib'
+link 'clib/clib403'
+
+
+field 
+	ws-function-title					type string
+	// Remember to use environment variables COLUMNS and LINES to set these
+	ws-max-columns						type number
+	ws-max-lines						type number
+// rjb log SER-start-------------------------------------------------------------
+	ws-whse-code						like whse-code
+	ws-stc-control-code					like stc-control-code
+// rjb log SER-end---------------------------------------------------------------
+
+object stv-copy like stock-take-variance
+
+// rjb log SER-start-------------------------------------------------------------
+object serials
+	type is memory
+	record is 
+		s-stock-code					like stock-code
+		s-serial-no						like serial-no
+	endrecord
+	key is s-stock-code s-serial-no
+// rjb log SER-end---------------------------------------------------------------
+ 
+procedure main 
+	get system-control first 
+	on error
+		abort "No Control Record"
+	endon
+	do i8secabt-check-abort
+		parameters are sys-consolidation-division login-id() "ZVRF" "T002"
+		returning ws-function-title 
+	do i8proglog-write-log
+	do vglrfclib-screen-size 
+		returning ws-max-columns ws-max-lines
+	if get-param(1) = "-qty"
+		do get-paras once
+		do rf-stocktake-scan initial-mode is entry parameters "Q"
+		exit
+	endif
+	if get-param(1) = "-scan"
+		do get-paras once
+		do rf-stocktake-scan initial-mode is entry parameters "S"
+		exit
+	endif
+	do rf-stock-take
+end-procedure
+
+
+menu rf-stock-take
+local
+	lf-ok								type boolean
+    window WINDOWSIZE
+	no-hide // not a tree menu
+before
+	clear
+detail
+    option "1. Normal Stocktake" @3,2 to @3,ws-max-columns - 2
+        help "Stocktake - (can enter qty)"
+		do get-paras once returning lf-ok
+		if lf-ok
+			do rf-stocktake-scan initial-mode is entry parameters "Q" 
+		endif
+		refresh
+    option "2. Scan each item" @4,2 to @4,ws-max-columns - 2
+        help "Scan each item"
+		do get-paras once returning lf-ok
+		if lf-ok
+			do rf-stocktake-scan initial-mode is entry parameters "S" 
+		endif
+		refresh
+    option "3. ReCount" @5,2 to @5,ws-max-columns - 2
+        help "Reset the count for one item to allow re-count"
+		do get-paras once returning lf-ok
+		if lf-ok
+			do rf-reset-count initial-mode is entry 
+		endif
+		refresh
+    option "9. Finish" @6,2 to @6,ws-max-columns - 2
+        help "Logout"
+		exit
+endmenu //rf-stocktake ---------------------------------------------------------
+
+screen rf-reset-count
+local field
+	lf-stock-code						like stock-code
+	lf-current-count					type number
+	lf-current-location-count			type number
+	lf-ok								type boolean
+	//
+    window WINDOWSIZE
+//		title is "RF Stocktake"
+    allowed entry
+	no-ok-cancel
+before
+	clear
+	display "Stock Code:" @1,1
+	display "QTY" @4,1
+	display "Count" @5,1
+detail
+	accept lf-stock-code @2,1
+		help "9 to exit"
+	validations
+		if lf-stock-code = "9"
+			exit
+		endif
+		//
+		do vglrfclib-validate-product parameters are lf-stock-code spaces
+			returning lf-ok lf-stock-code 
+		//
+		if not lf-ok
+			do vglrfclib-display-message parameters "Invalid Stock code" 2
+			re-enter lf-stock-code
+		endif
+		set lf-current-count = 0
+		set lf-current-location-count = 0
+		select * from stock-take-variance
+			where stv-control-code = :ws-stc-control-code
+			and whse-code = :ws-whse-code
+			and stock-code = lf-stock-code
+			order by stv-control-code whse-code stock-code stv-bin-location
+		detail
+			set lf-current-count += stv-count-qty
+			set lf-current-location-count += 1
+		end-select
+		if lf-current-location-count  = 0
+			do vglrfclib-display-message parameters "No count of these items" 3
+			re-enter optional
+		endif
+	end-validations
+	display concat("Count:" str(lf-current-count) ) @4,1
+	display concat("Recs:" str(lf-current-location-count) ) @5,1
+    confirm @8,1
+		prompt "OK(Y/N)?"
+		default YES
+	confirmed
+		select * from stock-take-variance
+			where stv-control-code = :ws-stc-control-code
+			and whse-code = :ws-whse-code
+			and stock-code = lf-stock-code
+			order by stv-control-code whse-code stock-code stv-bin-location
+			for update
+		detail
+			set stv-count-qty = 0
+			set stv-count-date-time = 0
+			set stv-count-date = 0
+			update stock-take-variance
+		end-select
+	end-confirm
+after
+	back-to-detail
+end-screen
+
+
+screen rf-stocktake-scan
+parameters
+	lp-mode								pic x // "S-SCAN Q-QTY"
+local field
+	lf-stock-code						like stock-code
+	lf-qty-counted						like whse-qty-on-hand	
+	lf-not-frozen						type numeric			
+//	lf-add-to-stocktake					pic x					
+	lf-ok								type boolean
+	lf-qty								type number
+	lf-current-soh						like whse-qty-on-hand	
+	lf-serial-lot						pic x(40) type string 
+	lf-message							pic x(128) type string
+	lf-pic-clause						pic x(10)
+	i									type number
+	lf-get-location						type boolean
+	lf-can-override-qty					type boolean
+	lf-found							type boolean
+	//
+	lf-last-stock-code					like stock-code
+	lf-last-count						type number
+	lf-last-total-count					type number
+	lf-last-location					like stv-bin-location
+	//
+	lf-display-next-stock-code			like stock-code
+	lf-display-next-bin-location		like whse-bin-location
+	lf-display-next-bulk-location		like whse-bulk-location
+	//
+	lf-entered-locn						like stv-bin-location
+	lf-entered-stock-code				like stock-code
+	//
+	lf-count							type number
+	//
+    allowed entry
+	no-ok-cancel
+    window WINDOWSIZE
+before
+	clear
+	set lf-pic-clause = "s(7)9"
+	if sys-default-no-of-decimals > 0
+		string lf-pic-clause appending "."
+		for i = 1 to sys-default-no-of-decimals
+			string lf-pic-clause appending "9"
+		end-for
+	endif
+	//
+    display "Locn:" @5,1
+	set lf-get-location = TRUE
+	set lf-can-override-qty = FALSE
+	//
+detail
+	set lf-can-override-qty = FALSE
+	if lf-entered-stock-code = "9"
+		set lf-entered-stock-code = space
+	endif
+	if lf-last-stock-code <> spaces
+		get stock-master 
+			on index stock-code
+			key is lf-last-stock-code
+		on error
+		endon
+		display strconcat(stock-code,"(",stk-unit-desc,")") @1,1 background
+		display stk-description @2,1 background
+		display concat("Prev Scan Count:",str(lf-last-count)) @3,1 background
+		display concat("Total Count:",str(lf-last-total-count)) @4,1 background
+	endif
+	// 
+	// if it's a cyclic count then get the next one to count and display
+	//
+	if stc-cyclic-code <> spaces
+		do find-next-item-to-count
+			parameters are ws-stc-control-code ws-whse-code
+				lf-last-location lf-last-stock-code
+			returning lf-display-next-stock-code 
+				lf-display-next-bin-location 
+				lf-display-next-bulk-location
+		display str-concat(
+				"Next:"
+				lf-display-next-stock-code
+				"@"
+				lf-display-next-bin-location
+				"/"
+				lf-display-next-bulk-location
+				) @8,1 background
+	endif
+	// ------------------------------------------------------------
+    accept lf-entered-locn @5,10
+        help "Key/Scan Location"
+        upper_case
+		when lf-get-location
+		show-value 
+        optional
+	set lf-get-location = FALSE
+    set lf-not-frozen = FALSE
+	// ------------------------------------------------------------
+    accept lf-entered-stock-code @6,1
+        help "Code 9)Quit 8)Locn"
+        uppercase
+		default lf-entered-stock-code
+    validation
+        if lf-entered-stock-code = "9"
+            exit
+        endif
+        if lf-entered-stock-code = "8"
+			set lf-get-location = TRUE
+			re-enter lf-entered-locn 
+        endif
+		if lf-entered-stock-code = SPACES
+			reenter optional
+		endif
+		//
+		// Get the actual stock Code from the entered one.
+		// The field we now work on will of lf-stock-code
+		//
+		do vglrfclib-validate-product parameters are lf-entered-stock-code spaces
+			returning lf-ok lf-stock-code lf-qty lf-serial-lot lf-message
+		get stock-master 
+			on index stock-code
+			key is lf-stock-code
+		on error
+			set lf-ok = FALSE
+			set lf-message = "Invalid Stock Code"
+		endon
+		if not lf-ok
+			do vglrfclib-display-message parameters are  lf-message 4
+			re-enter lf-entered-stock-code
+		else
+			set lf-qty-counted = lf-qty
+		endif
+		//"K","L" and "Z" type items should not be used in a stock take.
+		//
+		if stk-stock-status in ("K","L","Z")
+			do vglrfclib-display-message parameters are  "Invalid item type." 3
+			reenter optional
+		endif
+		display strconcat(stock-code,"(",stk-unit-desc,")") @1,1 background
+		display stk-description @2,1 background
+		if lf-last-stock-code <> stock-code
+			display concat("Prev Scan Count:",str(0)) @3,1 background
+			display concat("Total Count:",str(0)) @4,1 background
+		endif
+		do vglrfclib-check-can-override-qty parameters are stock-code
+			returning lf-can-override-qty
+// rjb log SER-start-------------------------------------------------------------
+		if stk-serialized-flag = "Y"
+			// check if any have been counted before because this will make
+			// little sense..  For a serialized item the user must count all
+			// the serial numbers for the unit in one hit.
+			select lf-count = count(*)
+				from stock-take-variance
+				where whse-code = :ws-whse-code
+				and stock-code = :stock-code
+				and stv-control-code = :ws-stc-control-code
+				and stv-count-qty <> 0
+			end-select
+			if lf-count > 0
+				do vglrfclib-display-message parameters concat(
+					"This is a serialized item and it "
+					"appears this item has already been counted.\n"
+					"You must use the re-count function."
+					)
+					6
+				re-enter lf-entered-stock-code
+			endif
+			//
+			do vglrfclib-display-message parameters
+				concat(
+				"You have scanned a serialized item\n"
+				"You must scan ALL the serial numbers for this item now, no matter where they are in the warehouse"
+				)
+				6
+			do rf-scan-all-serials 
+				parameters are stock-code
+				returning lf-qty-counted lf-ok
+			if not lf-ok
+				do vglrfclib-display-message parameters are 
+					concat(
+					"There was a problem updating the serial numbers in the database.\n"
+					"This transaction has been rolled back and no changes have been made."
+					)
+					6
+				re-enter lf-entered-stock-code
+			endif
+		endif
+// rjb log SER-end---------------------------------------------------------------
+    endvalidation
+	//
+	// By the time we get to this bit of code stock-code is set
+	// to a valid stock-code (not the barcode)
+	//
+	set lf-found = FALSE
+    select * from stock-take-variance
+		where whse-code = :ws-whse-code
+		and stock-code = :stock-code
+		and stv-control-code = :ws-stc-control-code
+        order by whse-code stock-code stv-bin-location
+	detail
+		set lf-found = TRUE
+	end-select
+	if not lf-found
+			do vglrfclib-display-message parameters 
+				concat("Item not in this stock take\n"
+				"Ctrl:" stv-control-code "\n"
+				"Whs:" ws-whse-code "\n"
+				"Code:" stock-code "\n"
+				)
+				3
+			reenter lf-entered-stock-code
+	endif
+	// ------------------------------------------------------------
+    accept lf-qty-counted @7,6 pic lf-pic-clause
+		title "QTY:"
+        default lf-qty-counted
+        help "Qty Counted"
+// rjb log SER-start-------------------------------------------------------------
+//		when lf-can-override-qty or lp-mode = "Q"
+		when lf-can-override-qty or (lp-mode = "Q" and stk-serialized-flag <> YES)
+// rjb log SER-end---------------------------------------------------------------
+		no-clear
+	validations
+		// attempt to trap the user scanning another bar code
+		// into the qty field
+		do clib403-calculate-available
+			parameters stock-code ws-whse-code
+			returning lf-current-soh
+		if (lf-current-soh > 0 and  lf-qty-counted > lf-current-soh * 100)
+		or (lf-qty-counted > 99999)
+            do vglrfclib-confirm
+				parameters  "Qty scanned looks excessive \n Select Y to confirm" 
+				returning lf-ok
+			if not lf-ok
+				set lf-qty-counted = 1
+				re-enter lf-qty-counted
+			endif
+		endif
+	end-validations
+	// ------------------------------------------------------------
+  	confirm auto
+    confirmed
+	// 
+	// In a non-advanced warehouse there can only ever be one stock-take
+	// record per warehouse.  The location is virtually a memo field
+	//
+		set lf-found = FALSE
+		select * from stock-take-variance
+			where whse-code = :ws-whse-code
+			and stock-code = :stock-code
+			and stv-control-code = :ws-stc-control-code
+			for update
+		detail
+			set stv-bin-location = lf-entered-locn
+            set stv-count-date = today()
+            set stv-count-qty += lf-qty-counted
+			set stv-count-date-time = gmt()
+            update stock-take-variance
+			set lf-found = TRUE
+			break // only the first record is processed
+		end-select
+		if not lf-found
+            do vglrfclib-display-message parameters  "Cannot get s/take record" 4
+		endif
+		set lf-last-stock-code = stock-code
+		set lf-last-count = lf-qty-counted
+		set lf-last-total-count = stv-count-qty
+		set lf-last-location = stv-bin-location
+    end-confirm
+after
+    back-to-detail
+end-screen //rf-stocktake-normal-----------------------------------------------
+
+// rjb log SER-start-------------------------------------------------------------
+procedure rf-scan-all-serials
+parameters are 
+	lp-stock-code						like stock-code
+returning
+	lr-qty								type number
+	lr-ok								type boolean
+local
+	lf-ok								type boolean
+	open serials truncate temporary
+	do rf-serial-scan-screen  entry
+		parameters are lp-stock-code
+	select lr-qty = count(*)
+		from serials
+	end-select
+	set lf-ok = TRUE
+	transaction begin
+	// mark them all as lost in the stock take
+	select * 
+		from stock-serial-number
+		where stock-code = :lp-stock-code
+		and serial-whse-code = :ws-whse-code
+		and serial-status = I8RS_SERIAL_IN_STOCK
+		for update
+	detail
+		get serials
+			on index s-stock-code s-serial-no
+			key is stock-code serial-no
+		on error
+			set serial-status = I8RS_SERIAL_LOST_IN_STOCK
+			update stock-serial-number
+			on error
+				set lf-ok = FALSE
+			endon
+		endon
+	end-select
+	//
+	select * from serials
+	detail
+		get stock-serial-number
+			on index stock-code serial-no
+			key is lp-stock-code s-serial-no
+			lock
+		on error
+			// serial is missing so add it.
+			initialise stock-serial-number
+			set stock-code = lp-stock-code
+			set serial-no = s-serial-no
+			set serial-status = I8RS_SERIAL_FOUND_IN_STOCK
+			set serial-install-date = today
+			set serial-stock-type = "S"
+			set serial-whse-code = ws-whse-code
+			set serial-secondary-key = s-serial-no
+			insert stock-serial-number
+			on error
+				set lf-ok = FALSE
+			endon
+		else
+		// else  - it is there - check the status
+			if serial-status <> I8RS_SERIAL_IN_STOCK
+				set serial-status = I8RS_SERIAL_FOUND_IN_STOCK
+				update stock-serial-number
+				on error
+					set lf-ok = FALSE
+				endon
+			endif
+		endon
+	endselect
+	//
+	if lf-ok
+		transaction commit
+		set lr-ok = TRUE
+	else
+		transaction rollback
+		set lr-ok = FALSE
+		set lr-qty = 0
+	endif
+	//
+	close serials
+end-procedure
+
+screen rf-serial-scan-screen
+parameters
+	lp-stock-code						like stock-code
+local
+	lf-serial-arr						like serial-no occurs 5  // display the last five so the 
+															 	// user knows what they have done.
+	i									type number
+	window WINDOWSIZE
+	primary serials
+before
+	display "S/N:" @2,3
+detail
+	for i = 1 to occurence(lf-serial-arr)
+		display lf-serial-arr[i] @(i + 4),3
+	end-for
+	accept s-serial-no @3,3
+		help "9) exit"
+	validations
+		if s-serial-no = "9"
+			exit
+		endif
+		get stock-serial-number
+			on index serial-no
+			key is s-serial-no
+		on error ENOREC
+			// this is ok - just means that we have found one
+		else
+			if serial-status not in (
+				I8RS_SERIAL_IN_STOCK
+				I8RS_SERIAL_FOUND_IN_STOCK		// need to include found in case there is a re-count
+				I8RS_SERIAL_LOST_IN_STOCK  
+				)
+				get stock-serial-status-desc
+					on index sssd-status sssd-language
+					key is serial-status spaces
+				on error
+					set sssd-description = "Unknown"
+				endon
+				do vglrfclib-display-message parameters
+					concat(
+					"S/N:" rtrim(serial-no) " is currently at status\n"
+					sssd-description "\n"
+					"You cannot scan this item at this time."
+					"  You will need to resolve this before continuing with the stock take."
+					)
+					6
+				re-enter s-serial-no
+			endif
+		endon
+	end-validations
+confirm auto
+before
+	set  s-stock-code = lp-stock-code
+confirmed
+	if screenmode = entry // always will be, but , just in case...
+		for i = occurence(lf-serial-arr) down to 2
+			set lf-serial-arr[i] = lf-serial-arr[i - 1]
+		end-for
+		set lf-serial-arr[1] = s-serial-no
+	endif
+end-confirm
+after
+	// do not allow escape as that will redisplay mode selection.
+	// we want the screen to stay in entry mode only and exit should
+	// only be via entering a 9
+	back-to-detail
+end-screen
+// rjb log SER-end---------------------------------------------------------------
+
+
+screen get-paras
+returning
+	lr-ok								type boolean
+    allowed entry
+    window WINDOWSIZE
+//		title is "RF Stocktake"
+	no-ok-cancel
+before
+	clear
+    display "Warehouse" @3,3
+    display "Control" @4,3
+    if getenv("DEFWHSE") <> spaces
+        set ws-whse-code = getenv("DEFWHSE")
+    endif
+    get system-user
+        on index sys-comp-code user-id
+        key is sys-consolidation-division login-id()
+    on error
+        set ws-whse-code = spaces
+    else
+        set ws-whse-code = user-whse
+    endon
+	set lr-ok = FALSE
+detail
+    accept ws-whse-code @3,14
+        help "Enter WHSE Code 9)exit"
+        default ws-whse-code
+        uppercase
+    validation
+		if ws-whse-code = "9"
+			exit
+		endif
+        get system-table
+            key is "WH" ws-whse-code
+        on error
+			do vglrfclib-display-message  parameter "Not a WHSE"  4
+            reenter optional
+		else
+			if sys-tbl-sales-mtd <> 0
+				do vglrfclib-display-message parameter "Not a Normal WHSE"  4
+				reenter optional
+			endif
+        endon
+    end-validation
+	accept ws-stc-control-code @4,14
+		help "Stock Take Control Code"
+	validation
+		if uppercase(ws-stc-control-code) = "Q"
+			exit
+		endif
+		get stock-take-control
+			on index stc-control-code
+			key is ws-stc-control-code
+		on error
+			do vglrfclib-display-message parameter "Invalid Control Code"  4
+			reenter optional
+		else
+			if stc-status <> "F" // frozen
+				do vglrfclib-display-message parameter "Control not at correct status"  4
+				reenter optional
+			endif
+		endon
+	end-validations
+	set lr-ok = TRUE
+after
+	// can't escape
+	if not lr-ok
+		back-to-detail
+	endif
+end-screen 
+
+
+procedure find-next-item-to-count
+//
+// The purpose of this routine is to determine the next item in a stock take
+// so that it can be displayed to the user when they are counting.  Note that
+// it takes no notice of whether the item has been counted or not.
+//
+parameters 
+	lp-control							like stc-control-code
+	lp-whse-code						like whse-code
+	lp-bin-location						like stv-bin-location
+	lp-stock-code						like stock-code
+returning
+	lr-stock-code						like stock-code
+	lr-bin-location						like stv-bin-location
+	lr-bulk-location					like stv-bin-location
+//
+	save stock-take-variance
+	save stock-warehouse-detail
+	select *
+		from stv-copy
+		where whse-code = lp-whse-code
+		and stv-control-code = lp-control
+		and stv-count-date-time = 0
+		and (( stv-bin-location >= lp-bin-location )
+			OR
+				(stv-bin-location = lp-bin-location
+				AND stock-code > lp-stock-code)
+				)
+		order by whse-code stv-bin-location stock-code
+	detail
+		set lr-stock-code = stock-code
+		set lr-bin-location = stv-bin-location
+		get stock-warehouse-detail
+			on index stock-code whse-code
+			key is stock-code lp-whse-code
+		on error
+		else
+			set lr-bulk-location = whse-bulk-location
+		endon
+		break // get the first one
+	end
+	restore stock-warehouse-detail
+	restore stock-take-variance
+end-procedure
+
+#ifdef DEBUG
+procedure test
+local
+	lf-ok					type boolean
+	do vglrfclib-confirm parameters are "Enter Y to display message box \n or N to exit program"
+		returning lf-ok
+	if lf-ok
+		do vglrfclib-display-message parameters are "TEst option that is quite long \n\n enter y" 8
+	else
+		exit
+	end
+end
+#endif

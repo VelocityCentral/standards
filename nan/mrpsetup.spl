@@ -1,0 +1,252 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : 
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2019
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: nan/mrpsetup.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 26May19  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+
+#define MFG_FG_SUBSELECT \
+		(select stock-code from stock-master  \
+			where stock-group in ("MGBR" "MGBU" "MGMI")  \
+			and stk-stock-status = 'M')
+
+#define RAW_MAT_SUBSELECT \
+		(select stock-code from stock-master  \
+			where stock-group like 'RM%' \
+			and stk-stock-status = 'R')
+ 
+field
+	ws-function-title						type string
+
+procedure main
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+//	do i8secabt-check-abort
+//		parameters are sys-consolidation-division login-id() "ZUSR" "R004"
+//		returning ws-function-title 
+	do i8proglog-write-log
+	do mrpmenu 
+end-procedure
+
+menu mrpmenu
+	window
+	title "Setup for MRP"
+	tree-menu
+detail
+	option "Remove MPS records" @1,1
+		do remove-mps
+		message "Completed"
+	option "Add MPS Records" @2,1
+		do add-mps
+		message "Completed"
+	option "Set EOQ" @3,1
+		do set-eoq
+		message "Completed"
+	option "Optional Items" @4,1
+		do optional-items
+end-menu
+
+menu optional-items
+	window
+	title "Optional MRP"
+	tree-menu
+detail
+	option "Create a forecast" @1,1
+		spl "nan/budg2fcast"
+	option "Set the shelf life " @2,1
+		do set-shelf-life 
+		message "Completed"
+	option "Set the days cover / Min Stock " @3,1
+		help "min stock will be set to 7 days of the first forecast record older than today"
+		do set-days-cover
+		message "Completed"
+	option "Set planning policy" @4,1
+		help "Finished Goods will be set to weekly and RM's to MOnthly"
+		do set-planning-policy
+		message "Completed"
+	option "Set pack qty" @6,1
+		do set-pack-qty
+		message "Completed"
+	option "Set the lead time" @7,1
+		do set-lead-time 
+		message "Completed"
+	option "Set MPS flag on BOM headers to match MPS Items" @8,1
+		do set-bom-flag-for-mps
+		message "Completed"
+end-menu
+
+procedure set-bom-flag-for-mps
+	sql-update bill-of-materials-header
+		set bom-mps-flag = YES
+		where stock-code in (select prod-parent-code from production-master-schedule)
+end-procedure
+		
+
+
+procedure set-pack-qty
+	sql-update  stock-supplier
+		set sup-pack-qty = 1000
+		where stock-code in MFG_FG_SUBSELECT
+		and cre-accountcode = 'FCT'
+end-procedure
+
+procedure set-lead-time
+	sql-update  stock-supplier
+		set sup-lead-time = 3
+			sup-qa-lead-time = 0
+		where stock-code in MFG_FG_SUBSELECT
+		and cre-accountcode = 'FCT'
+end-procedure
+
+procedure set-shelf-life
+local
+	lf-shelf-life-code					like stk-shelf-life-days
+	// ugly - the field on the stock master is a numeric, but the sys-tbl-code
+	// is alpha.  The system only allow numerics in sys-tbl-code via pgm code
+	message-box param-text("<<P1>><<BR>><<p2>><<BR>><<p3>>"
+		,"This will set shelf life for lot items to the lowest value between 3 and 30 for lot controlled items"
+		,"and blank (0) for the non-lot controlled items"
+		,"Are you sure?")
+		title is "Shelf Life"
+		message-buttons  MSG_BOX_OK_CANCEL
+		icon MSG_BOX_QUESTION
+	if message-status() = MSG_BOX_CANCEL
+		exit
+	endif
+	select *
+		from system-table
+		where sys-tbl-code = "SU"
+		and sys-money-value between 3 and 30
+		order by sys-money-value 
+	detail
+		// take the first one
+		set lf-shelf-life-code = num(sys-tbl-code)
+		break
+	end-select
+	sql-update stock-master
+		set stk-shelf-life-days = :lf-shelf-life-code
+		where stk-serialized-flag = 'L'
+	sql-update stock-master
+		set stk-shelf-life-days = 0
+		where stk-serialized-flag != 'L'
+end-procedure
+
+procedure set-days-cover
+local
+	lf-daily							like whse-min-stock
+	lf-sql-date							type date
+	// set min days cover to 0 because otherwise it screws up 
+	// the planning policy code demos
+	sql-update stock-warehouse-detail
+		set whse-min-days-cover = 0
+		where (stock-code in MFG_FG_SUBSELECT
+			OR stock-code in RAW_MAT_SUBSELECT )
+//		and whse-code in ('W01' 'W02' 'W03')
+	// set min qty based on forecast
+	select *
+		from stock-warehouse-detail
+		where stock-code in MFG_FG_SUBSELECT
+			OR stock-code in RAW_MAT_SUBSELECT 
+		for update
+	detail
+		//  get the first forecast record for the current date
+		set lf-sql-date = today
+		select * from forecast-results
+			where fr-stock-code = :stock-code
+			and fr-whse-code = :whse-code
+			and fr-forecast-start-date >= :lf-sql-date
+		detail
+			set lf-daily = fr-forecast-qty / (fr-forecast-end-date - fr-forecast-start-date + 1)
+		end-select
+		set whse-min-stock = lf-daily * 7
+		update stock-warehouse-detail
+	end-select
+end-procedure
+
+procedure set-planning-policy
+	sql-update stock-master
+		set stk-reorder-review = 'W'
+		where stock-code in MFG_FG_SUBSELECT
+	sql-update stock-master
+		set stk-reorder-review = 'M'
+		where stock-code in RAW_MAT_SUBSELECT
+end-procedure
+
+procedure remove-mps
+	sql-delete ALL production-master-schedule
+end-procedure
+
+procedure add-mps
+	// only create mps records for manufactured items
+	// that are not configured
+	// and a published forecast exits
+	select *
+		from stock-master as t0
+		where t0.stk-stock-status = 'M'
+		and t0.stk-issue-control-code != 'F'
+		and exists (select fs-stock-code 
+					from forecast-stats
+					where fs-stock-code = t0.stock-code
+					and fs-forecast-type = ' ')
+	detail
+		initialise production-master-schedule
+		set prod-parent-code = stock-code
+		set prod-whse-code = 'FCT'
+		set prod-manufacture-flag = 'M'
+		set prod-firm-planned-period  = 14
+		set prod-approval-reqd-period = 7
+		insert production-master-schedule
+	end-select
+end-procedure
+
+procedure set-eoq
+local 
+	lf-count					type number
+	lf-min-stock 				type number
+	select * from stock-supplier
+		where cre-accountcode = 'FCT'
+		for update
+	detail
+		// don't process items that aren't MPS items
+		select lf-count = count(*)
+			from production-master-schedule
+			where prod-parent-code = :stock-code
+		end-select
+		if lf-count = 0
+			continue
+		endif
+		// total the min stock for all warehouses supplied by this factory
+		select lf-min-stock = sum(whse-min-stock)
+			from stock-warehouse-detail
+			where stock-code = :stock-code
+			and whse-code in (select sys-tbl-code 
+				from system-table
+				where sys-tbl-type = 'WH'
+				and sys-tbl-alpha-3 = :cre-accountcode)
+		end-select
+		//
+		// determine the EOQ
+		// Add 20% to the min stock and round to nearest 10.
+		//
+		set sup-economic-order-qty = 
+			(integer((lf-min-stock * 1.2) // add 20%
+			/ 10)
+			+ 1) * 10
+		update stock-supplier
+	end-select
+end-procedure

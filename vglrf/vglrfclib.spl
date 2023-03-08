@@ -1,0 +1,560 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : Clibs to support barcoding 
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2011
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: c:\usr\pronto\cus\sample\rayb\vglrfclib.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 24Mar11	rayb		written
+////////////////////////////////////////////////////////////////////////////////
+
+field 
+	ws-max-rows							type number
+	ws-max-cols							type number
+
+//#include "include/i5sostatii.spl"
+#include "include/i8ologdesc.spl"
+
+link "clib/clibcvt"
+
+procedure library-init 
+	get system-control first 
+	on error
+		abort "No Control Record (clib)"
+	endon
+	if get-env("TERM") = "vt100" or get-env("TERM") = "vt220"
+		set ws-max-cols = num(get-env("COLUMNS"))
+		set ws-max-rows = num(get-env("LINES"))
+	else
+		set ws-max-cols = max-screen-columns()
+		set ws-max-rows = max-screen-rows()
+		if ws-max-cols > 80
+			set ws-max-cols = 80
+		endif
+		if ws-max-rows > 24
+			set ws-max-rows = 24
+		endif
+	endif
+end-procedure
+
+procedure vglrfclib-get-default-warehouse export
+returning 
+	lr-whse-code						like whse-code
+//
+	set lr-whse-code = sys-default-whse
+	get system-user
+		on index user-id sys-comp-code
+		key is login-id sys-consolidation-division
+	on error
+	else
+		if user-whse <> spaces
+			set lr-whse-code = user-whse
+		endif
+	endon
+end-procedure
+
+procedure vglrfclib-get-pic-clause export
+parameters
+//
+//  You can call this with either a unit of measure description 
+//  or a stock code
+//
+	lp-input							type string
+returning
+	lr-pic-clause						type string
+local
+	i									type number
+	lf-no-decs							type number
+//
+//  Return a pic clause suitable for displaying numerics for a given
+//  stock-code
+//
+	set lf-no-decs = sys-default-no-of-decimals
+	get system-table
+		on index sys-tbl-type sys-tbl-code
+		key is "UM" lp-input
+	on error
+		// maybe passed a stock-code
+		get stock-master
+			on index stock-code
+			key is lp-input
+		on error
+		else
+			get system-table
+				on index sys-tbl-type sys-tbl-code
+				key is "UM" stk-unit-desc
+			on error
+			else
+				if sys-tbl-alpha-1 = "Y"
+					set lf-no-decs = sys-money-value
+				endif
+			endon
+		endon
+	else
+		if sys-tbl-alpha-1 = "Y"
+			set lf-no-decs = sys-money-value
+		endif
+	endon
+	if lf-no-decs = 0
+		set lr-pic-clause = "s(9)"
+	else
+		set lr-pic-clause = "s(9)."
+		for i = 1 to lf-no-decs
+			string lr-pic-clause appending "9"
+		endfor
+	endif
+end-procedure
+
+procedure vglrfclib-screen-size export
+returning
+	lr-cols								type number
+	lr-rows								type number
+//
+//  All RF programs call this routine.  If you change 
+//  the screen size on the device you should change it here
+	set lr-cols = ws-max-cols
+	set lr-rows = ws-max-rows
+endprocedure
+
+procedure vglrfclib-validate-product export
+parameters are
+	lp-scan								type string
+	lp-allowed-stock-code				like stock-code
+returning
+	lr-ok								type boolean
+	lr-stock-code						like stock-code
+	lr-qty								type number
+	lr-serial-lot						pic x(40) type string 
+	lr-message							pic x(128) type string
+	//
+	set lr-ok = FALSE
+	set lr-qty = 1
+	set lr-message = spaces
+	get stock-master
+		on index stock-code
+		key is lp-scan
+	on error
+		set lr-ok = FALSE
+	else
+		if lp-allowed-stock-code = spaces or stock-code = lp-allowed-stock-code
+			set lr-stock-code = stock-code
+			set lr-ok = TRUE
+			exit
+		endif
+	endon
+	// Try GTIN
+	select * from stock-unit-conversion
+		where suc-trade-unit-no = lp-scan
+		and (lp-allowed-stock-code = spaces or stock-code = lp-allowed-stock-code)
+		order by suc-trade-unit-no stock-code suc-unit-desc
+	detail
+		set lr-qty = suc-unit-conversion
+		set lr-stock-code = stock-code
+		set lr-ok = TRUE
+		exit
+	end-select
+	// try APN Number
+	get stock-master
+		on index stk-apn-number
+		key is lp-scan
+	on error
+	else
+		if lp-allowed-stock-code = spaces or stock-code = lp-allowed-stock-code
+			set lr-qty = 1
+			set lr-stock-code = stock-code
+			set lr-ok = TRUE
+			exit
+		endif
+	endon
+	// try supplier stock code
+	select * from stock-supplier
+		where sup-stock-code = :lp-scan
+		order by sup-stock-code stock-code
+	detail
+		if lp-allowed-stock-code = spaces or stock-code = lp-allowed-stock-code
+			set lr-stock-code = stock-code
+			set lr-qty = 1
+			set lr-ok = TRUE
+			exit
+		endif
+	end-select
+	//
+	// try manufacturers part number and colloqial names
+	//
+	// Note that for Manufacturers part number and colloqial names to work you
+	// need to have those note types indexed in keywords.  This is done by
+	// creating 2 KN entries in the system table with sys-tbl-code set to ##
+	// for the manufacturers part no and ** for colloquial names.
+	//
+	select * from stock-key-words
+		where stock-key-word = lp-scan
+		order by stock-key-word
+	detail
+		select * from stock-notes
+			where stock-code = :stock-code
+			and stock-note-type in ( "##" "**" )
+			and substring(stock-note,1,20) = lp-scan
+			order by stock-code stock-note-type stock-note-sequence
+		detail
+			// we found one
+			if lp-allowed-stock-code = spaces or stock-code = lp-allowed-stock-code
+				set lr-stock-code = stock-code
+				set lr-qty = 1
+				set lr-qty = num(substring(stock-note,21,30))
+				if lr-qty = 0
+					set lr-qty = 1
+				endif
+				set lr-ok = TRUE
+				exit
+			endif
+		end-select
+	end-select
+	//
+	// try serial number
+	//
+// rjb log SER-start-------------------------------------------------------------
+	select * from stock-serial-number
+		where serial-no = lp-scan
+	detail
+		if lp-allowed-stock-code = spaces or stock-code  = lp-allowed-stock-code
+			set lr-stock-code = stock-code
+			set lr-serial-lot = lp-scan
+			set lr-qty = 1
+			set lr-ok = TRUE
+			exit
+		endif
+	end-select
+// rjb log SER-end---------------------------------------------------------------
+	set lr-message = "Could not identify stock code"
+	// TODO: Allow scanning of serial numbers and Lot numbers
+end-procedure
+
+procedure vglrfclib-check-can-override-qty export
+parameters 
+	lp-stock-code						like stock-code
+returning 
+	lr-can-override-qty					type boolean
+//
+	set lr-can-override-qty = FALSE
+	// should really change the following so that it uses a 
+	// zvg.Snnn module / function code.
+//	if login-id = "rayb"
+//		set lr-can-override-qty = TRUE
+//	endif
+	// change the rules to suit
+	get stock-master
+		on index stock-code
+		key is lp-stock-code
+	on error
+		exit
+	else
+		if stk-movement-code = 'H'
+			set lr-can-override-qty = TRUE
+		endif
+	endon
+end-procedure
+
+
+procedure vglrfclib-validate-order-no export
+//
+//  This routine takes an string that contains an order number and any suffix.
+//  It extracts the suffix and order number component and returns these to the
+//  calling rouinte.
+//
+parameters 
+	lp-string								type string
+	lp-archive-flag							pic x(20)
+returning
+	lr-ok									type boolean
+	lr-order-no								like so-order-no
+	lr-bo-suffix							like so-bo-suffix
+//
+//	Input is a valid string
+//	Output is an indication of whether it is a valid order or not
+//	the the order no split up.
+	set lr-ok = FALSE
+	// if there is a dot, then remove it
+	// This is used by m5delfifo to indicate there is no suffix
+	//
+	if pattern(lp-string,".")
+		set lp-string = substring(lp-string,1,pattern(lp-string,".") - 1)
+	endif
+	if valid-number(lp-string)
+		set lr-order-no = num(lp-string)
+		set lr-bo-suffix = spaces
+		do check-order-no parameters are lr-order-no lr-bo-suffix lp-archive-flag
+			returning lr-ok
+	else
+		if valid-number(substring(lp-string,1,str-len(lp-string) - 1))
+			set lr-order-no = num(substring(lp-string,1,str-len(lp-string) - 1))
+			set lr-bo-suffix = uppercase(substring(lp-string,str-len(lp-string),str-len(lp-string)))
+			do check-order-no parameters are lr-order-no lr-bo-suffix lp-archive-flag
+				returning lr-ok
+		elseif valid-number(substring(lp-string,1,str-len(lp-string) - 2))
+			set lr-order-no = num(substring(lp-string,1,str-len(lp-string) - 2))
+			set lr-bo-suffix = uppercase(substring(lp-string,str-len(lp-string) - 1,str-len(lp-string)))
+			do check-order-no parameters are lr-order-no lr-bo-suffix lp-archive-flag
+				returning lr-ok
+		endif
+	endif
+end-procedure
+
+procedure check-order-no
+//
+//  This is a simple routine to validate that the given order exists.
+//
+parameters 
+	lp-order-no								like so-order-no
+	lp-bo-suffix							like so-bo-suffix
+	lp-archive-flag							pic x(20)
+returning
+	lr-ok									type boolean
+//
+	set lr-ok = TRUE
+	get sales-order
+		on index so-order-no so-bo-suffix
+		key is lp-order-no lp-bo-suffix
+	on error
+		if lp-archive-flag = "-archive"
+			get sales-order-archive
+				on index so-order-no so-bo-suffix
+				key is lp-order-no lp-bo-suffix
+			on error
+				set lr-ok = FALSE
+			endon
+		else
+			set lr-ok = FALSE
+		endif
+	endon
+end-procedure
+
+/*
+	The purpose of all of the following routines is provide
+	a black-box message and confirmation handler that will
+	work in wide variety of screen sizes and be independant
+	of whether the user is using proterm/proclient or a standard telnet interface
+*/
+
+procedure vglrfclib-display-message export
+parameters
+	lp-message							pic x(1024) type string
+	lp-bells							type number
+//
+// the purpose of this is to have a generalised message handling
+// routine that will deal with different screen sizes 
+//
+//
+	window @1,1 to @ws-max-rows,ws-max-cols
+	no-hide
+ 	do display-message-box parameters are lp-message lp-bells
+	pause
+end-procedure
+
+procedure vglrfclib-confirm export
+parameters
+	lp-message							pic x(1024) type string
+returning
+	lr-ok								type boolean
+	do confirm-screen entry once
+		parameters are lp-message
+		returning lr-ok
+end-procedure
+
+screen confirm-screen 
+parameters
+	lp-message							pic x(1024) type string
+returning
+	lr-ok								type boolean
+local 
+	lf-ok								pic x
+	window @1,1 to @ws-max-rows,ws-max-cols
+	allowed entry
+	no-ok-cancel
+//
+//  The purpose of this routine is to provide a simple Y/N
+//  confirm that can be used at any point in a screen (even if the screen
+//  already has a confirm).  This is needed because message-box function
+//  is not supported on dumb terminals
+//
+before
+	do display-message-box parameters are lp-message 3
+	set lr-ok = FALSE
+detail
+	accept lf-ok @ws-max-rows - 2 ,ws-max-cols - 2
+		help "Enter Y or N"
+		allowed YES NO
+		uppercase
+	validations
+		if lf-ok = YES 
+			set lr-ok = TRUE
+		else
+			set lr-ok = FALSE
+		endif
+	end-validations
+end-screen
+
+procedure display-message-box
+parameters
+	lp-message							pic x(1024) type string
+	lp-bell-rings						type number									
+local 
+	lf-message							pic x(128) type string occurs 24
+	i									type number
+	lf-pic								pic x(20)
+//
+	if lp-bell-rings > 0
+		for i = 1 to lp-bell-rings
+			display " " @1,1 bell
+		end-for
+	endif
+	clear
+	box  @1,1 to @ws-max-rows - 2,ws-max-cols
+	set lf-pic = concat("x(",str(ws-max-cols - 2),")")
+	do break-line parameters are lp-message returning lf-message[*]
+	for i = 1 to ws-max-rows - 4
+		display str-concat(lf-message[i]) 
+			pic lf-pic @i + 1,2 background
+	end-for
+end-procedure
+
+procedure break-line
+parameters are
+	lp-message							pic x(1024)
+returning
+	lr-message							pic x(128) occurs 24
+local
+	lf-max								type number
+	i									type number
+	j									type number
+//
+	set lf-max = ws-max-cols - 2
+	set lr-message[*] = spaces
+	set i = 1
+	while str-len(lp-message) > 1 and i < 24
+		// check for new line
+		if pattern(lp-message,"\\n") <= lf-max and pattern(lp-message,"\\n") > 0
+			// ensure there are no trailing spaces
+			set lr-message[i] = rtrim(substring(lp-message,1,pattern(lp-message,"\\n") - 1))
+			string lp-message deleting 1 to pattern(lp-message,"\\n") + 1
+			// ensure there are no leading spaces:
+			set lp-message = ltrim(lp-message)
+		else
+			// if the string is less than the max, then just use it
+			if str-len(lp-message) <= lf-max
+				set lr-message[i] = lp-message
+				exit
+			else
+				// find the last space
+				for j = lf-max down to 1 //step -1
+					if substring(lp-message,j,j) = space
+						break
+					endif
+				end
+				// if you find a space use it
+				if j > 1
+					set lr-message[i] = substring(lp-message,1,j)
+					string lp-message deleting 1 to j
+				else // otherwise grab the whole string
+					set lr-message[i] = substring(lp-message,1,lf-max)
+					string lp-message deleting 1 to lf-max
+				endif
+			endif
+		endif
+		// trim any leading spaces
+		set lr-message[i] = ltrim(lr-message[i])
+		set i += 1
+	end-while
+end-procedure
+
+menu vglrfclib-select-warehouse export
+	window @1,1 to @ws-max-rows - 1, ws-max-cols - 1
+returning 
+	lr-whse						like whse-code
+local
+	lf-whses					like whse-code occurs 20
+	lf-option-text				pic x(10) occurs 20
+	i							type number
+before 
+	box
+	clear
+	select * from system-table
+		where sys-tbl-type = "WH" 
+	detail
+		set i += 1
+		set lf-whses[i] = sys-tbl-code
+		set lf-option-text[i] = concat(str(i) "." sys-tbl-code)
+	end-select
+detail
+	option lf-option-text[1] @2,2
+		when i >= 1
+		set lr-whse = lf-whses[1]
+	option lf-option-text[2] @3,2
+		when i >= 2
+		set lr-whse = lf-whses[2]
+	option lf-option-text[3] @4,2
+		when i >= 3
+		set lr-whse = lf-whses[3]
+	option lf-option-text[4] @5,2
+		when i >= 4
+		set lr-whse = lf-whses[4]
+	option lf-option-text[5] @6,2
+		when i >= 5
+		set lr-whse = lf-whses[5]
+	option lf-option-text[6] @7,2
+		when i >= 6
+		set lr-whse = lf-whses[6]
+	option lf-option-text[7] @8,2
+		when i >= 7
+		set lr-whse = lf-whses[7]
+	option lf-option-text[8] @9,2
+		when i >= 8
+		set lr-whse = lf-whses[8]
+	confirm auto
+	confirmed
+		exit
+	end-confirm
+end-menu
+
+procedure vglrfclib-get-picking-data export
+parameters
+	lp-order-no								like so-order-no
+	lp-bo-suffix							like so-bo-suffix
+returning
+	lr-ok									type boolean
+	lr-pick-date							type date
+	lr-pick-complete-time					type time
+	lr-pick-duration-secs					type number
+	lr-picker								like ordlog-login-id
+local
+	lf-count								type number
+	//
+	set lr-ok = FALSE
+	// look for any picking completed records in the audit file
+	select * from sales-audit-file
+		where so-order-no = :lp-order-no
+		and so-bo-suffix = :lp-bo-suffix
+		and ordlog-type  = I8OLOG_PICKING_COMPLETED
+		and saf-program-name = "vglrf/vglrfpick"
+	detail
+		// just keep reading until we get to the last one
+		// I count them up just because we cannot have a
+		// detail/end-select with nothing in between
+		set lf-count += 1
+	end-select
+	if lf-count > 0
+		// then there was at least one and we are positioned on the last
+		set lr-ok = TRUE
+		set lr-pick-date = order-log-date
+		do clibcvt-time parameters are ordlog-new-info 
+			returning lr-pick-complete-time
+		set lr-pick-duration-secs = ordlog-change-value
+		set lr-picker = ordlog-login-id
+	endif
+end-procedure

@@ -1,0 +1,338 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : Bell curve demand analysis
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2019
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: clib/clibvdemand.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 04May19  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+//
+/*
+	This documentation is in RST format.  To view this as a nice pdf goto
+	https://overbits.herokuapp.com/rsteditor/ or rst.ninjs.org  and paste this content.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|           |           |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+
+	Alternatively
+
+	 =========== =========== ======================================================== 
+	  Direction   Data Type   Description                                             
+	 =========== =========== ======================================================== 
+	 =========== =========== ======================================================== 
+
+===========
+clibvdemand
+===========
+
+	A collection of demand related functions that returns some statistical analysis for 
+	working with bell curves.
+
+	In all cases each routine is called with a 120 element array of numbers and the second
+	parameter is the number of elements used
+
+clibvdemand-mean 
+~~~~~~~~~~~~~~~~
+
+	Returns the mean
+
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |number     |Array of values to analyse                              |
+	|           |occurs 100 |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |Number     |The number of elements of the array in use              |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |Number     |The mean                                                |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvdemand-stddev 
+~~~~~~~~~~~~~~~~~~
+
+	Standard Deviation of values
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |number     |Array of values to analyse                              |
+	|           |occurs 100 |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |Number     |The number of elements of the array in use              |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |Number     |The standard deviation                                  |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvdemand-median 
+~~~~~~~~~~~~~~~~~~
+
+	The median value of the elements used
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |number     |Array of values to analyse                              |
+	|           |occurs 100 |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |Number     |The number of elements of the array in use              |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |Number     |The median value                                        |
+	+-----------+-----------+--------------------------------------------------------+
+
+
+clibvdemand-pcs 
+~~~~~~~~~~~~~~~
+	Pearsons coefficient of skewness using median.
+	this should tell you where outliers might lie and how far out they are.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |number     |Array of values to analyse                              |
+	|           |occurs 100 |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |Number     |The number of elements of the array in use              |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |Number     |Pearsons Coefficient                                    |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvdemand-skew 
+~~~~~~~~~~~~~~~~
+	skewness tells you how far a normal distribution is skewed to one end or
+	the other
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |number     |Array of values to analyse                              |
+	|           |occurs 100 |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |Number     |The number of elements of the array in use              |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |Number     |Skewness                                                |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvdemand-kurtosis 
+~~~~~~~~~~~~~~~~~~~~
+	Kurtosis tells you how high the bell is compared with the tail
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |number     |Array of values to analyse                              |
+	|           |occurs 100 |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |Number     |The number of elements of the array in use              |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |Number     |Kurtosis                                                |
+	+-----------+-----------+--------------------------------------------------------+
+
+*/
+
+#define MAXELEMENTS 120 // allows for 10 years of 12 periods each
+#include "../include/i8proglogparam.spl"
+ 
+procedure library-init
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8proglogparam-write-log parameters are "clibvdemand"
+end-procedure
+
+procedure clibvdemand-mean export
+parameters
+	lp-values						type number occurs MAXELEMENTS
+	lp-eu							type number // elements used
+returning
+	lr-mean							type float
+	//
+	set lr-mean = SUM-ARRAY(lp-values,1,lp-eu) / lp-eu
+end-procedure
+
+procedure clibvdemand-stddev export
+parameters
+	lp-values						type number occurs MAXELEMENTS
+	lp-eu							type number // elements used
+returning
+	lr-sd							type number
+local
+	lf-work							type float occurs MAXELEMENTS
+	lf-mean							type float
+	i								type number
+	//
+	do clibvdemand-mean parameters are lp-values lp-eu
+		returning lf-mean
+	for i = 1 to lp-eu
+		set lf-work[i] = lp-values[i] - lf-mean // difference from the mean
+		set lf-work[i] = lf-work[i] * lf-work[i] // square the result
+	end-for
+	// caluclate the mean of the squared differences
+	set lr-sd = sum-array(lf-work,1,lp-eu) / lp-eu
+	set lr-sd = square-root(lr-sd)
+end-procedure
+
+procedure clibvdemand-median export
+parameters
+	lp-values						type number occurs MAXELEMENTS
+	lp-eu							type number // elements used
+returning
+	lr-median						type number
+local
+	lf-array						type number occurs MAXELEMENTS
+	//
+	do sort-array parameters are lp-values, lp-eu returning lf-array
+	if lp-eu % 2 = 0
+		set lr-median = sum-array(lf-array,
+			integer(lp-eu / 2),
+			integer(lp-eu / 2) + 1) / 2
+	else
+		set lr-median = lf-array[ integer(lp-eu / 2) + 1 ]
+	endif
+end-procedure
+
+procedure clibvdemand-pcs export
+// pearsons coefficient of skewness using median.
+// this should tell you where outliers might lie and how far out they are.
+parameters
+	lp-values						type number occurs MAXELEMENTS
+	lp-eu							type number // elements used
+returning
+	lr-pcs							type number
+local
+	lf-mean							type float
+	lf-median						type float
+	lf-stddev						type float
+	//
+	do clibvdemand-mean parameters are lp-values lp-eu returning lf-mean
+	do clibvdemand-median parameters are lp-values lp-eu returning lf-median
+	do clibvdemand-stddev parameters are lp-values lp-eu returning lf-stddev
+	//
+	set lr-pcs = (3 * ( lf-mean - lf-median)) / lf-stddev
+end-procedure
+
+procedure clibvdemand-skew export
+// skewness tells you how far a normal distribution is skewed to one end or
+// the other
+parameters
+	lp-values						type number occurs MAXELEMENTS
+	lp-eu							type number // elements used
+returning
+	lr-skew							type float
+local
+	lf-work							type float occurs MAXELEMENTS
+	i								type number
+	lf-mean							type float
+	lf-skew-numerator				type float
+	lf-skew-denominator				type float
+	// a skewness greater than 1 is highly skewed.
+	// between .5 and 1 is moderately skewed 
+	// less than .5 is moderately skewed.
+	//
+	// The formula is the 
+	// (the mean of the differences between actual and mean) cubed
+	// -----------------------------------------------------------
+	// the 3/2 root of ((the mean of the differences) squared)
+	//
+	do clibvdemand-mean parameters are lp-values lp-eu returning lf-mean
+	for i = 1 to lp-eu
+		set lf-work[i] = lp-values[i] - lf-mean
+		set lf-work[i] = power-of(lf-work[i],3)
+	end-for
+	set lf-skew-numerator = sum-array(lf-work,1,lp-eu) / lp-eu
+	// 
+	// denominator
+	//
+	set lf-work[*] = 0
+	for i = 1 to lp-eu
+		set lf-work[i] = lp-values[i] - lf-mean
+		set lf-work[i] = power-of(lf-work[i],2)
+	end-for
+	set lf-skew-denominator = sum-array(lf-work,1,lp-eu) / lp-eu
+	set lf-skew-denominator = power-of(lf-skew-denominator, 1.5)
+	set lr-skew = lf-skew-numerator / lf-skew-denominator
+end-procedure
+
+procedure clibvdemand-kurtosis export
+// kurtosis tells you how high the bell is compared with the tail
+parameters
+	lp-values						type number occurs MAXELEMENTS
+	lp-eu							type number // elements used
+returning
+	lr-kurtosis						type float
+local
+	lf-work							type float occurs MAXELEMENTS
+	i								type number
+	lf-mean							type float
+	lf-k-numerator				type float
+	lf-k-denominator				type float
+	// a skewness greater than 1 is highly skewed.
+	// between .5 and 1 is moderately skewed 
+	// less than .5 is moderately skewed.
+	//
+	// The formula is the 
+	// (the mean of the differences between actual and mean) to the 4th power
+	// -----------------------------------------------------------
+	// the square  of ((the mean of the differences) squared)
+	//
+	// less three.
+	//
+	do clibvdemand-mean parameters are lp-values lp-eu returning lf-mean
+	for i = 1 to lp-eu
+		set lf-work[i] = lp-values[i] - lf-mean
+		set lf-work[i] = power-of(lf-work[i],4)
+	end-for
+	set lf-k-numerator = sum-array(lf-work,1,lp-eu) / lp-eu
+	// 
+	// denominator
+	//
+	set lf-work[*] = 0
+	for i = 1 to lp-eu
+		set lf-work[i] = lp-values[i] - lf-mean
+		set lf-work[i] = power-of(lf-work[i],2)
+	end-for
+	set lf-k-denominator = sum-array(lf-work,1,lp-eu) / lp-eu
+	set lf-k-denominator = power-of(lf-k-denominator, 2)
+	set lr-kurtosis = (lf-k-numerator / lf-k-denominator) - 3
+end-procedure
+
+procedure sort-array
+parameters
+	lp-values						type number occurs MAXELEMENTS
+	lp-eu							type number // elements used
+returning
+	lp-values						// type number occurs MAXELEMENTS
+local
+	i								type number
+	lf-swaps						type number
+	lf-hold							type number
+//
+	repeat
+		set lf-swaps = 0
+		for i = 1 to lp-eu - 1
+			if lp-values[i] > lp-values[i + 1]
+				set lf-hold = lp-values[i]
+				set lp-values[i] = lp-values[i + 1]
+				set lp-values[i + 1] = lf-hold
+				set lf-swaps += 1
+			endif
+		end-for
+	until lf-swaps = 0
+	end-repeat
+end-procedure
+
+
+
+

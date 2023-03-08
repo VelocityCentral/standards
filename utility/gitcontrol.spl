@@ -1,0 +1,2448 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : Git control files
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2023
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: utility/gitcontrol.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 30Jan23  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+//
+/*
+
+==========
+gitcontrol
+==========
+
+Overview
+~~~~~~~~
+	
+	GIT (don't bother looking for an acronym - its all nonsense) is a web based source control system.
+	It is not like other SCS's.  Do not expect to find a check-out check-in processs.  It was created
+	by Linus Torvald to manage linux development with many different collaborators.  Since then it has
+	been widly adopted by the open source community.
+
+	Under linux, git is managed with a number of commands entered on the command line.  They all start with
+	git.  Examples are "git add" and "git push". 
+	**The main purpose of this program is to execute those commands in a Pronto environment wihout the user
+	needing to understand the commands and their options**
+	RHEL and Ubuntu both come with the git commands installed by default.
+
+	We expect the user to install github desktop (using samba to map managed folders) to provide access to timelines 
+	of changes.
+
+	You will need your own github account (see below).  Velocity has a github account that we can all access.  It is 
+	called VelocityCentral.  There are (will be) a number of repos here.  The most important of which is the standards
+	library.
+
+Setup overview
+--------------
+
+	The first step is to create a git account.  You will need to find the git web site and create an account.
+	The second step is to talk to Ray about getting invited to the velocity repos.  While most of GIT is 
+	structured to support the open source community, Velocity's use is a closed environment where only 
+	selected users have access to repositories.  Some repos maybe be open for you to change, others may 
+	be available for you to download only.
+	
+	On each machine that you work with you will need to create an ssh key and record that key in the repo.
+	This program will help you with that.
+
+	The next step is to decide whether you are creating a new repo or attaching to an existing repo.  
+	Either way, you will need a folder structure on the local machine.  Having created (or determined) a folder 
+	to use, it must be initialised for git.  The result of this will be a hidden folder (.git) that exists as a sub-folder
+	of your selected folder and a hidden file (.gitignore) that essentially determines which files will be in the repo
+	(for example we only source files :.spl, .http, .xml, .txt)
+	
+	Finally you will need to create a link between the existing folder and the remote repo.
+
+	Once all of that is complete you can begin making changes to source files, testing and pushing
+	your changes to the remote.
+
+General Operations
+------------------
+
+	Write code in the normal manner.
+
+	Select this (gitcontrol) program daily and review the status by selecting the changes option.
+	The messages in first screen section are important to review.  This should tell you what things
+	you need to do next.
+	
+	This looks at the folder that is being managed and lists all the files that have changed in the local copy.
+
+	Files that marked "waiting add" should be added to the set of local changes by selecting the "Add" mode on the screen.
+	This will record them as being part of the set of tracked changes.
+
+	When you complete a piece of work you will need to select the commit operation.
+
+	Use the Log option on the main folder screen to see and review the history of commit operations.
+
+Cucial concepts
+---------------
+
+Repository
+++++++++++
+	
+	A repository (commonly abbreviated to "repo") is the main 'thing' that is being managed by GIT.
+	In terms of a Velocity Pronto repo, this will be a folder structure, and typically, a single folder,
+	though there is no reason why this could not be a customer's cus structure.
+
+Branch
+++++++
+
+	A branch is a "version" of the repo.  The repo could have multiple branches.  A branch could be created for
+	a pronto version, or it could be created for a major project (or both).
+
+Commit
+++++++
+
+	The github commit command should be used to commit each piece of work.  The commit operation prompts for
+	a comment.  This comment should be used to identify relatively small parcels of work.  A ticket number
+	for example.  Be clear about the difference between commit comments and branches.
+
+Clone
++++++
+
+	The clone opepration is used to create a copy of a repoistory on the local machine.  You will run this
+	only ONCE.  Having specified a folder (which must not exist), a url for the github repo and a particular
+	branch, the clone operation will copy everything in the repo for that branch to the specified folder.
+	This program will also apply the necessary configurations to make it work ongoing.
+
+Local Changes vs Remote Changes
++++++++++++++++++++++++++++++++
+
+	Changes are made on the local machine.  As each change is made a "git add" command is required to add the
+	file to the set of files in your current suite of changes.
+
+	When testing is complete a "git commit" should be made to record these changes in the local repository with
+	some kind of comment.  
+
+	So far everything is done on the local machine.
+
+	Eventually your changes are "pushed" to the server, specifiying a "branch".  This is when your changes are recorded 
+	on the remote server.
+
+SSH
++++
+
+	An important part of the integration is the need and use of an SSH key.  This program should do most of the work
+	for you.  There are these components:  
+
+		#. Key creation (ssh-keygen)
+		#. Creating the known hosts file (ssh-keyscan)
+		#. Creating a config file (a text file in the users .ssh folder)
+		#. recording of the ssh command (git config)
+
+	The SSH key gets created and there is an option to display the key.  This key MUST be registed in YOUR GITHUB account.
+	Note that if you are invited to collaborate in a repo that is not in your account, the key does NOT need to be recorded
+	against the collaboration account.  Only YOUR account.  On your github account you will have a (single) separate 
+	SSH key for each MACHINE from which you access github.
+
+	Big Note:  The SSH key as displayed in the github site does not look like the public key that is displayed.  They are
+	encrypted differently.
+
+	The ssh command uses the recorded SSH key when executing any commands.  The ssh command is stored in the git config
+	file.
+
+	The config file is $HOME/.ssh/config.  It should look like this:
+
+Config file::
+	
+	Host github.com
+		User git
+		IdentityFile /home/rayb/.ssh/github
+
+gitignore
++++++++++
+
+	The gitignore file is a hidden file in the toplevel folder that contains a list of files to ignore.
+	This system says ignore EVERYTHING EXCEPT the following.....
+
+README
+++++++
+
+	It is pretty much de-rigueur that a README file is created in the folder that is being shared.  People using github 
+	will look for this file and are expecting to find a short description of what this code is all about.
+
+	It is a velocity Standard that the README file is in rst format.  (This documentation is an example of rst).
+	IF you are unsure how to use RST request a copy of the "HowToUseRST" document from Ray.
+
+Standards Repo
+++++++++++++++
+
+	This repository will contain all the code from the standards library.  This is generic code that can be used in 
+	any site.  IT IS NOT FREE.  This code (as with all code) is Velocity Copyright.   You can ONLY use it on 
+	Velocity MANAGED on-premise sites.
+
+	The code may be used on PHS sites, provided it is only accessed by Velocity Staff.  If the site is shared 
+	(for example Motion Industries - where there are some companies managed by PHS and some by Velocity) only
+	the load code may exist on the PHS site. Source must not be available on these machines.
+
+
+Setup
+~~~~~
+
+Setting up an account
+---------------------
+
+	Goto github.com and select the sign up option.  
+
+Getting invited
+---------------
+
+	Send an email with your github account to Ray.  He will invite you to be a collaborator on the VelocityCentral
+	account.
+
+Creating an SSH key
+-------------------
+
+	The program should manage this for you.  From the main menu select SSH option.
+
+	If you do not have an ssh key then the program will execute an ssh-keygen command.  
+	Ssh keys are stored in a hidden folder (.ssh) in your home folder. Two files are created, a private and
+	a public key.  The private key is called github and the public key is called github.pub.
+
+	You will notice two other files are also created: a known_hosts file and a config file.  
+	This is most important for the program to function correctly.
+
+	Once an ssh-key has been generated this *MUST* to be recorded against your user profile in the GITHUB website.
+	This will be required for EACH machine that you use to access github.
+
+Putting an existing folder into GIT
+-----------------------------------
+
+	* Ensure SSH has been setup correctly using the menu option.
+	* Setup a repository in Github to mirror a folder tree on the local machine (i.e. this one) 
+	* Use this program to select a folder and initialise it
+	* Register the key from the local machine on Github
+	* Find the SSH path in Github and define a remote repository in this program
+	* Do an initial Push of all code to the remote
+
+Establishing a local copy of an already existing GIT repository
+---------------------------------------------------------------
+
+	* Ensure SSH has been setup correctly using the menu option.
+	* Register the key from the local machine on Github (May need to be done by the admin)
+	* Check the repo on github and determine the address from the "Code" option at the top of the repo. 
+	  (Use the SSH option)
+	* Check the branches from the branch dropdown on the LHS of the repo on the github website
+	* Select the CLONE option from the main menu,
+
+
+Reference Section
+~~~~~~~~~~~~~~~~~
+
+You do not necessarily need to know all these.  The program executes them for you.
+
+Local only commands
+-------------------
+
+	================ ==================================================================================
+	Command          Description
+	================ ==================================================================================
+	git init         Initialises the structure and creates the .git folder
+	---------------- ----------------------------------------------------------------------------------
+	git config       A variety of options to config git.  Options are stored in the .git config file.
+                     Some options for adding new configurations and some for listing the config details
+	---------------- ----------------------------------------------------------------------------------
+	git add          Adds the file to the set of files being tracked on the local machine.
+	---------------- ----------------------------------------------------------------------------------
+	git commit       Commit local changes
+	                 Note that this program uses the -a option will automatically perform a git add
+					 on any files that have been changed but not yet "git added".  **HOWEVER: new files
+					 that are part of set of tractked files are NOT committed**.  A manual ADD must be
+					 perfomed on these files.
+	---------------- ----------------------------------------------------------------------------------
+	git restore      Drop a set of changes and revert to a known good point
+	---------------- ----------------------------------------------------------------------------------
+	ssh-keygen       Creates the key pairs
+	================ ==================================================================================
+
+
+Remote repo commands
+--------------------
+
+	================ ==================================================================================
+	Command          Description
+	================ ==================================================================================
+	git pull         Pulls the remote repo and merges with local repo.  Effectively makes the remote 
+	                 current.  Really just a shortcut to a git fetch followed by a git merge
+
+					 Use git pull to update an existing folder with the contents of the repo
+
+					 git pull is git fetch + git merge
+	---------------- ----------------------------------------------------------------------------------
+	git fetch        downloads the remote but does not merge it with the local.  Allows user
+	                 to review the latests commits that were made on the remote against what is local.
+
+                     git fetch gives everything, alternatively, get fetch *branch* returns a specfic 
+					 branch
+
+	---------------- ----------------------------------------------------------------------------------
+	git merge        git merge is the command to merge the "fetched" results with the local.
+	---------------- ----------------------------------------------------------------------------------
+	git checkout     git checkout has to be used before a git merge.  Git checkout is used with a 
+					 BRANCH.
+
+                     git checkout will CHANGE the active branch.  If you want to change the branch you
+					 are working with, then use the git checkout command.
+	---------------- ----------------------------------------------------------------------------------
+	git push         Send changes in the local repo to the remote in the current active branch.	
+	---------------- ----------------------------------------------------------------------------------
+	git log          Useful for seeing what has and what has not changed.
+	---------------- ----------------------------------------------------------------------------------
+	git branch       Lists all the local branches.  git branch -r lists the remote branches AFTER a 
+	                 git fetch.
+
+					 git branch -a lists all the branches and highlights the current active branch
+					  
+					 git branch <name> creates a new branch.
+	---------------- ----------------------------------------------------------------------------------
+	git clone        Used to instantiate the local repo from an already existing remote.
+	================ ==================================================================================
+
+Understanding git status -s (short)
+-----------------------------------
+
+The -s (or --short) parameter of git status is used in this program to determine the status of changed files.
+
+The short status of each path is shown as one of the following ::
+
+	XY PATH
+	OR
+	XY ORIG_PATH ->PATH
+
+The status is returned in the second form only if there has been some rename or copy operation. 
+The ORIG_PATH denotes the actual location from where the renamed or copied contents came from. 
+XY is a two-letter status code, where X represents status of the file in the staging area (Committed) and 
+Y represents status of the file in the working directory (not committed). 
+
+The following table lists the possible values for X and Y.
+
+=========   ====================
+Indicator	Interpretation
+=========   ====================
+  ‘ ’       Unmodified
+   M        Modified
+   A        Added
+   D        Deleted
+   R        Renamed
+   C        Copied
+   U        Updated but unmerged
+=========   ====================
+
+There can be several combinations of the above indicators depending on the status of a file in each of these areas. 
+The status code, ??, represents an untracked file.
+
+
+Program User Information
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+Main Screen
+-----------
+
+Program Technical Information
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Basic Structure
+---------------
+	Essentially the user chooses a folder to work with.  This is stored in ws-folder.
+
+	An xml folder is stored in the users home folder that contains the name of the last folder
+	that was used with this program.
+
+    There is a routine called validate-repository.  As well as checking that the managed folder
+	is a git repo it also does populates a few memory tables (such as mem-branch).  Therefore
+	any action that might change the contents of the memory table (e.g. adding a branch) is followed by
+	a call to validate-repository in order to refresh the memory tables.
+	validate-repository populates the branches, the remotes and reads the repo config.
+
+	There is a MACRO called FLDRCMD which takes a command and executes it in the selected folder.
+	The output is sent to a file.  In various places the output is displayed on the screen.  In some 
+	places the output of more than one command needs to be displayed.  This is done by purging the output
+	file immediately before the first command of the set.
+
+SSH
+---
+	SSH is required for the git commands to work.  Once the keys ahve been defined and GITHUB updated,
+	the system records the ssh command in the configuration.  This is:
+
+	ssh -i $HOME/.ssh/github
+
+	Another approach is to ensure the ssh agent is running.  This would normally be done during the 
+	login process.  This seems too complex to ensure we get it right.  I have recorded here the steps
+	for future reference:
+
+SSH command in-line ::
+
+		eval "$(ssh-agent -s)"
+		ssh-add ~/.ssh/github 
+
+*/
+ 
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+#include "../include/i8gparam.spl"
+
+link "clib/clibvfile"
+
+#define AUTODOC // comment this ONE line if you do not have access to this clib.  You will have to read the help manually.
+#ifdef AUTODOC
+link "clib/clibvautodoc" 
+#endif
+
+#define USERPREF ".velgit.xml"
+
+#define GITHUBMGR "ray.burns@velocityglobal.co.nz"
+
+//#define DEBUG
+
+//#define SSHDIR if-then-else(ws-folder = spaces,str-concat(get-env("HOME") "/.ssh"), str-concat(ws-folder,"/.git"))
+#define SSHFILE "github"
+#define SSHDIR str-concat(get-env("HOME") "/.ssh")
+#define SSHFULLPATH str-concat(SSHDIR,"/",SSHFILE)
+
+#define BRANCHCOLOUR if-then-else(mb-status = "Current",red,0) on if-then-else(mb-status = "Current",yellow,0) 
+
+/* The following are used when parsing the output of git config --list.
+The output of this command is similar to:
+
+	/pro/pronto/cus/std/clib>git config --list
+	user.name=Ray Burns
+	core.repositoryformatversion=0
+	core.filemode=true
+	core.bare=false
+	core.logallrefupdates=true
+	core.sharedrepository=1
+	core.sshcommand=ssh -i /home/rayb/.ssh/ie_ed25519
+	receive.denynonfastforwards=true
+	user.name=psd
+	user.email=ray_gmail@velocityglobal.co.nz
+	remote.origin.url=git@github.com:K6king/clib.git
+	remote.origin.fetch=+refs/heads/*:refs/remotes/origin/*
+	branch.master.remote=origin
+	branch.master.merge=refs/heads/master
+
+These macros remove and strip off the components at the start
+
+*/ 
+
+// These two split the A into the LHS of an equals and the RHS of an equals
+#define CONFIGKEY(A) substring(A,1,pattern(A,"=") - 1)
+#define CONFIGVALUE(A) substring(A,pattern(A,"=") + 1,str-len(A))
+// These two are used to separate the parts of the key using the period as the
+// separator
+#define REMOVENEXTCONFIGPART(A) string A deleting 1 to pattern(A,"\.")
+#define GETNEXTCONFIGPART(A) if-then-else(pattern(A,".") = 0, A, substring(A,1,pattern(A,".") - 1))
+
+// Named Constants
+#define REMOTE_LOCATION_NAME 'Remote'
+#define LOCAL_LOCATION_NAME 'Local'
+#define INITIAL_REMOTE_BRANCH_NAME 'master'
+#define DEFAULT_REMOTE_NAME 'origin'
+// Change type constants
+/*
+#define MODIFIED_WAITING_ADD "Modified waiting add"
+#define MODIFIED_WAITING_COMMIT "Modified waiting commit"
+#define DELETED_WAITING_ADD "Deleted waiting add"
+#define DELETED_WAITING_COMMIT "Deleted waiting commit"
+#define ADDED_WAITING_ADD "Added waiting add"
+#define ADDED_WAITING_COMMIT "Added waiting commit"
+#define UNTRACKED "Untracked"
+*/
+
+#define ADDMESSAGE(A) \
+	if lf-messages = spaces \
+		set lf-messages = A \
+	else \
+		string lf-messages appending ascii-char(10) \
+		string lf-messages appending A \
+	endif
+ 
+field
+	ws-function-title					type string
+	// Git is based around a folder.
+	// One folder, one repository.
+	// The folder is the primary instance here.
+	ws-folder							pic x(1024) type string
+	// This program may be called with intention of establishing a git
+	// control, or with git already established.
+	// Either way, some functions can be done only git is established, so it
+	// is important to know whether it has or hasn't
+	// ws-git-established is determined by validate-repository
+	ws-git-established					type boolean
+	//  There are lots of calls to the git command so we define the variable
+	//  that holds the command once.  This saves us defining it in every
+	//  procedure that uses the FLDRCMD macro.  This variable should not be
+	//  used ANYWHERE accept in the FLDRCMD macro
+	ws-cmd								pic x(1024) type string
+	// The program makes extensive use of running commands, capturing the
+	// output and interogating that output.  IT would appear that, at times,
+	// (especially when sub-screens are loading via a screen-section) the
+	// file trips over itself.  We therefore use a sequntial number to creat
+	// each command output in a separately labelled file.
+	ws-command-output-seq				type number
+	// We need to know if there are changes in the local repo that have been
+	// committed but not pushed to the remote.  This is for the current branch
+	ws-remote-up-to-date				type boolean
+	// When a github account is created it is given a userid and an email
+	// address.  We remember these.
+	ws-github-userid					type string
+	ws-github-email						pic x(128) type string
+
+
+object text-file
+	type is text // we want LF terminators not CRLF
+	record is
+		tf-text							type varchar pic x(4096) // needs to be long for ssh keys
+	end-record
+
+object command-output
+	type is external
+	record is
+		co-text							type string pic x(1024)
+	end-record
+
+object mem-config
+	type is memory
+	record is
+		mc-key							type string pic x(128)
+		mc-value						type string pic x(128)
+	end-record
+	key is mc-key
+
+object mem-remotes
+	type is memory
+	record
+		mr-name							type string pic x(128)
+		mr-url							type string pic x(512)
+	end-record 
+	key is mr-name
+
+object mem-branches
+	type is memory
+	record
+		mb-seq							pic 9(5)
+		mb-name							pic x(128) type string
+		mb-status						pic x(20) type string
+		mb-location						pic x(10)
+	end-record
+	key is mb-seq
+		
+object mem-gitignore
+	type is memory
+	record
+		mg-seq							pic 9(5)
+		mg-value						pic x(128) type string
+	end-record
+	key is mg-seq
+
+object mem-local-changes
+	type is memory
+	record
+		mlc-seq							pic 9(5)
+		mlc-change-type					pic x(30)
+		mlc-change-code					pic xx
+		mlc-filename					type string
+	end-record
+	key is mlc-seq
+
+// We remember the last 20 folders the user managed with this program
+object mem-last-folders
+	type is memory
+	record
+		mlf-seq							type number
+		mlf-folder						like ws-folder
+	end-record
+	key is mlf-seq
+
+// Row Selection objects
+
+object rso-display-local-changes
+	type is memory
+	record
+		mlc-seq
+		mlc-filename
+	end-record
+	key is mlc-seq
+
+#define ADDTEXT(A) \
+	set tf-text = A \
+	insert text-file \
+	on error \
+	endon 
+
+#define TAB  ascii-char(9)
+
+
+// the first parameters to FLDRCMD is the command, the second is a boolean
+// indicating whether errors should be shown or not.
+// If NOT, it is VITAL that the command execution is the LAST thing in the
+// macro, as the code may check the exit status manually....
+
+#define FLDRCMD(C,E) \
+	if not file-exists(file-name(command-output),False)   \
+		set ws-command-output-seq += 1 \
+		open command-output create permanent \
+			file is concat("/tmp/cmdout" str(pid()) "_" str(ws-command-output-seq) '.txt') \
+	endif \
+	set ws-cmd = concat("cd " ws-folder ";") \
+	string ws-cmd appending C \
+	initialise command-output  \
+	set co-text = concat("COMMAND:" ws-cmd) \
+	insert command-output \
+	string ws-cmd appending " >> "  \
+	string ws-cmd appending file-name(command-output) \
+	string ws-cmd appending " 2>&1" \
+	if E \
+		command "sh" parameters are "-c" ws-cmd \
+		if exit-status != 0 \
+			initialise command-output \
+			set co-text = "The above command has failed"\
+			insert command-output \
+			do clibvfile-display-text-file parameters filename(command-output) 100 "Command Errors" \
+			exit 1 \
+		endif \
+	else \
+		command "sh" parameters are "-c" ws-cmd \
+	endif
+
+#define GENERALCMD(C,E) \
+	if not file-exists(file-name(command-output),False)   \
+		open command-output create permanent \
+			file is concat("/tmp/cmdout" str(pid()) '.txt') \
+	endif \
+	set ws-cmd = C \
+	initialise command-output  \
+	set co-text = concat("COMMAND:" ws-cmd) \
+	insert command-output \
+	if pattern(C," > ") = 0 and pattern(C, " >> ") = 0  \
+		string ws-cmd appending " >> "  \
+		string ws-cmd appending file-name(command-output) \
+		string ws-cmd appending " 2>&1" \
+	endif \
+	if E \
+		command "sh" parameters are "-c" ws-cmd \
+		if exit-status != 0 \
+			initialise command-output \
+			set co-text = "The above command has failed"\
+			insert command-output \
+			do clibvfile-display-text-file parameters filename(command-output) 100 "Command Errors" \
+			exit 1 \
+		endif \
+	else \
+		command "sh" parameters are "-c" ws-cmd \
+	endif
+
+procedure main
+local
+	lf-git-add							type boolean
+	lf-filename							pic x(512) type string
+	I8GPARAM_FLAG("-add",FALSE,lf-git-add)
+	I8GPARAM_ALPHA("-file",spaces,lf-filename)
+	if lf-git-add and file-exists(lf-filename,false) = 1
+		do git-add parameters are lf-filename
+		message "added" lf-filename
+		exit
+	endif
+	//
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8secabt-check-abort
+		parameters are sys-consolidation-division login-id() "EMS" "X000"
+		returning ws-function-title 
+	set ws-function-title = "Git Control"
+	get system-user-control
+		on index user-id
+		key is login-id
+	on error ENOREC
+		message-box "Your login id must exist on the system as a pronto user."
+			title is ws-function-title
+			message-buttons  MSG_BOX_CANCEL
+			icon MSG_BOX_STOP
+		exit 1
+	endon
+	if suc-user-email = spaces
+		message-box "Your login must have an email address assocaited with it in system user control"
+			title is ws-function-title
+			message-buttons  MSG_BOX_CANCEL
+			icon MSG_BOX_STOP
+		exit 1
+	endif
+	do i8proglog-write-log
+	I8GPARAM_ALPHA("-folder",spaces,ws-folder)
+	if 	file-exists(ws-folder,false) = 2
+		do validate-repository
+	endif
+	// The intention is to be able to call this from somewhere else and just
+	// add  a file for the next commit
+	do load-user-preferences
+	if ws-folder != spaces
+		do validate-repository 
+	endif
+	do git-menu
+	do save-user-preferences
+end-procedure
+
+//--------------------------------------------------------------------------------
+//
+// User interface
+//
+//--------------------------------------------------------------------------------
+
+menu git-menu
+local
+	lf-ssh-setup-ok						type boolean
+	responsive
+	title ws-folder
+	no-hide
+before
+	do ssh-validation
+	if exit-status() > 0
+		set lf-ssh-setup-ok = FALSE
+	else
+		set lf-ssh-setup-ok = TRUE
+	endif
+detail
+	screen-group // ---- Options ----------------------------
+		title "Options"  // The title is optional
+	option "Github Account Details"
+		help "User id and email address for your github account"
+		do github-profile correct once
+	option "SSH Setup"
+		help "Setup users ssh keys, known_hosts and config"
+		when not lf-ssh-setup-ok
+		do ssh-setup
+		refresh prompts
+	option "Display SSH key"
+		help "Display the SSH key for use in github"
+		when lf-ssh-setup-ok
+		do display-ssh-key show once
+	option "Clone a folder"
+		help "Clone a github repo to a new folder on this machine"
+		when lf-ssh-setup-ok 
+		do clone-repo entry once
+		refresh title
+		refresh whens
+	option "Select / Change Folder for Repository" 
+		do prompt-for-folder entry once		
+		refresh title
+		refresh whens
+	option "Initialise Folder as Repository" 
+		help "Setup this folder for Git Control"
+		when file-exists(ws-folder,false) = 2 and not ws-git-established
+		do initialise-folder-repository 
+		if exit-status <= 0
+			do validate-repository
+			message-box param-text("<<P1>>"
+				,concat("The initialisation is complete.  Your next step should be to specify the remote and"
+						" perform and initial push to get all the local code to the remote."))
+				title is ws-function-title
+				message-buttons  MSG_BOX_OK
+				icon MSG_BOX_INFORMATION
+		endif
+		refresh whens
+	option "Manage" 
+		when file-exists(ws-folder,false) = 2 and ws-git-established
+		do manage-repository 
+	option "Remove Git Control" 
+		help "Removes Git Control from repository but leaves files alone"
+		when file-exists(ws-folder,false) = 2 and ws-git-established
+		message-box param-text("<<P1>><<BR>><<p2>>"
+			,concat("This option will remove all the git control functions.  The .git folder"
+				" and the .gitignore file will be deleted.  You will lose all history of changes"
+				" made to this folder structure.  The program will then exit.")
+			,"Are you sure? - select OK to continue with removal.")
+			title is ws-function-title
+			message-buttons  MSG_BOX_OK_CANCEL
+			icon MSG_BOX_QUESTION
+			default MSG_BOX_CANCEL
+		if message-status() = MSG_BOX_OK
+			do remove-git-control
+			// force an exit.  We need to reload anyway
+			exit
+		endif
+	option "Manage &Last Folders List"
+		help "Remove or correct any folders in your history"
+		do manage-last-folders
+	option "Help & Instructions" 
+		help "Describes how to setup git for working with pronto"
+		do help-and-instructions
+	end-screen-group
+#ifdef DEBUG
+	screen-group // ---- Testing ----------------------------
+		title "Testing"  // The title is optional
+	option "test ssh config" 
+		do update-ssh-config
+		message "Update Complete"
+	end-screen-group // ---- Testing --------------------------------------
+#endif
+end-menu
+
+
+
+#if BMS_DICT_VER > 7600
+screen manage-repository 
+local
+	lf-user-name						type varchar
+	lf-user-email						type varchar
+	lf-ssh-command-defined				type varchar
+	lf-ahead							type boolean
+	lf-behind							type boolean
+	lf-unstaged							type boolean
+	lf-uncommitted						type boolean
+	lf-messages							type varchar pic x(4096)
+	lf-one-message						pic x(1024) type string
+local mode
+	lm-status
+		prompt "Status"
+		help "Display Current Status"
+	lm-log
+		prompt "Log"
+		help "display Current log"
+	lm-add-ssh-command
+		prompt "SSH command"
+		help "Add path to the SSH public key into the configuration"
+		always-show
+//		when lf-ssh-command-defined = spaces
+	window
+	responsive
+	title concat("Local Folder:" ws-folder)
+	allowed search correct
+screen-section
+	title "Changes"
+	do display-local-changes 
+end-screen-section
+screen-section
+	title "Remotes"
+	do display-git-remotes  
+	// TODO:
+	//  We need to reload the before section after this.
+	//  I know there is a way to do this and I think it is in the exit of the
+	//  subscreen - but I can't remember how.
+end-screen-section
+screen-section
+	title "Branches"
+	do display-branches  
+end-screen-section
+screen-section
+	title "Config &Detail"
+	do display-config  
+end-screen-section
+screen-section
+	title "Ignore"
+	do maintain-gitignore 
+end-screen-section
+before
+	set lf-messages = spaces
+	select * from mem-config
+	detail
+		switch lowercase(mc-key)
+		case 'user.name'
+			if lf-user-name = spaces
+				set lf-user-name = mc-value
+			else
+				string lf-user-name appending "," 
+				string lf-user-name appending  mc-value
+			endif
+		case 'user.email'
+			set lf-user-email = mc-value
+		case 'core.sshcommand'
+			set lf-ssh-command-defined = mc-value
+		end-switch
+	end-select
+	do ssh-validation returning lf-one-message
+	if exit-status() != 0 
+		ADDMESSAGE(lf-one-message)
+	endif
+	if lf-ssh-command-defined = spaces
+		ADDMESSAGE("SSH Command not defined in Config")
+	endif
+	if not file-exists(concat(SSHFULLPATH,".pub"),FALSE)
+		ADDMESSAGE("No SSH key has been defined.  (see Remotes)")
+	else
+		if file-size(concat(SSHFULLPATH,".pub")) = 0
+			ADDMESSAGE("The public key exists but is empty")
+		endif
+	endif
+	if not file-exists(concat(SSHDIR,"/known_hosts"),FALSE)
+		ADDMESSAGE("The known_hosts file is missing from the SSH folder")
+	else
+		if file-size(concat(SSHDIR,"/known_hosts")) = 0
+			ADDMESSAGE("Known_hosts file is empty")
+		endif
+	endif
+	if not ws-remote-up-to-date
+		ADDMESSAGE("There are local committed changes that have not been pushed to the remote branch")
+	endif
+	do parse-git-status returning
+		lf-ahead
+		lf-behind
+		lf-unstaged
+		lf-uncommitted
+	if lf-ahead 
+		ADDMESSAGE("There a local changes that have not yet been pushed to the remote repo")
+	endif
+	if lf-behind
+		ADDMESSAGE("There are remote changes that have not yet been merged with the local repo")
+	endif
+	if lf-unstaged
+		ADDMESSAGE("There are local changes to files that have been recorded with a file add")
+	endif
+	if lf-uncommitted
+		ADDMESSAGE("There are local changes to files that have not yet been committed to the local repo")
+	endif
+	refresh whens
+detail
+	if screenmode = lm-status
+		close command-output and remove
+		FLDRCMD("git status",true)
+		do clibvfile-display-text-file	parameters are file-name(command-output) 100 "Git Status"
+	endif
+	if screenmode = lm-log
+		close command-output and remove
+		FLDRCMD("git log --stat '*.spl' '*.txt' '*.rst' '*.sh' '*.sql' ",TRUE)
+		do clibvfile-display-text-file	parameters are file-name(command-output) 100 "Git log"
+	endif
+	if screenmode = lm-add-ssh-command
+		do set-path-to-private-key
+		do validate-repository
+		refresh prompts
+		refresh whens
+	endif
+	screen-group // ---- User Details ----------------------------
+		title "User Details"  // The title is optional
+		accept lf-user-name
+			title "Git User Id"
+			read-only
+		accept lf-user-email
+			title "Email"
+			read-only
+	end-screen-group // ---- User Details --------------------------------------
+	screen-group // ---- Profile Details ----------------------------
+		title "Profile Details"  // The title is optional
+		accept ws-github-userid
+			title "Github Account USer id"
+		accept ws-github-email
+			title "Github account email address"
+	end-screen-group // ---- rofile Details --------------------------------------
+	screen-group // ---- SSH Warning ----------------------------
+		title "Messages"
+		when lf-messages != spaces
+		accept lf-messages
+			colour red
+			multi-line
+			rows 5
+			columns 80
+			bold
+			read-only
+			no-warning
+	end-screen-group // ---- SSH Warning --------------------------------------
+after
+//	do save-to-xml
+end-screen
+
+#else
+
+procedure set-user-and-password
+parameters
+	lf-folder							pic x(1024) type string
+	//
+	acknowledge "The screens are only written for ginger so far"
+	acknowledge "Write the above screen for previous version if required"
+endprocedure
+
+#endif
+
+
+#if BMS_DICT_VER > 7600
+screen prompt-for-folder 
+local
+	lf-confirmed						type boolean
+	lf-reenter							type boolean
+	window
+		window-position 107
+	responsive
+#ifdef DEBUG
+	before
+		set ws-folder = "/pro/pronto/cus/std"
+#endif
+detail
+	set lf-confirmed = FALSE
+	screen-group // ---- User Details ----------------------------
+		title "Folder Details"  // The title is optional
+		accept ws-folder
+			title "Repository Folder"
+			default ws-folder
+			on help-key
+				do clibvfile-folder-chooser parameters are "/pro/pronto/cus" returning ws-folder
+				if lf-reenter
+					re-enter
+				endif
+			endon
+			drop-down
+				width 38
+				edit
+				select mlf-folder
+					from mem-last-folders 
+					order by mlf-seq
+			end-drop-down
+	end-screen-group // ---- User Details --------------------------------------
+	confirm 
+		auto
+	confirmed
+		set lf-confirmed = TRUE
+	end-confirm 
+after
+	if not lf-confirmed
+		exit 1
+	endif
+	if ws-folder = spaces
+		message-box param-text("<<P1>><<BR>><<p2>>"
+			,"You cannot leave the folder blank"
+			,"press Escape to exit the funciton")
+			title is ws-function-title
+			message-buttons  MSG_BOX_CANCEL
+			icon MSG_BOX_STOP
+		back-to-detail
+	endif
+	do validate-repository 
+	if exit-status > 0
+		message-box param-text("<<P1>><<BR>><<p2>>"
+			,"This folder is not yet a  git repository"
+			,"Select Yes to continue (Your next step should be to initialise the folder for git) or cancel to select a new folder")
+			title is ws-function-title
+			message-buttons  MSG_BOX_OK_CANCEL
+			icon MSG_BOX_STOP
+		if message-status() = MSG_BOX_CANCEL
+			back-to-detail
+		endif
+	else
+	endif
+end-screen
+
+
+#else
+
+procedure prompt-for-folder
+parameters
+	lf-folder							pic x(1024) type string
+	//
+	acknowledge "The screens are only written for ginger so far"
+	acknowledge "Write the above screen for previous version if required"
+endprocedure
+
+#endif
+
+screen github-profile
+	responsive
+	title "Github User Profile"
+detail
+	screen-group // ---- Profile Details ----------------------------
+		title "Profile Details"  // The title is optional
+		accept ws-github-userid
+			title "User Id"
+			help "The user id used in your github account"
+			default ws-github-userid
+		accept ws-github-email
+			title "Email Address used in your github account"
+			default ws-github-email
+	end-screen-group // ---- rofile Details --------------------------------------
+end-screen
+
+screen clone-repo
+local
+	lf-folder							like ws-folder
+	lf-url								like mr-url
+	lf-messages							pic x(4096) type varchar
+	lf-branch							like mr-url
+	responsive
+	title "Clone existing repo"
+	no-ok-cancel
+before
+	ADDMESSAGE("The folder is the target folder on the local machine and must NOT exist")
+	ADDMESSAGE(" ")
+	ADDMESSAGE("The URL is the url on the remote machine.  See program documentation for further information")
+	ADDMESSAGE(" ")
+	ADDMESSAGE("The branch is not validated.  However, It MUST exist on the remote machine if specified")
+	ADDMESSAGE("Note that it is case sensitive.  If left blank all branches are downloaded")
+detail
+	screen-group // ---- Instructions ----------------------------
+		title "Instructions"  // The title is optional
+		display lf-messages
+			multi-line
+			columns 80
+			rows 6
+	end-screen-group // ---- Instructions --------------------------------------
+	screen-group // ---- Parameters ----------------------------
+		title "Parameters"  // The title is optional
+		next row
+		accept lf-folder pic x(60)
+			prompt "Folder"
+			help "Full path to folder that does not yet exist"
+		validations
+			if file-exists(lf-folder,FALSE) = 2
+				message-box param-text("<<P1>><<BR>><<p2>>"
+					,"This folder already exists."
+					,"The folder must not exist on this machine")
+					title is ws-function-title
+					message-buttons  MSG_BOX_RETRY
+					icon MSG_BOX_STOP
+				re-enter
+			endif
+		end-validations
+		accept lf-url pic x(60)
+			prompt "url"
+			default lf-url
+			help "this is the url of the folder as defined in github"
+		before-accept
+			if screenmode = form-entry-defaults
+				set lf-url = "git@github.com:<<user>>/<<repo>>.git"
+			endif
+		end-before-accept
+		accept lf-branch pic x(60)
+			prompt "Branch"
+			help "The branch on the remote to clone"
+	end-screen-group // ---- Parameters --------------------------------------
+	confirm 
+		prompt "Ok to create new folder"
+		default is no
+	confirmed
+		do git-clone parameters are lf-url lf-folder lf-branch
+	end-confirm 
+end-screen
+
+screen display-config
+	window
+	datagrid
+	select * from mem-config
+	allowed search
+	responsive
+detail
+	screen-group // ---- Config ----------------------------
+		title "Config"  // The title is optional
+		accept mc-key col 4 pic x(30)
+			title "Key"
+			when screenmode = search
+			show-value
+		display mc-value col 5 pic x(50)
+			title "Value"
+	end-screen-group // ---- Config --------------------------------------
+end-screen
+
+screen display-branches
+local mode
+	lm-create-new-branch
+		prompt "Create"
+		help "Create a new Branch"
+	lm-make-current
+		prompt "Current"
+		help "Make the selected branch the current branch"
+	window
+	datagrid
+	select * from mem-branches
+	allowed search
+	responsive
+detail
+	if screenmode = lm-create-new-branch
+		do prompt-git-create-branch entry once
+		do validate-repository
+		reselect
+		refresh
+	endif
+	if screenmode = lm-make-current
+		do git-checkout parameters are mb-name
+		do validate-repository
+		reselect
+		refresh
+	endif
+	screen-group // ---- Config ----------------------------
+		title "Branches"  // The title is optional
+		accept mb-seq col 1  pic z(4)
+			title "Seq"
+			when screenmode = search
+			show-value
+			colour BRANCHCOLOUR
+		display mb-name col 2 pic x(30)
+			title "Branch Name"
+			colour BRANCHCOLOUR
+		display mb-status col 3 
+			title "Status"
+			colour BRANCHCOLOUR
+		display mb-location col 4 
+			title "Location"
+			colour BRANCHCOLOUR
+	end-screen-group // ---- Config --------------------------------------
+end-screen
+
+screen display-git-remotes
+local 
+	lf-count						type number
+	lf-branch						like mb-name
+local mode
+	lm-remove prompt "Remove"
+	lm-entry prompt "Entry"
+	lm-status prompt "S&tatus"
+		help "Show the remote status"
+	lm-push prompt "Push"
+		help "Push all outstanding commits.  A prompt for the branch will be displayed."
+	lm-pull prompt "Pull"
+		help "Effectively refreshes the current repo from the server"
+	window 
+	datagrid
+	select * from mem-remotes
+	responsive
+	allowed search
+detail
+	if screenmode  = lm-remove
+		do git-remove-remote parameters are mr-name
+		reselect
+		refresh data
+	endif
+	if screenmode = lm-entry
+		do prompt-for-remote-add  entry once
+		reselect
+		refresh data
+	endif
+	if screenmode = lm-status
+		do git-remote-show parameters are mr-name
+	endif
+	if screenmode = lm-pull
+		do git-pull parameters are mr-name
+	endif
+	if screenmode = lm-push
+		select lf-count = count(*) 
+			from mem-branches
+			where mb-location = "Remote"
+		end-select
+		if lf-count = 0
+			message-box param-text("<<P1>><<BR>><<p2>>"
+				,concat("There are no remote branches defined.  Continuing with this option will force write all the "
+					"local code to the repository.  This is good for an initial push but REALLY bad if there is already "
+					"code in the remote repo")
+				,"Press OK to continue with this process.")
+				title is ws-function-title
+				message-buttons  MSG_BOX_OK_CANCEL
+				icon MSG_BOX_STOP
+			if message-status() = MSG_BOX_OK
+				do get-branch-name entry once returning lf-branch
+				if not escape()
+					do git-remote-push parameters are mr-name lf-branch
+				endif
+			endif
+		else
+			do get-branch-name entry once returning lf-branch
+			if not escape()
+				do git-remote-push parameters are mr-name lf-branch
+			endif
+		endif
+	endif
+	screen-group // ---- Remotes ----------------------------
+		title "Remotes"  // The title is optional
+		accept mr-name col 1 pic x(20)
+			title "Name"
+		display mr-url col 2 pic x(128)
+			title "URL"
+	end-screen-group // ---- Remotes --------------------------------------
+end-screen
+
+screen display-local-changes
+local
+//	lf-count							type boolean
+	lf-commit-message					pic x(512) type string
+local mode
+	lm-add
+		prompt "Add"
+		help "Add to tracked files"
+		always-show
+		when row-selection-count != 0
+	lm-restore
+		prompt "Restore"
+		help "Restore file to previous track point"
+		when row-selection-count != 0
+	lm-commit
+		prompt "Commit"
+		help "Commit the selected items"
+		when row-selection-count != 0
+	responsive
+	datagrid
+	row-selection-object rso-display-local-changes
+	title "Local Changes"
+	select * from mem-local-changes
+	allowed search
+before
+	open mem-local-changes truncate temporary
+	close command-output and remove
+	FLDRCMD('git status -s --untracked=all',TRUE)
+	set mlc-seq = 0
+	// See documentation at the top for some further explanation of returned
+	// statii
+	select * from command-output 
+		where co-text not like 'COMMAND:%'
+	detail
+		initialise mem-local-changes leaving mlc-seq
+		set mlc-seq += 1
+		set mlc-change-code = substring(co-text,1,2)
+		// first anything in this list has been modified is waiting a commit
+		// if a fille has been committed then it won't appear in the list.
+		// if a file is status ?? then it needs an add.....
+		if mlc-change-code = "??"
+			set mlc-change-type = "Untracked"
+		else 
+			set mlc-change-type = "Awaiting Commit"
+		endif
+		set mlc-filename = substring(co-text,4,str-len(co-text))
+		insert mem-local-changes
+	end-select
+detail
+	if screenmode = lm-add
+		close command-output and remove
+		select * from rso-display-local-changes
+		detail
+			do git-add parameters are str-concat(ws-folder,"/",mlc-filename)
+		endselect
+		do clibvfile-display-text-file parameters are filename(command-output) 100 "Git Add"
+		refresh prompts
+		refresh whens
+		open rso-display-local-changes truncate temporary
+		reselect
+		refresh review
+	endif
+	if screenmode = lm-restore
+		close command-output and remove
+		select * from rso-display-local-changes
+		detail
+			do git-restore parameters are str-concat(ws-folder,"/",mlc-filename)
+		endselect
+		do clibvfile-display-text-file parameters are filename(command-output) 100 "Git Restore"
+		refresh prompts
+		refresh whens
+		open rso-display-local-changes truncate temporary
+		reselect
+		refresh review
+	endif
+	if screenmode = lm-commit
+		do get-commit-message entry once returning lf-commit-message
+		if escape() 
+			set lf-commit-message = spaces
+		endif
+		if lf-commit-message != spaces
+			close command-output and remove
+			select * from rso-display-local-changes
+			detail
+				do git-commit parameters are str-concat(ws-folder,"/",mlc-filename) lf-commit-message
+			endselect
+			do clibvfile-display-text-file parameters are filename(command-output) 100 "Git Commit"
+		endif
+		refresh prompts
+		refresh whens
+		open rso-display-local-changes truncate temporary
+		reselect
+		refresh review
+	endif
+	screen-group // ---- Changes ----------------------------
+		title "Changes"  // The title is optional
+		accept mlc-seq col 1
+			title "Seq"
+			when screenmode = search
+			show-value
+		display mlc-change-type col 2
+			title "Type"
+		display mlc-filename col 3
+			title "File"
+	end-screen-group // ---- Changes --------------------------------------
+end-screen
+
+screen maintain-gitignore
+local 
+	lf-seq						like mg-seq
+	window
+	datagrid 
+	select * from mem-gitignore
+		responsive
+		title "Ignored Patterns"
+before
+	open text-file
+		file is str-concat(ws-folder "/.gitignore")
+		read-only
+	open mem-gitignore temporary truncate
+	set mg-seq = 0
+	select * from text-file
+	detail
+		Initialise mem-gitignore
+		leaving mg-seq
+		set mg-seq += 1
+		set mg-value = tf-text
+		insert mem-gitignore
+	end-select
+detail
+	screen-group // ---- Git Ignore ----------------------------
+		title "Git Ignore"  // The title is optional
+		accept  mg-seq col 1 pic zzz9
+			title "Seq"
+			when screenmode in {search entry}
+			show-value
+		before-accept
+			if screenmode = entry
+				select lf-seq = max(mg-seq) from mem-gitignore end-select
+			endif
+			set mg-seq = lf-seq + 1
+		end-before-accept
+		accept mg-value col 2
+			title "Value"
+	end-screen-group // ---- Git Ignore --------------------------------------
+after
+	open text-file
+		file is str-concat(ws-folder "/.git/.gitignore")
+		create truncate permanent
+	on error
+		message-box param-text("<<P1>><<BR>><<p2>>"
+			,"It appears you do not have authority to change the gitignore file"
+			,"No changes have been made")
+			title is ws-function-title
+			message-buttons  MSG_BOX_CANCEL
+			icon MSG_BOX_STOP
+		exit 1
+	else
+		select * from mem-gitignore
+			order by mg-seq
+		detail
+			Initialise text-file
+			set tf-text = mg-value
+			insert text-file
+		end-select
+		close text-file
+	endon
+end-screen
+
+screen display-ssh-key
+local
+	lf-ssh-key							pic x(4096) type varchar
+	lf-instructions						pic x(1024) type string
+	window
+		window-position 109
+		title "SSH Key"
+	responsive
+before
+	open text-file
+		file is str-concat(SSHFULLPATH,".pub")
+	on error ENOREC
+		message "Unable to open SSH .pub file"
+		exit 1
+	endon
+	select * from text-file
+	detail
+		string lf-ssh-key appending tf-text
+	end-select
+	set lf-instructions = "Copy the following text into SSH key in to 'SSH Keys'"
+	string lf-instructions appending "found under 'settings' for your user profile in Github"
+	screen-group // ---- Instructions ----------------------------
+		title "Instructions"  // The title is optional
+		display lf-instructions
+			multi-line
+			columns 80
+			rows 2
+	end-screen-group // ---- Instructions --------------------------------------
+detail
+	screen-group // ---- SSH Key ----------------------------
+		title "SSH Key"  // The title is optional
+		accept  lf-ssh-key
+			multi-line
+			rows 10
+			columns 120
+	end-screen-group // ---- SSH Key --------------------------------------
+end-screen
+
+//--------------------------------------------------------------------------------
+//
+// Parameter screens for commands
+//
+//--------------------------------------------------------------------------------
+
+screen prompt-for-remote-add	
+local
+	lf-name							like mr-name
+	lf-url							like mr-url
+	lf-count						type number
+	window
+		window-position 107
+		title "Add New Remote"
+	responsive
+	no-ok-cancel
+detail
+	screen-group // ---- Remote Values ----------------------------
+		title "Remote Values"  // The title is optional
+		accept lf-name 
+			title "Remote Name"
+			help "Enter a general name to call this remote"
+			default DEFAULT_REMOTE_NAME
+		validations
+			if lf-name != DEFAULT_REMOTE_NAME
+				message-box param-text("<<P1>><<BR>><<p2>>"
+					,concat("Are you sure about this?  The remote should be called " DEFAULT_REMOTE_NAME)
+					,"Press OK to continue with addition")
+					title is ws-function-title
+					message-buttons  MSG_BOX_OK_CANCEL
+					icon MSG_BOX_STOP
+				if message-status() = MSG_BOX_CANCEL
+					re-enter
+				endif
+			endif
+			get mem-remotes
+				on index mr-name
+				key is lf-name
+			on error ENOREC
+				// good
+			else
+				message-box param-text("<<P1>><<BR>><<p2>>"
+					,"This name has already been used"
+					,"Either delete it or change the name")
+					title is "Invalid remote name"
+					message-buttons  MSG_BOX_CANCEL
+					icon MSG_BOX_STOP
+				re-enter
+			endon
+		end-validations
+		accept lf-url
+			default lf-url
+			title "Url of remote"
+			help 'Get this from the "Code" section of the repository in GITHUB'
+		before-accept
+			if screenmode = form-entry-defaults
+				set lf-url = "git@github.com:<<accctname>>/<<repo>>.git"
+			endif
+		end-before-accept
+	end-screen-group // ---- Remote Values --------------------------------------
+	confirm 
+		prompt "Ok to add new remote"
+		default is yes
+	confirmed
+		select lf-count = count(*) 
+			from mem-remotes 
+		end-select
+		if lf-count > 0
+			message-box param-text("<<P1>><<BR>><<p2>>"
+				,"Are you sure you know what you are doing?  There should only be one remote."
+				,"Select OK to continue with the addition")
+				title is ws-function-title
+				message-buttons  MSG_BOX_OK_CANCEL
+				icon MSG_BOX_WARNING
+			if message-status = MSG_BOX_OK
+				do git-add-new-remote parameters are lf-name lf-url
+			endif
+		else
+			do git-add-new-remote parameters are lf-name lf-url
+		endif
+	end-confirm 
+end-screen
+
+screen get-branch-name
+returning
+	lr-branch						like mb-name
+	window
+		window-position 107
+		title "Branch Name"
+	responsive
+before
+	// This routine is called during the initialisation phase
+	// when there will be no mem-branches created yet.
+	// So oppeen the file to ensure the select does not fail
+	open mem-branches temporary
+detail
+	screen-group // ---- Remote Values ----------------------------
+		title "Branch Name"  // The title is optional
+		accept lr-branch 
+			title "Branch Name"
+			help "Enter a general name to call this branch"
+			default lr-branch
+		before-accept
+			set lr-branch = str(BMS_DICT_VER)
+			select * from mem-branches
+				where mb-status = "Current"
+				and mb-location = REMOTE_LOCATION_NAME
+			detail
+				set lr-branch = mb-name
+			end-select
+		end-before-accept
+	end-screen-group // ---- Remote Values --------------------------------------
+end-screen
+
+screen prompt-git-create-branch
+local
+	lf-branch-name						type varchar
+	window
+	window-position 5
+	responsive
+	no-ok-cancel
+detail
+	screen-group // ---- Branch Name ----------------------------
+		title "Branch Name"  // The title is optional
+		accept lf-branch-name
+			title "Branch"
+			default lf-branch-name
+		before-accept
+			if screenmode = form-entry-defaults
+				set lf-branch-name = str-concat(str(BMS_DICT_VER),"_")
+			endif
+		end-before-accept
+	end-screen-group // ---- Branch Name --------------------------------------
+	confirm 
+		prompt "Ok to Create Branch"
+		default is yes
+	confirmed
+		do git-create-branch parameters lf-branch-name
+	end-confirm 
+end-screen
+
+screen manage-last-folders
+	window
+	title "Last folders list"
+	datagrid
+	select * from mem-last-folders
+	allowed search correct remove
+detail
+	accept mlf-seq col 1 pic zz9
+		title "Sequence"
+		when screenmode in (search)
+		show-value
+	accept mlf-folder col 2 pic x(80)
+		title "Folder"
+end-screen
+
+
+//--------------------------------------------------------------------------------
+//
+// procedures to save user preferences
+//
+//--------------------------------------------------------------------------------
+
+procedure load-user-preferences
+local
+	lx-doc							type xml-handle
+	lx-root							type xml-handle
+	lx-last-folders					type xml-handle
+	lx-node							type xml-handle
+	set lx-doc = xml-parse-file(concat(get-env("HOME"),"/",USERPREF))
+	set lx-root = xml-get-root-node(lx-doc)
+	set ws-github-userid = xml-node-text(xml-get-child-by-name(lx-root,"userid",spaces))
+	set ws-github-email = xml-node-text(xml-get-child-by-name(lx-root,"email",spaces))
+	open mem-last-folders temporary
+	set lx-last-folders = xml-get-child-by-name(lx-root,"lastfolders",spaces)
+	set lx-node = xml-get-child-by-name(lx-last-folders,"folder",spaces)
+	while lx-node != 0
+		initialise mem-last-folders
+		set mlf-seq = num( xml-get-node-attribute(lx-node,"seq"))
+		set mlf-folder = xml-node-text(lx-node)
+		insert mem-last-folders
+		// set ws-folder to the first one in the list
+		if ws-folder = spaces
+			set ws-folder = mlf-folder
+		endif
+		set lx-node = xml-get-next-node(lx-node)
+	end-while
+end-procedure
+
+procedure save-user-preferences
+local
+	lx-doc							type xml-handle
+	lx-root							type xml-handle
+	lx-last-folders					type xml-handle
+	lx-node							type xml-handle
+	i 								type number
+	set lx-doc = xml-new-document("1.0","git")
+	set lx-root = xml-get-root-node(lx-doc)
+	if xml-add-child-node-text(lx-root,"userid",spaces,ws-github-userid) endif
+	if xml-add-child-node-text(lx-root,"email",spaces,ws-github-email) endif
+	//
+	set i = 10
+	set lx-last-folders =  xml-add-child-node(lx-root,"lastfolders",spaces) 
+	// make tthe current folder first
+	set lx-node =  xml-add-child-node(lx-last-folders,"folder",spaces) 
+	if ws-folder != spaces
+		if xml-add-node-attribute(lx-node,"seq",spaces,str(i)) endif
+		if xml-modify-node-text(lx-node,ws-folder) endif
+		if xml-free-node-handle(lx-node) endif
+	endif
+	// now save the remaining
+	select * from mem-last-folders
+		where mlf-folder not in (spaces, ws-folder)
+		order by mlf-seq
+	detail
+		set i += 10
+		set lx-node =  xml-add-child-node(lx-last-folders,"folder",spaces) 
+		if xml-add-node-attribute(lx-node,"seq",spaces,str(i)) endif
+		if xml-modify-node-text(lx-node,mlf-folder) endif
+		if xml-free-node-handle(lx-node) endif
+	end-select
+	//
+	if xml-save-as-file(lx-doc,str-concat(get-env("HOME"),"/",USERPREF),spaces,2) endif
+end-procedure
+
+
+//--------------------------------------------------------------------------------
+//
+// Read and process configuration file
+//
+//--------------------------------------------------------------------------------
+
+procedure validate-repository
+local
+	lf-cmd								pic x(1024) type string
+//	lf-file-count						type number
+	set lf-cmd = concat("cd " ws-folder ";") 
+	string lf-cmd appending "git status > /dev/null" 
+	command "sh" parameters are "-c" lf-cmd 
+	if exit-status = 128
+		set ws-git-established = FALSE
+		exit 1
+	else
+		set ws-git-established = TRUE
+		do parse-config
+		do load-branches
+		do check-remote-up-to-date returning ws-remote-up-to-date
+//		do folder-contents parameters ws-folder returning lf-file-count
+//		message lf-file-count " files"
+	endif
+end-procedure
+
+procedure parse-config
+local
+	lf-key							pic x(100) type string
+	lf-value						pic x(100) type string
+	close mem-config and remove
+	open mem-config temporary truncate
+	close mem-remotes and remove
+	open mem-remotes temporary truncate
+	close command-output and remove
+	FLDRCMD("git config --list",TRUE)
+	select * from command-output
+		where co-text not like 'COMMAND:%'
+	detail
+//		do get-named-pair parameters are co-text returning lf-name lf-value
+		set lf-key = CONFIGKEY(co-text) // lf-name
+		set lf-value = CONFIGVALUE(co-text) //lf-value
+		initialise mem-config
+		set mc-key = lf-key
+		set mc-value = lf-value
+		insert mem-config
+		// Check if we are dealing with remote definitions and record the url.
+		if pattern(lf-key,"^remote.") = 1
+			REMOVENEXTCONFIGPART(lf-key)
+			initialise mem-remotes
+			set mr-name  = GETNEXTCONFIGPART(lf-key)
+			REMOVENEXTCONFIGPART(lf-key)
+			if GETNEXTCONFIGPART(lf-key) = 'url'
+				set mr-url = lf-value
+				insert mem-remotes
+			endif
+		endif
+	end-select
+end-procedure
+
+procedure load-branches
+	close command-output and remove
+	close mem-branches and remove
+	open mem-branches temporary truncate
+	FLDRCMD("git branch -a",TRUE)
+	set mb-seq = 0
+	select * from command-output
+		where co-text not like 'COMMAND:%'
+	detail
+		initialise mem-branches
+			leaving mb-seq
+		set mb-seq += 1
+		if substring(co-text,1,1) = "*"
+			set mb-status = "Current"
+		elseif substring(co-text,1,1) = "+"
+			set mb-status = "Checked Out"
+		endif
+		string co-text deleting 1 to 2
+		if substring(co-text,1,7) = "remotes"
+			set mb-location = REMOTE_LOCATION_NAME
+			string co-text deleting 1 to 8
+		else
+			set mb-location = LOCAL_LOCATION_NAME
+		endif
+		set mb-name = co-text
+		insert mem-branches
+	end-select
+end-procedure
+
+procedure check-remote-up-to-date
+returning
+	lr-up-to-date						type boolean
+	set lr-up-to-date = FALSE
+	close command-output and remove
+	FLDRCMD("git push --dry-run",FALSE)
+	select * from command-output
+	detail
+		if co-text =  "Everything up-to-date"
+			set lr-up-to-date = TRUE
+		endif
+	end-select
+end-procedure
+
+
+procedure folder-contents
+// careful - this routine is recursive!
+parameters
+	lf-folder							like ws-folder
+returning
+	lr-unhidden-file-count				type number
+local
+	lf-filename							like ws-folder
+	lf-subfolder-count					type number
+	lf-loop-break						type number
+	if start-dir-search(lf-folder,spaces)
+		repeat
+			set lf-filename = next-dir-entry()
+			set lf-loop-break += 1
+			if lf-loop-break > 1000
+				exit
+			endif
+		until lf-filename = spaces
+			if pattern(lf-filename,".") != 1
+				if file-exists(str-concat(lf-folder,"/",lf-filename),False) = 2 // its a folder
+					do folder-contents parameters are str-concat(lf-folder,"/",lf-filename) returning lf-subfolder-count
+//					message param-text("<<p1>> has <<p2>> files",lf-filename, str(lf-subfolder-count))
+					set lr-unhidden-file-count += lf-subfolder-count
+				else
+//					message str-concat(lf-folder,"/",lf-filename)
+					set lr-unhidden-file-count += 1
+				endif
+			endif
+		end-repeat
+	endif
+	if finish-dir-search() endif
+end-procedure
+
+//--------------------------------------------------------------------------------
+// 
+// Procedures to execute Git commands
+//
+//--------------------------------------------------------------------------------
+
+procedure initialise-folder-repository
+local
+	lf-folder-empty						type boolean
+	lf-one-entry						type string
+	lf-branch							like mb-name
+	do get-branch-name entry once returning lf-branch
+	if escape()
+		exit 1
+	endif
+	// 
+	// Check the folder contents
+	//
+	set lf-folder-empty = TRUE
+	if start-dir-search(ws-folder,spaces)
+		repeat
+			set lf-one-entry = next-dir-entry
+		until lf-one-entry = spaces
+			if lf-one-entry not in (".", "..")
+				set lf-folder-empty = FALSE
+				break
+			endif
+		endrepeat
+		if finish-dir-search() endif
+	else
+		message "Unable to check folder contents"  // security?
+		exit 1
+	endif
+	//
+	// initialise
+	//
+	close command-output and remove
+	open command-output temporary
+	set co-text =  concat("Initialising " ws-folder)
+	insert command-output
+	set co-text = if-then-else(lf-folder-empty,"Folder is empty","Folder contains files")
+	insert command-output
+	FLDRCMD(concat("git init --shared --initial-branch=" lf-branch),TRUE)
+	// our stuff..
+	do git-config-add-vgl-detail
+	//
+	// Before going on to add files prompt the user to review the git ignore
+	// file in case they want to remove subfolders.
+	//
+	message-box param-text("<<P1>><<BR>><<p2>>"
+		,concat("Before completing the initialisation, you should review the gitignore file."
+				," This is a good time to add any folders that should NOT be included in the Github"
+				," repo.  A good example is personal test folders.  These are specified by adding"
+				," the subfolder name followed by a trailing / ."
+				," See the last line as an example.")
+		,"Select YES to review the file or NO to add all subfolders.")
+		title is ws-function-title
+		message-buttons  MSG_BOX_YES_NO
+		default MSG_BOX_YES
+		icon MSG_BOX_QUESTION
+	if message-status = MSG_BOX_YES
+		do maintain-gitignore
+	endif
+	// add files, do an initial commit 
+	if not lf-folder-empty
+		FLDRCMD("git add .",TRUE)
+		FLDRCMD('git commit -a -m  "Initial commit"',TRUE)
+	endif
+	do clibvfile-display-text-file parameters file-name(command-output) 100 "Git Initialisation"
+end-procedure
+
+procedure git-config-add-vgl-detail
+	// name and email is simply used to tag your changes.
+	// we don't want to make this --local because there can be only one in the
+	// config of the repository.
+	FLDRCMD(concat("git config --global user.name " user-employee-name),TRUE)
+	FLDRCMD(concat("git config --global user.email " suc-user-email),TRUE)
+	//
+	// add the ssh command
+	// 
+	FLDRCMD(concat("git config --local core.sshCommand 'ssh -i  $HOME/.ssh/" SSHFILE "'" ),TRUE)
+	//
+	// make sure the current branch is the default for push commands
+	//
+	FLDRCMD("git config --local push.default current",TRUE)
+	//
+	// server.  e.g. we don't want .cld or .err or .op7 etc etc
+	// create gitignore - we only want certain file types to be stored on the
+	open text-file
+		file is str-concat(ws-folder,"/.gitignore")
+		create truncate permanent
+	ADDTEXT("#Ignore everything")
+	ADDTEXT("*.*") 
+	ADDTEXT("#Don't ignore:")
+	ADDTEXT("!*.spl") 
+	ADDTEXT("!*.sh") 
+	ADDTEXT("!*.pcs") 
+	ADDTEXT("!*.xml") 
+	ADDTEXT("!*.rst") 
+	ADDTEXT("!*.jpg") 
+	ADDTEXT("!*.gif") 
+	ADDTEXT("!*.png") 
+	ADDTEXT("!*.bmp") 
+	// python
+	ADDTEXT("# Required for any python code")
+	ADDTEXT("!*.html") 
+	ADDTEXT("!*.css") 
+	ADDTEXT("!*.py") 
+	// test folders
+	ADDTEXT("# Ignored subfolders")
+	ADDTEXT("rayb/")
+	close text-file
+endprocedure
+
+procedure git-create-branch
+parameters
+	lp-name								type varchar
+	//
+	FLDRCMD(concat("git branch " lp-name),TRUE)
+end-procedure
+
+procedure git-checkout
+parameters
+	lp-name								type varchar
+	//
+	FLDRCMD(concat("git checkout " lp-name),TRUE)
+end-procedure
+
+procedure git-add-new-remote
+parameters
+	lp-name								pic x(100) type string
+	lp-remote-repository				pic x(1024) type string
+	//
+	// initialise
+	//
+	//in github goto the reportistory and select the green code button and
+	//select the ssh option.  This will give the url for the repository.
+	//
+	FLDRCMD(concat("git remote add " lp-name " " lp-remote-repository),TRUE)
+	do validate-repository
+end-procedure
+
+procedure git-remove-remote
+parameters
+	lp-name								pic x(100) type string
+	FLDRCMD(concat("git remote remove " lp-name ),TRUE)
+	do validate-repository
+end-procedure
+
+procedure git-add
+parameters
+	lp-filename							pic x(1024) type string
+	//
+	if file-exists(lp-filename,false) != 1
+		message "File does not exist"
+		exit 1
+	endif
+	FLDRCMD(concat("git add "  lp-filename),TRUE)
+end-procedure
+
+procedure git-restore
+parameters
+	lp-filename							pic x(1024) type string
+	if file-exists(lp-filename,false) != 1
+		message "File does not exist"
+		exit 1
+	endif
+	FLDRCMD(concat("git restore " lp-filename),TRUE)
+end-procedure
+
+procedure git-commit
+parameters
+	lp-filename							pic x(1024) type string
+	lp-message							pic x(512) type string
+	//
+	FLDRCMD(concat('git commit -m "' lp-message '" ' lp-filename),TRUE)
+end-procedure
+
+procedure git-remote-show
+parameters
+	lp-remote-name					like mr-name
+	close command-output and remove
+	FLDRCMD(concat("git remote show " lp-remote-name),TRUE)
+	FLDRCMD("git push --dry-run",FALSE)
+	do clibvfile-display-text-file parameters are filename(command-output) 100 "Remote Status"
+end-procedure
+
+procedure git-clone
+parameters
+	lp-url-name							like mr-url
+	lp-folder							like ws-folder
+	lp-branch							like mr-url
+	close command-output and remove
+	// Can't do FLDRCMD here because the folder does not exist.
+	set ws-folder = lp-folder
+	if lp-branch = spaces
+		GENERALCMD(concat("git clone " lp-url-name " " lp-folder),TRUE)
+	else
+		GENERALCMD(concat("git clone --branch " lp-branch " " lp-url-name " " lp-folder),TRUE)
+		FLDRCMD(concat("git checkout " lp-branch),TRUE)
+	endif
+	// now add our configuration details
+	do git-config-add-vgl-detail
+	do validate-repository
+	do clibvfile-display-text-file parameters are filename(command-output) 100 "Clone Status"
+end-procedure
+
+procedure git-pull
+parameters
+	lp-remote-name					like mr-name
+	close command-output and remove
+	FLDRCMD(concat("git pull --commit "  lp-remote-name),TRUE)
+	do clibvfile-display-text-file parameters are filename(command-output) 100 "Clone Status"
+end-procedure
+
+screen get-commit-message
+returning
+	lr-message						pic x(512) type string
+	window
+		window-position 108
+	title "Enter commit message"
+	no-ok-cancel
+	responsive
+detail
+	screen-group // ---- Commit ----------------------------
+		title "Commit"  // The title is optional
+		accept lr-message
+			title "Commit Message"
+			default lr-message
+		before-accept
+			if screenmode = form-entry-defaults
+				set lr-message = format-picture(sys-time(),"yyyymmmdd HH:MM")
+			endif
+		end-before-accept
+	end-screen-group // ---- Commit --------------------------------------
+end-screen
+
+procedure remove-git-control
+	if file-exists(ws-folder,false) != 2
+		message "Main Folder is missing"
+		exit 1
+	endif
+	do validate-repository
+	if exit-status > 0
+		message "Not a valid repository"
+		exit 1
+	endif
+	if file-exists(concat(ws-folder,"/.git"),false) != 2
+		message-box param-text("<<P1>><<BR>><<p2>>"
+			,"Something very wroing.  Git status says all is well but the .git folder is missing"
+			,"Over to you.  I give up")
+			title is ws-function-title
+			message-buttons  MSG_BOX_CANCEL
+			icon MSG_BOX_STOP
+		exit
+	endif
+	command "sh" parameters are "-c" concat("rm -rf " concat(ws-folder,"/.git"))
+	if exit-status > 0
+		message-box param-text("<<P1>><<BR>><<p2>>"
+			,"Unable to remove .git folder."
+			,"Over to you.  I give up.")
+			title is ws-function-title
+			message-buttons  MSG_BOX_CANCEL
+			icon MSG_BOX_STOP
+		exit 1
+	endif
+	if file-exists(concat(ws-folder,"/.gitignore"),false) = 1
+		command "sh" parameters are "-c" concat("rm -f " concat(ws-folder,"/.gitignore"))
+		if exit-status > 0
+			message-box param-text("<<P1>><<BR>><<p2>><<BR>><<p3>>"
+				,"Unable to remove .gitignore file."
+				,"The .git folder has been removed."
+				,"Over to you.  I give up.")
+				title is ws-function-title
+				message-buttons  MSG_BOX_CANCEL
+				icon MSG_BOX_STOP
+			exit 1
+		endif
+	endif
+	do validate-repository // to re-establish value of ws-git-established
+	message-box "Git control successfully removed"
+		title is ws-function-title
+		message-buttons  MSG_BOX_OK
+		icon MSG_BOX_INFORMATION
+end-procedure
+
+procedure parse-git-status
+returning 
+	//  
+	// The ahead-behind indicator is for when the local repository does not
+	// match the remote repo
+	//
+	lr-ahead							type boolean
+	lr-behind							type boolean
+	// unstaged changes occur when a file has been changed but not git file
+	// add has occurred
+	lr-unstaged-changes					type boolean
+	// uncomitted changes are those that have had a file-add but no commit 
+	lr-uncommitted-changes				type boolean
+	// the name of the current local branch
+	lr-current-branch					type string
+	//
+	open command-output truncate temporary
+	FLDRCMD('git status',TRUE)
+	select *
+		from command-output
+	detail
+		if pattern(co-text, "^On branch") = 1
+			set lr-current-branch = substring(co-text,11,str-len(co-text))
+		elseif pattern(co-text, "^Your branch is ahead of 'origin/master' by ?* commit.") = 1
+			set lr-ahead = true
+		elseif pattern(co-text, "^Your branch is behind of 'origin/master' by ?* commit.") = 1
+			set lr-behind = true
+		elseif pattern(co-text, "^Changes not staged for commit:") = 1
+			set lr-unstaged-changes = true
+		elseif pattern(co-text, "^Changes to be committed:") = 1
+			set lr-uncommitted-changes = true
+		endif
+	end-select
+end-procedure
+
+procedure git-initial-remote-push
+parameters
+	lp-remote-name						type varchar
+	lp-new-branch-name					type varchar
+	// 
+	// Be VERY careful calling this routine.  It should only be used for the
+	// first push
+	//
+	close command-output and remove
+	FLDRCMD(concat('git push -u ' rtrim(lp-remote-name) ' ' lp-new-branch-name),TRUE)
+	do clibvfile-display-text-file parameters are file-name(command-output) 100 "Initial Push"
+end-procedure
+
+
+procedure git-remote-push
+parameters
+	lp-repo								type varchar
+	lp-branch							type varchar
+local
+	lf-count							type number
+
+/*
+git push <remote-name> <branch-name>
+This example will upload the local state of <branch-name> to the remote repository specified by <remote-name>
+*/
+			select lf-count = count(*) from mem-branches
+				where mb-location = REMOTE_LOCATION_NAME
+			end-select
+			if lf-count = 0
+				// there are no remote branches
+			endif
+	close command-output and remove
+	FLDRCMD(concat('git push ' lp-repo ' ' lp-branch),TRUE)
+	do clibvfile-display-text-file parameters are file-name(command-output) 100 "Remote Push"
+end-procedure
+
+//--------------------------------------------------------------------------------
+//
+// for ssh access....
+//
+//--------------------------------------------------------------------------------
+
+procedure ssh-setup
+local
+//	lf-ssh-folder						type varchar
+//	lf-ssh-filename						type varchar
+	lf-email							type varchar
+	lf-ssh-validation-status			type number
+	do ssh-validation 
+	set lf-ssh-validation-status = exit-status()
+	if exit-status() = 1
+		do get-email-for-ssh-keygen entry once returning lf-email
+		if escape()
+			exit 1
+		endif
+		/*
+		 create key in folder with no passphrase
+		
+		I started off thinking that I needed to have the key in some folder other than the default
+		(/home/.ssh) so that we could specify the path to the key in the config core.sshcommand.
+		But this raises another problem:  a) Users can't have their own key b) each git controlled folder needs a separate key
+
+		I have left the code here but this can probably be deleted...  
+
+		GENERALCMD(concat("ssh-keygen -t ed25519  "
+						" -C  " lf-email
+						" -f " SSHFULLPATH(lf-ssh-filename)
+						" -P ''"))
+
+		So now I am using the code below which creates the key in the users home/.ssh folder
+		(and core.sshcommand uses $HOME to point to this folder....
+		*/
+		if file-exists( SSHFULLPATH,FALSE)
+			message-box param-text("<<P1>><<BR>><<p2>>"
+				,"The ssh key file already exists.  You will need to remove it manually."
+				,SSHFULLPATH)
+				title is "File name conflict"
+				message-buttons  MSG_BOX_CANCEL
+			exit 1
+		endif
+		GENERALCMD(concat("ssh-keygen -t ed25519  "
+						" -C  " lf-email
+						" -f " SSHFULLPATH
+						" -P ''")
+					,TRUE)
+	endif
+	//
+	// Add github to known_hosts
+	//
+	if lf-ssh-validation-status in  (3,6,7)
+		GENERALCMD(concat("ssh-keyscan -t ed25519 github.com >> " SSHDIR "/known_hosts"),TRUE)
+	endif
+	//
+	// Add ~.ssh/config
+	//
+	if lf-ssh-validation-status in  (2,4,5)
+		do update-ssh-config
+	endif
+	//
+	do clibvfile-display-text-file parameters file-name(command-output) 100 "SSH Key Setup"
+	//
+	// Finally email the key to the github manager so that it can be added
+	//
+	if mail-start(concat("New Public Key from " login-id()))
+		if mail-add-line("The attached public key has been created") endif
+		if mail-add-line(concat("Host:" node-name())) endif
+		if mail-add-line(concat("User:" login-id())) endif
+		if mail-attach(concat(SSHFULLPATH,".pub"),"publickey.txt",0,0,0) endif
+		if not mail-send(GITHUBMGR,false,false)
+			message "The key has been created.  Send it to ray for inclusion"
+		endif
+	endif
+end-procedure
+
+screen get-email-for-ssh-keygen
+returning 
+	lr-email						type varchar
+	window
+		window-position 5
+		title "Github account email address"
+	responsive
+detail
+	screen-group // ---- User id ----------------------------
+		accept lr-email
+			title "Email Address"
+			help "Enter the email address that is used for your github account"
+	end-screen-group // ---- User id --------------------------------------
+end-screen
+
+procedure set-path-to-private-key
+	do ssh-validation
+	if exit-status() != 0
+		message "SSH Not correctly configured"
+		exit 1
+	endif
+	FLDRCMD(concat("git config --local core.sshCommand 'ssh -i  $HOME/.ssh/" SSHFILE "'" ),TRUE)
+	do validate-repository // to reload the mem file
+end-procedure
+
+procedure update-ssh-config
+local
+	lf-config-filename					pic x(1024) type string
+	//
+	set lf-config-filename  = concat(SSHDIR,"/config")
+	//
+	//  Check if file exists
+	//
+	if file-exists(lf-config-filename, False)
+		open text-file
+			file is lf-config-filename
+		on error
+			message "Ssh config exists but cannot open"
+			exit 1
+		endon
+		select * from text-file
+		detail
+			// trim leading spaces
+			set tf-text = ltrim(tf-text)
+			if pattern(uppercase(tf-text), "^HOST[ \t]GITHUB") != 0
+				// message "Git already configured - nothing to do"
+				exit 0 // nothing to do
+			endif
+		end-select
+	endif
+	//
+	// if we get to here then either the file does not exist
+	// or it does exist but github is not defined in it.
+	// We can simply open the file:  If it is not there then it will be
+	// created
+	//
+	open text-file
+		file is lf-config-filename
+		create permanent
+	on error
+		message "Unable to open file" error-description(file-status)
+		exit 1
+	endon
+	// just add the lines
+	ADDTEXT("Host github.com")
+	ADDTEXT(concat(TAB,"User git"))
+	ADDTEXT(concat(TAB,"IdentityFile " SSHDIR "/github"))
+	close text-file
+	// It is critical that the file ownership is 600
+	GENERALCMD(concat("chmod 600 " lf-config-filename),TRUE)
+end-procedure
+
+
+procedure ssh-validation
+returning
+	lr-message							pic x(1024) type string
+local
+	lf-found							type boolean
+	if file-exists(str-concat(SSHFULLPATH,".pub"),false) != 1
+		set lr-message = "No public key defined for github"
+		exit 1
+	endif
+	if file-exists(str-concat(SSHDIR,"/config"),false) != 1
+		set lr-message = "No SSH configuration file"
+		exit 2
+	endif
+	if file-exists(str-concat(SSHDIR,"/known_hosts"),false) != 1
+		set lr-message = "No Known Hosts file"
+		exit 3
+	endif
+	// For config and known hosts, check the contents
+	// config
+	set lf-found = FALSE
+	open text-file
+		file is concat(SSHDIR,"/config")
+	on error
+		message "Ssh config exists but cannot open"
+		exit 4
+	endon
+	select * from text-file
+	detail
+		// trim leading spaces
+		set tf-text = ltrim(tf-text)
+		if pattern(uppercase(tf-text), "^HOST[ \t]GITHUB") != 0
+			// message "Git already configured - nothing to do"
+			set lf-found = TRUE
+		endif
+	end-select
+	if not lf-found
+		set lr-message = "Github missing from config"
+		exit 5
+	endif
+	// known hosts
+	set lf-found = FALSE
+	open text-file
+		file is concat(SSHDIR,"/known_hosts")
+	on error
+		message "Ssh known_hosts exists but cannot open"
+		exit 6
+	endon
+	select * from text-file
+	detail
+		// trim leading spaces
+		set tf-text = ltrim(tf-text)
+		if pattern(uppercase(tf-text), "GITHUB.COM") != 1
+			// message "Git already configured - nothing to do"
+			set lf-found = TRUE
+		endif
+	end-select
+	if not lf-found
+		set lr-message = "Github missing from known_hosts"
+		exit 7
+	endif
+end-procedure
+
+//--------------------------------------------------------------------------------
+//
+// Ancilliary procedures
+//
+//--------------------------------------------------------------------------------
+
+procedure help-and-instructions
+#ifdef AUTODOC
+local
+	lf-source-name						pic x(1024) type string
+	lf-unc								pic x(20) type string
+	lf-path								pic x(1024) type string
+	lf-filename							pic x(1024) type string
+	lf-ext								pic x(20) type string
+	lf-paths							pic x(256) type string occurs 100
+	i 									type number
+	// Unfortunately the clib requires the full path and get-param(0) varies
+	// depending on how it is called....
+	do clibvfile-get-parts parameters are get-param(0)
+		returning lf-unc lf-path lf-filename lf-ext
+	if pattern(get-param(0),get-env("PRONTO")) = 1
+		// then we have the full path
+		set lf-source-name = str-concat(lf-path "/" lf-filename ".spl")
+	else
+		// must be in propath
+		do  clibvfile-pathlist-to-array 
+			parameters are get-env("PROPATH") ":"
+			returning lf-paths
+		repeat
+			set i +=  1
+		until lf-paths[i] = spaces
+			if file-exists(str-concat(lf-paths[i],"/",lf-path,"/",lf-filename,".spl"), FALSE)
+				set lf-source-name = str-concat(lf-paths[i],"/",lf-path,"/",lf-filename,".spl")
+				break
+			endif
+		end-repeat
+	endif
+	do clibvautodoc-one-html parameters 
+		lf-source-name
+		true // download
+		false // copyright
+		3 // toc level
+#else
+	message-box param-text("<<P1>><<BR>><<p2>>"
+		,"This program has been compiled without autodoc support."
+		,"You will need to read the source for the help.")
+		title is "Git Help"
+		message-buttons  MSG_BOX_CANCEL
+		icon MSG_BOX_INFORMATION
+#endif
+end-procedure
+

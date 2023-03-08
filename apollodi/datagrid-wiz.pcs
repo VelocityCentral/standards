@@ -1,0 +1,22 @@
+#PRONTO Screen Customiser File (Override statements only).
+#PCS_TIMESTAMP : Wed May 21 05:58:18 2014 rayb
+screen select-saved-projects
+	{
+	mode
+		{
+		name = "apollo"
+		add = true
+		text = "Apollo"
+		}
+	trigger
+		{
+		trigger_point = confirmed
+		name = "apollo"
+		run = "apollodi/definer" "-di" dim-project-id
+		type = pronto
+		}
+	window
+		{
+		window_size = 30,148
+		}
+	}

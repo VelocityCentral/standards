@@ -1,0 +1,4010 @@
+///////////////////////////////////////////////////////////////////////////
+// Program : trueform - TrueForm Manual fax email program 
+//=========================================================================//
+// Copyright (C) PRONTO Software Pty Ltd 1987 thru 2009
+//
+// PRONTO is a registered trademark of PRONTO Software Developments P/L.
+//
+// All Rights Reserved. Unauthorised copying is prohibited.
+//=========================================================================//
+// File : m9tfsend.spl
+//
+//
+//Program to handle manual fax ability from pronto.
+//Will also allow a manual email facility as well...........
+//
+//
+//<CALLING_METHODS>
+//
+//<METHOD>
+//<DESC> Manual send method 1 (Uses template 1 settings) 
+//<P1> '-menu1'
+//
+//<METHOD>
+//<DESC> Manual send method 2 (Uses template 2 settings) 
+//<P1> '-menu2'
+//
+//<METHOD>
+//<DESC> Manual send method 3 (Uses template 3 settings) 
+//<P1> '-menu3'
+//
+//<METHOD>
+//<DESC> Manual send method 4 (Uses template 4 settings) 
+//<P1> '-menu4'
+//
+//<METHOD>
+//<DESC> Manual send method 5 (Uses template 5 settings) 
+//<P1> '-menu5'
+//
+//<METHOD>
+//<DESC> TrueForm manual send settings maintenance 
+//<P1> '-setup'
+//
+//<METHOD>
+//<DESC> Direct Fax send - creates Fax tags based on setup in the trueform settings
+// and then forwards to as pronto print queue that is mapped to the faxing software
+// that has been setup
+//<P1> '-sendfax'
+//<P2> Recipient Name				
+//<P3> Recipient Name Line 2	
+//<P4> Recipient Name Line 3	
+//<P5> Recipient Department	
+//<P6> Recipient Fax Number	
+//<P7> Senders Name				
+//<P8> Senders Name Line 2	
+//<P9> Senders Name Line 3	
+//<P10> Senders Department	
+//<P11> Senders Fax Number	
+//<P12> Subject				
+//<P13> Coverpage Name/Template				
+//<P14> Coverpage file name (file containing coverpage text) must be a text file.				
+//<P15> Fax file name  - Text file containing fax info to be be faxed (if required)				
+//
+//<METHOD>
+//<DESC> TrueForm document delivery customer bulk maintenance 
+//<P1> '-customer'
+//<METHOD>
+//<DESC> TrueForm document delivery supplier bulk maintenance 
+//<P1> '-supplier'
+//<METHOD>
+//<DESC> TrueForm document delivery warehouse bulk maintenance 
+//<P1> '-warehouse'
+//<METHOD>
+//<DESC> TrueForm print preview 
+//  Passed without optional parameters will bring up spool file review screen
+//  If spool file passed without project, will attempt to find matching default project
+//	If passed trueform form project as well, will use passed form project...
+//	.
+//	Optional environment variables can be set to alter time to wait for the 
+//	Trueform output to be built and copied accross
+//	"TFRENDERDELAY" = time to wait for output to be processed by trueform, default = 30 seconds
+//	"TFCOPYDELAY" = time to wait to open PDF after being copied across, default = 2 seconds
+//<P1> -spoolview
+//<P2> (optional) spool file name - full spool file name including #P or .xml extension				
+//<P3> (optional) Matching trueform for project name    (without the extension .cdp6)	
+//
+//</CALLING_METHODS>
+//
+/////////////////////////////////////////////////////////////////////////////
+
+version-number "$Header: /apps/devel/src/bms/sys/RCS/m9tfsend.spl,v 1.28.1.33 2017/03/06 05:40:46 rhondaw Exp $"
+
+#include "../include/i8secabt.spl"
+#include "../include/i8secok.spl"
+#include "../include/bmsdef.spl"
+#include "../include/m1enqdeb.spl"		
+#include "../include/m2enqcre.spl"
+#include "../include/i85whse.spl"			//Warehouse maint
+#include "../include/iprogbar.spl"			//Warehouse maint
+link "clib/clib800"
+link "clib/trueform"
+link "clib/clibbillto" 					// find correct bill-to
+
+object tmp-template		type text 
+	record 
+		tmp-line			pic x(1000)
+	endrecord 
+
+object tmp-jobticket		type text 
+	record 
+		tmp-line		
+	endrecord 
+
+object tmp-jobticket2		type text 
+	record 
+		tmp-line		
+	endrecord 
+
+object tmp-reportfile		type text 
+	record 
+		tmp-line		
+	endrecord 
+
+object tmp-template-indexed		type memory 
+	record 
+		tmp-seq2			pic 9(8)v9
+		tmp-data			pic x(1000)
+	endrecord
+	key is tmp-seq2 unique
+
+
+object tmp-coverpage-text
+	type text
+	record
+		tmp-tct-text						pic x(300)
+	endrecord
+
+object tmp-spoolfiles
+	type memory
+	record
+		tmp-ts-key						pic x(20) type string
+		tmp-ts-spoolfile-id				type string pic x(30)
+		tmp-ts-owner					type string
+		tmp-ts-seq						pic 9(4)
+		tmp-ts-fileinfo					type string
+		tmp-ts-date-time				type date-time 
+		tmp-ts-description				pic x(50) type string
+		tmp-ts-form						pic x(30) type string
+		tmp-ts-pages					pic 9(5)
+		tmp-ts-numeric-lt-seq			pic x(5)
+		tmp-ts-tf-project				pic x(60)
+	endrecord
+	key is tmp-ts-spoolfile-id unique
+	key is tmp-ts-owner tmp-ts-spoolfile-id
+	key is tmp-ts-seq
+	key is tmp-ts-key
+	key is tmp-ts-owner tmp-ts-date-time desc 
+	key is tmp-ts-tf-project tmp-ts-seq
+
+object tmp-txt-spoolfiles
+	type external
+	separator is "|"
+	record 
+		tmp-ts-owner
+		tmp-ts-spoolfile-id
+	endrecord
+
+object tmp-spoolfile-header
+	type text
+	record
+		tmp-tsh-record				pic x(1023) type string
+	endrecord
+
+object tmp-email type memory 
+	record 
+		tmp-email							like mailer-name-email 
+		tmp-name							like na-name	
+		tmp-fax								pic x(30)
+		tmp-type							pic x(20)
+	endrecord	
+	key is tmp-email 
+
+object pronto-printers
+	type is external
+	separator is ','
+	record is
+		tmp-printer-name					type string pic x(15)
+		tmp-filler							pic x(1)
+	endrecord
+//	
+object tmp-printer-review
+	type is memory
+	record is
+		tmp-sequence						pic 999
+		tmp-printer-name
+	endrecord
+	key is tmp-sequence
+	key is tmp-printer-name
+
+
+	field 	
+		// only use these if director project has a plain text fall through...... (for xml and non TF reports)
+		ws-spoolfile-directory			type string pic x(250)
+		//
+		ws-prompt					like tftd-prompt occurs 24
+		ws-tag						like tftd-start occurs 24
+		ws-tag2						like tftd-end occurs 24
+		ws-section					like tftd-section occurs 24
+		ws-help						like tftd-help occurs 24
+		ws-mand						like tftd-mandatory occurs 24
+		ws-seq						like tftd-seq occurs 24
+		ws-content					pic x(100) type string occurs 15
+		ws-attached-file			pic x(30) type string occurs 99
+		ws-tagged					pic 9(8) 
+		ws-total-reports 			pic 9(8) 
+		ws-mapped-form				like fmse-code
+		//
+		ws-selected-reports			type numeric
+		ws-tmp-dir					type string pic x(250)
+		ws-report-file				type string pic x(250)
+		ws-to-fields				pic 99
+		ws-from-fields				pic 99
+		ws-detail-fields			pic 99
+		ws-to-row					pic 999 occurs 24
+		ws-from-row					pic 999 occurs 24
+		ws-detail-row				pic 999 occurs 24
+		ws-reenter					type boolean
+		ws-idd-code					like sys-description
+		ws-cover-ok					type boolean
+		ws-dummy					pic x
+		ws-fields					type boolean 
+		ws-col						pic 999
+		ws-window					pic 99
+		ws-spoolfile-display		pic 99
+		ws-cp-display				pic 99
+		ws-data-1					like tmp-data 
+		ws-data-2					like tmp-data 
+		ws-data-3					like tmp-data 
+		ws-data-4					like tmp-data 
+		ws-data-5					like tmp-data 
+		ws-data-6					like tmp-data 
+		ws-data-7					like tmp-data 
+		ws-data-8					like tmp-data 
+		ws-data-9					like tmp-data 
+		ws-data-10					like tmp-data 
+		ws-data-11					like tmp-data 
+		ws-data-12					like tmp-data 
+		ws-data-13					like tmp-data 
+		ws-data-14					like tmp-data 
+		ws-data-15					like tmp-data 
+		ws-data-16					like tmp-data 
+		ws-data-17					like tmp-data 
+		ws-data-18					like tmp-data 
+		ws-data-19					like tmp-data 
+		ws-data-20					like tmp-data 
+		ws-data-21					like tmp-data 
+		ws-data-22					like tmp-data 
+		ws-data-23					like tmp-data 
+		ws-data-24					like tmp-data 
+		ws-screen-title				pic x(60)
+		ws-ok						type boolean
+		ws-printers-loaded					pic 9
+		ws-preview					type boolean
+		ws-tod						pic x(20)
+		ws-preview-file				pic x(256)
+		ws-project					pic x(60)
+		ws-attachment-name			pic x(100)
+		ws-wait-1					pic 9(5)
+		ws-wait-2					pic 9(5)
+		ws-using-web-client			type boolean
+		
+	
+
+mode md-header 
+	prompt "Header"
+	help "Correct sender/recipient header details"
+	process correct
+mode md-attachments 
+	prompt "Spool Files"
+	help "Append/Remove spool file attachments."
+mode md-send
+	prompt "Send"
+	help "Send this transmission"
+mode md-prowp
+	prompt "CoverPage"
+	help "Insert the cover page text"
+	when ws-cover-ok 
+	always-show
+mode md-tag
+	prompt "Tag"
+	help "Select a spool file for attachment."
+	currency
+mode md-exit 
+	prompt "E&xit"
+	help "Exit this screen"
+mode md-settings
+	prompt "settings (just to play) "
+mode md-show 
+	prompt "Show"
+mode md-preview 
+	prompt "Preview"
+//	when not ws-using-web-client
+	always-show
+mode md-detail  
+	prompt "Detail"
+//mode md-load  
+//	prompt "Load From TF Template"
+mode md-preload  
+	prompt "Restore defaults"
+mode md-select  
+	prompt "Select"
+mode md-select1  
+	prompt "Select"
+	when ws-tagged < 1 
+	always-show
+mode md-done  
+	prompt "Done"
+mode md-select-mode
+	prompt 'Select'
+	currency
+
+#define SET_DATA(A) ws-data-A
+#define GET_DATA(A) get-field-value(concat("ws-data-",str(A)))
+
+#define F_ACCEPT(ROW,SECT,DISP)\
+	accept SET_DATA(ROW) @DISP,20 pic x(56)\
+		title ws-prompt[ROW]\
+		when ws-prompt[ROW] != space\
+		and ws-section[ROW] = SECT\
+		default SET_DATA(ROW)\
+		no-warning\
+		help concat("Enter ",strconcat(ws-prompt[ROW])," details here")\
+	on help-key\
+		do help-me\
+			parameter ROW SET_DATA(ROW)\
+			returning SET_DATA(ROW)\
+		reenter optional\
+	endon \
+	validations\
+		do data-validations\
+			parameter ws-prompt[ROW] SET_DATA(ROW) ws-mand[ROW] ws-help[ROW] ws-tag[ROW] ws-tag2[ROW]\
+		refresh data\
+		if ws-reenter = TRUE\
+			reenter \
+		endif 	\
+	endvalidations\
+
+#define V_SET(ROW,VALUE)\
+	set SET_DATA(ROW) = VALUE
+
+#define	DO_LOAD_TEMPLATE(A,B,C,D,E,F,G,H,I)\
+	set tftd-key = A\
+	set	tftd-seq	= B\
+	set	tftd-prompt = C\
+	set	tftd-start = D\
+	set	tftd-end = E\
+	set	tftd-accept = F\
+	set	tftd-mandatory = G\
+	set	tftd-help = H\
+	set	tftd-section = I\
+	insert trueform-template-data\
+	on error\
+	endon
+
+#define TAGGED	if-then-else(tmp-ts-seq = 1,white,0) on if-then-else(tmp-ts-seq = 1,green,0) 
+
+procedure main export
+	get system-control first
+	//
+	set ws-tmp-dir = BMSDEF_TEMP_DIR_NAME()
+	open tmp-spoolfiles truncate temporary
+	do get-idd-code	
+	//	
+	set ws-col = 299		
+	get trueform-manual-settings first 
+	on error 
+	endon 
+	set ws-wait-1 = num(getenv("TFRENDERDELAY"))
+	set ws-wait-2 = num(getenv("TFCOPYDELAY"))
+	if ws-wait-1 = 0
+		set ws-wait-1 = 30
+	endif 	
+	if ws-wait-2 = 0
+		set ws-wait-2 = 2
+	endif 	
+	//
+	set ws-using-web-client = get-system-metrics(7) // Non 0 = web client
+	//
+	if get-param(1) = "-menu1"
+		do i8secabt-check-abort
+			parameters sys-consolidation-division login-id() "TFM" "R001"
+			returning ws-screen-title
+		if tms-prompt1 != space 
+			do check-window-size
+				parameter "1"
+			do interactive-send-1 once 
+				parameter  "1" tms-type1 tms-queue1
+				initial-mode entry  
+		else		
+			message "This Send option is not configured"
+		endif 	
+	elseif get-param(1) = "-menu2"
+		do i8secabt-check-abort
+			parameters sys-consolidation-division login-id() "TFM" "R002"
+			returning ws-screen-title
+		if tms-prompt2 != space 
+			do check-window-size
+				parameter "2"
+			do interactive-send-2 once 
+				parameter "2" tms-type2 tms-queue2
+				initial-mode entry  
+		else		
+			message "This Send option is not configured"
+		endif 	
+	elseif get-param(1) = "-menu3"
+		do i8secabt-check-abort
+			parameters sys-consolidation-division login-id() "TFM" "R003"
+			returning ws-screen-title
+		if tms-prompt3 != space 
+			do check-window-size
+				parameter "3"
+			do interactive-send-3 once 
+				parameter "3" tms-type3 tms-queue3
+				initial-mode entry  
+		else		
+			message "This Send option is not configured"
+		endif 	
+	elseif get-param(1) = "-menu4"
+		do i8secabt-check-abort
+			parameters sys-consolidation-division login-id() "TFM" "R004"
+			returning ws-screen-title
+		if tms-prompt4 != space 
+			do check-window-size
+				parameter "4"
+			do interactive-send-4 once 
+				parameter "4" tms-type4 tms-queue4
+				initial-mode entry  
+		else		
+			message "This Send option is not configured"
+		endif 	
+	elseif get-param(1) = "-menu5"
+		do i8secabt-check-abort
+			parameters sys-consolidation-division login-id() "TFM" "R005"
+			returning ws-screen-title
+		if tms-prompt5 != space 
+			do check-window-size
+				parameter "5"
+			do interactive-send-5 once 
+				parameter "5" tms-type5 tms-queue5
+				initial-mode entry  
+		else		
+			message "This Send option is not configured"
+		endif 	
+	elseif get-param(1) = "-setup"
+		do i8secabt-check-abort
+			parameters sys-consolidation-division login-id() "TFD" "M005"
+			returning ws-screen-title
+		do setup-screen 
+	elseif get-param(1) = "-upgrade"
+		do load-initial-data
+	elseif get-param(1) = "-sendfax"
+		do i8secok-check-ok
+			parameters sys-consolidation-division login-id() "TFM" "R006"
+			returning ws-ok
+		if not ws-ok 
+			do i8secok-check-ok
+				parameters sys-consolidation-division login-id() "FAXM" "R001"
+				returning ws-ok
+		endif 
+		if ws-ok 
+			do send-fax 
+				parameters
+					//to
+					get-param(2)
+					get-param(3)
+					get-param(4)
+					get-param(5)
+					get-param(6)
+					//from
+					get-param(7)
+					get-param(8)
+					get-param(9)
+					get-param(10)
+					get-param(11)
+					//fax details
+					get-param(12)
+					get-param(13)
+					get-param(14)
+					get-param(15)
+		else
+			message "Faxing requires [FAXM R001] or [TFM R006] security access"   
+		endif 
+	elseif get-param(1) = "-supplier"
+		do i8secabt-check-abort
+			parameters sys-consolidation-division login-id() "TFD" "M003"
+			returning ws-screen-title
+		do bulk-maintenance
+			parameter "S" SPACES 
+	elseif get-param(1) = "-customer"
+		do i8secabt-check-abort
+			parameters sys-consolidation-division login-id() "TFD" "M002"
+			returning ws-screen-title
+		do bulk-maintenance
+			parameter "C" SPACES
+	elseif get-param(1) = "-warehouse"
+		do i8secabt-check-abort
+			parameters sys-consolidation-division login-id() "TFD" "M004"
+			returning ws-screen-title
+		do bulk-maintenance
+			parameter "W" SPACES
+	elseif get-param(1) = "-spoolview"
+//		if ws-using-web-client
+//			message-box "This feature is not currently available in a browser"
+//				title "Feature not available"
+//				message-buttons MSG_BOX_OK
+//				icon MSG_BOX_INFORMATION
+//		else	
+			do i8secabt-check-abort
+				parameters sys-consolidation-division login-id() "TFD" "E001"
+				returning ws-screen-title
+			if get-param(2) != space  
+				if get-param(3) = space 
+					do find-form 
+						parameter get-param(2)
+				else
+					set ws-project = get-param(3)
+				endif 
+				if ws-project != space 	
+					do print-preview
+						parameter get-param(2) ws-project 
+				else		
+					message "Could not find a matching project"
+				endif 
+			else	
+				set ws-preview = TRUE
+				do get-attachments 
+				set ws-preview = FALSE
+			endif
+//		endif
+	endif
+endprocedure //main ----------------------------------------------------------
+
+screen interactive-send-1
+////////////////////////////////////////////////////////////////
+//Changes made to this procedure need to be replicated in     //
+// interactive-send1 <-> 5                                    //  
+////////////////////////////////////////////////////////////////
+parameter 
+	lp-key				like tftd-key 
+	lp-type				pic x
+	lp-queue			pic x(50)
+	//
+	window @1,1,to @ws-window,100
+		title is ws-screen-title
+	form-entry	
+	allowed correct md-attachments md-prowp md-send
+before
+	do common-before 
+		parameter  
+			lp-type
+detail
+	accept ws-dummy @1,ws-col
+		when not ws-fields
+		help "Choose send options"
+	///////////////////////////////
+	// to options	
+	///////////////////////////////	
+	F_ACCEPT(1,"T",ws-to-row[1])
+	F_ACCEPT(2,"T",ws-to-row[2])
+	F_ACCEPT(3,"T",ws-to-row[3])
+	F_ACCEPT(4,"T",ws-to-row[4])
+	F_ACCEPT(5,"T",ws-to-row[5])
+	F_ACCEPT(6,"T",ws-to-row[6])
+	F_ACCEPT(7,"T",ws-to-row[7])
+	F_ACCEPT(8,"T",ws-to-row[8])
+	F_ACCEPT(9,"T",ws-to-row[9])
+	F_ACCEPT(10,"T",ws-to-row[10])
+	F_ACCEPT(11,"T",ws-to-row[11])
+	F_ACCEPT(12,"T",ws-to-row[12])
+	F_ACCEPT(13,"T",ws-to-row[13])
+	F_ACCEPT(14,"T",ws-to-row[14])
+	F_ACCEPT(15,"T",ws-to-row[15])
+	F_ACCEPT(16,"T",ws-to-row[16])
+	F_ACCEPT(17,"T",ws-to-row[17])
+	F_ACCEPT(18,"T",ws-to-row[18])
+	F_ACCEPT(19,"T",ws-to-row[19])
+	F_ACCEPT(20,"T",ws-to-row[20])
+	F_ACCEPT(21,"T",ws-to-row[21])
+	F_ACCEPT(22,"T",ws-to-row[22])
+	F_ACCEPT(23,"T",ws-to-row[23])
+	F_ACCEPT(24,"T",ws-to-row[24])
+	///////////////////////////////
+	// From options	
+	///////////////////////////////	
+	F_ACCEPT(1,"F",ws-from-row[1])
+	F_ACCEPT(2,"F",ws-from-row[2])
+	F_ACCEPT(3,"F",ws-from-row[3])
+	F_ACCEPT(4,"F",ws-from-row[4])
+	F_ACCEPT(5,"F",ws-from-row[5])
+	F_ACCEPT(6,"F",ws-from-row[6])
+	F_ACCEPT(7,"F",ws-from-row[7])
+	F_ACCEPT(8,"F",ws-from-row[8])
+	F_ACCEPT(9,"F",ws-from-row[9])
+	F_ACCEPT(10,"F",ws-from-row[10])
+	F_ACCEPT(11,"F",ws-from-row[11])
+	F_ACCEPT(12,"F",ws-from-row[12])
+	F_ACCEPT(13,"F",ws-from-row[13])
+	F_ACCEPT(14,"F",ws-from-row[14])
+	F_ACCEPT(15,"F",ws-from-row[15])
+	F_ACCEPT(16,"F",ws-from-row[16])
+	F_ACCEPT(17,"F",ws-from-row[17])
+	F_ACCEPT(18,"F",ws-from-row[18])
+	F_ACCEPT(19,"F",ws-from-row[19])
+	F_ACCEPT(20,"F",ws-from-row[20])
+	F_ACCEPT(21,"F",ws-from-row[21])
+	F_ACCEPT(22,"F",ws-from-row[22])
+	F_ACCEPT(23,"F",ws-from-row[23])
+	F_ACCEPT(24,"F",ws-from-row[24])
+	///////////////////////////////
+	// Detail options	
+	///////////////////////////////	
+	F_ACCEPT(1,"D",ws-detail-row[1])
+	F_ACCEPT(2,"D",ws-detail-row[2])
+	F_ACCEPT(3,"D",ws-detail-row[3])
+	F_ACCEPT(4,"D",ws-detail-row[4])
+	F_ACCEPT(5,"D",ws-detail-row[5])
+	F_ACCEPT(6,"D",ws-detail-row[6])
+	F_ACCEPT(7,"D",ws-detail-row[7])
+	F_ACCEPT(8,"D",ws-detail-row[8])
+	F_ACCEPT(9,"D",ws-detail-row[9])
+	F_ACCEPT(10,"D",ws-detail-row[10])
+	F_ACCEPT(11,"D",ws-detail-row[11])
+	F_ACCEPT(12,"D",ws-detail-row[12])
+	F_ACCEPT(13,"D",ws-detail-row[13])
+	F_ACCEPT(14,"D",ws-detail-row[14])
+	F_ACCEPT(15,"D",ws-detail-row[15])
+	F_ACCEPT(16,"D",ws-detail-row[16])
+	F_ACCEPT(17,"D",ws-detail-row[17])
+	F_ACCEPT(18,"D",ws-detail-row[18])
+	F_ACCEPT(19,"D",ws-detail-row[19])
+	F_ACCEPT(20,"D",ws-detail-row[20])
+	F_ACCEPT(21,"D",ws-detail-row[21])
+	F_ACCEPT(22,"D",ws-detail-row[22])
+	F_ACCEPT(23,"D",ws-detail-row[23])
+	F_ACCEPT(24,"D",ws-detail-row[24])
+	//
+	confirm auto 
+	confirmed
+		if screenmode() = md-prowp
+		or (screenmode() = entry 
+		and lp-type in {"0" "1" "2"})
+			do coverpage 
+		endif	
+		if screenmode() = md-attachments
+		or screenmode() = entry
+			do get-attachments 
+			if lp-type = "0"
+				do set-file-name
+				refresh data	
+			endif 	
+		endif	
+		if screenmode() = md-send
+			do manual-validations
+			refresh data	
+			if ws-reenter = TRUE
+				continue
+			else
+				do send-to-queue
+					parameter 
+						lp-key		
+						lp-type		
+						lp-queue	
+			endif 
+		endif		
+	endconfirm 
+endscreen //interactive-send-1 -----------------------------------------------
+
+procedure send-mail-fax
+parameter
+	lp-queue	pic x(50)
+	//////////////////////////////////////////////////////////////	
+	//	Queue must be plain text if going to be processed by TF
+	/////////////////////////////////////////////////////////////
+	report "Sending interacive data for TF"
+		no-xml
+		direct to lp-queue
+		width 300
+		length 300
+		no-message 
+	extract tmp-jobticket	
+		all
+	detail
+		/////////////////////////////////////////////////
+		//Try and keep print aspect the same.. (FF in the coprrect place) 
+		// if we add our own our print wont repaginate for us when it hits the length ....
+		/////////////////////////////////////////////////
+		if substring(tmp-line,1,1) = ascii-char(12)
+			string tmp-line deleting 1 
+			page
+		endif 
+		print substring(tmp-line,1,255) col 1
+			// limitation of 255 characters that can be printed at this point in time .... doh.
+			 substring(tmp-line,256,500) col 256
+	endextract 
+	report finished
+/////////////////////////////////////////////////////////////////////////////////	
+/*DEBUG ---------------------------------------------------------------	
+	//////////////////////////////////////////////////////////////	
+	//	Queue must be plain text if going to be processed by TF
+	/////////////////////////////////////////////////////////////
+	report "Sending interacive data for TF"
+		no-xml
+		width 300
+		length 300
+	extract tmp-jobticket	
+		all
+	detail
+		/////////////////////////////////////////////////
+		//Try and keep print aspect the same.. (FF in the coprrect place) 
+		// if we add our own our print wont repaginate for us when it hits the length ....
+		/////////////////////////////////////////////////
+		if substring(tmp-line,1,1) = ascii-char(12)
+			string tmp-line deleting 1 
+			page
+		endif 
+		print substring(tmp-line,1,255) col 1
+			// limitation of 255 characters that can be printed at this point in time .... doh.
+			 substring(tmp-line,256,500) col 256
+	endextract 
+	report finished
+DEBUG ---------------------------------------------------------------*/	
+/////////////////////////////////////////////////////////////////////////////////	
+endprocedure //send-mail-fax -------------------------------------------------
+
+procedure coverpage		
+local
+	lf-count			pic 99
+	//
+	command "prowp" parameters are
+		"-h" "CoverPage" "-b" "15" 
+		 100 "5" "18" 
+		"-t" "0" "-r" "0" filename(tmp-coverpage-text)
+	set lf-count = 1
+	set ws-content[*] = SPACES
+	extract tmp-coverpage-text
+		all
+	detail
+		if lf-count <= 15
+			set ws-content[lf-count] = tmp-tct-text
+			set lf-count += 1
+		else
+			break
+		endif
+	endextract
+	do cover-page-text
+endprocedure //coverpage -----------------------------------------------------
+
+procedure cover-page-text
+	local 
+		lf-i		pic 99
+	for lf-i = 1 to 3
+		display ws-content[lf-i] @ws-cp-display + lf-i,2 pic x(98) prompt
+	endfor	
+endprocedure //cover-page-text -----------------------------------------------
+
+procedure get-attachments 
+local 
+	lf-count			pic 99
+	lf-pages			pic 9(3)
+	//
+	do attach-spoolfiles 
+	set ws-attached-file[*] = SPACES
+	set ws-attachment-name = space  
+	set lf-count = 1
+	set lf-pages = 1 // Cover Page.
+	extract tmp-spoolfiles
+		on index tmp-ts-seq
+		key is 1
+	detail
+		if lf-count <= 90
+			set ws-attached-file[lf-count] = tmp-ts-spoolfile-id
+			set lf-count += 1
+		endif
+		set lf-pages += tmp-ts-pages
+	after 
+		if lf-count = 2 
+			set ws-attachment-name = strconcat(tmp-ts-description,".pdf")
+			while pattern(substring(ws-attachment-name,1,strlen(ws-attachment-name))," ")
+				string  ws-attachment-name replacing "_" AT pattern(substring(ws-attachment-name,1,strlen(ws-attachment-name))," ")
+			endwhile
+		elseif lf-count > 2
+			set ws-attachment-name = "Multiple_reports.pdf"
+		endif
+	endextract
+	do attachment-display
+endprocedure //get-attachments -----------------------------------------------
+
+procedure attachment-display
+	local 
+		lf-i		pic 99
+	for lf-i = 1 to ws-spoolfile-display
+		display ws-attached-file[lf-i] @1 + lf-i,82.5 pic x(17) prompt
+	endfor	
+endprocedure //attachment-display --------------------------------------------
+
+procedure send-to-queue
+parameter 
+	lp-key				like tftd-key 
+	lp-type				pic x
+	lp-queue			pic x(50)
+local 
+	lf-feed				type boolean
+	//
+	/////////////////////////////////////////////////////////
+	//Step 1.   Convert spool files to text files
+	/////////////////////////////////////////////////////////
+	if ws-tagged = zero
+		do create-job-ticket				
+			parameter lp-key lp-type
+		do send-mail-fax	
+			parameter lp-queue
+	else
+		/////////////////////////////////////////////
+		// Method for creating separate files and send nodes....
+		/////////////////////////////////////////////
+		extract tmp-spoolfiles 
+			on index tmp-ts-tf-project tmp-ts-seq 
+			when tmp-ts-seq > 0
+		before tmp-ts-tf-project 	
+			//////////////////////////////////////////////////////////
+			//Step 2.    create header 
+			//////////////////////////////////////////////////////////
+			if lp-type = "P"
+				set ws-tod = str(gmt())
+				open tmp-jobticket truncate temporary 
+				set tmp-line = "%cpBegin"
+				insert tmp-jobticket
+				set tmp-line = concat("%cpParam:-s",tms-preview-project)
+				insert tmp-jobticket
+				set tmp-line = concat("%cpUserData:",tmp-ts-tf-project)
+				insert tmp-jobticket
+				set tmp-line = concat("%cpDate:",ws-tod)
+				insert tmp-jobticket
+				set tmp-line = concat("%cpUser:",login-id())
+				insert tmp-jobticket
+				set tmp-line = "%cpEnd"
+				insert tmp-jobticket
+				set ws-preview-file = strconcat(tms-preview-directory,"\",login-id(),ws-tod,".pdf")
+			else
+				do create-job-ticket				
+					parameter lp-key lp-type
+			endif 		
+		detail
+			set ws-report-file = strconcat(ws-tmp-dir,'/',tmp-ts-spoolfile-id,"-",str(pid()),".txt")
+			command 'proprint'	parameters '-t' tmp-ts-spoolfile-id ws-report-file
+			////////////////////////////////////////////////////////
+			//consolidate like projects 
+			////////////////////////////////////////////////////////
+			open tmp-reportfile 
+				file is ws-report-file
+			on error 
+				message "There was an error processing the spool file(s)" ws-report-file
+			else
+				extract tmp-reportfile 
+					all
+				before	
+					set lf-feed = FALSE 
+				detail 
+					//////////////////////////////////////////////////////////////////
+					//Need to insert a formfeed here to separate from the last report
+					//////////////////////////////////////////////////////////////////
+					if not lf-feed
+						if substring(tmp-line,1,1) != ascii-char(12) 
+							string tmp-line inserting ascii-char(12) at 1
+						endif 
+						set lf-feed = true 	
+					endif 	
+					insert tmp-jobticket
+				endextract 
+			endon 	
+			close tmp-reportfile and remove 
+		after tmp-ts-tf-project 	
+			//////////////////////////////////////////////////////////
+			//Step 4.    send to Queue  (truform email or fax)  
+			//////////////////////////////////////////////////////////
+			do send-mail-fax	
+				parameter lp-queue
+		endextract
+	endif
+endprocedure //send-to-queue -------------------------------------------------
+
+procedure load-up-template 	
+	parameter 
+		lp-key		like tftd-key
+	local
+		lf-count			like tftd-seq
+	//
+	set ws-data-1 = space 	
+	set ws-data-2 = space 	
+	set ws-data-3 = space 	
+	set ws-data-4 = space 	
+	set ws-data-5 = space 	
+	set ws-data-6 = space 	
+	set ws-data-7 = space 	
+	set ws-data-8 = space 	
+	set ws-data-9 = space 	
+	set ws-data-10 = space 	
+	set ws-data-11 = space 	
+	set ws-data-12 = space 	
+	set ws-data-13 = space 	
+	set ws-data-14 = space 	
+	set ws-data-15 = space 	
+	set ws-data-16 = space 	
+	set ws-data-17 = space 	
+	set ws-data-18 = space 	
+	set ws-data-19 = space 	
+	set ws-data-20 = space 	
+	set ws-data-21 = space 	
+	set ws-data-22 = space 	
+	set ws-data-23 = space 	
+	set ws-data-24 = space 	
+	set ws-help[*] = space 	
+	set ws-mand[*] = space 	
+	set ws-prompt[*] = space 	
+	set ws-tag[*] = space 	
+	set ws-tag2[*] = space 	
+	set ws-section[*] = space 	
+	set ws-seq[*] = zero  	
+	set ws-detail-row[*] = 99
+	set ws-to-row[*] = 99
+	set ws-from-row[*] = 99
+	//
+	set	ws-to-fields = 0			
+	set	ws-from-fields = 0			
+	set	ws-detail-fields = 0		
+	//
+	set lf-count = 0 
+	//
+	extract trueform-template-data 
+		on index tftd-key tftd-seq
+		key is lp-key 0 
+		next same tftd-key 
+		when tftd-accept = "Y"
+	detail 
+		if lf-count <= 24    // too ridiculous to have more ......	
+			set lf-count += 1
+			set ws-mand[lf-count] = tftd-mandatory
+			set ws-prompt[lf-count] = tftd-prompt
+			set ws-tag[lf-count] = tftd-start
+			set ws-tag2[lf-count] = tftd-end
+			set ws-section[lf-count] = tftd-section
+			set ws-help[lf-count] = tftd-help 	
+			set ws-seq[lf-count] = tftd-seq
+			switch on tftd-section
+			case "T"	
+				set	ws-to-fields += 1			
+				set ws-to-row[lf-count] = ws-to-fields
+			case "F"	
+				set	ws-from-fields += 1			
+				set ws-from-row[lf-count] = ws-from-fields
+			else 	
+				set	ws-detail-fields += 1		
+				set ws-detail-row[lf-count] = ws-detail-fields
+			endswitch
+		endif 
+	after 
+		for lf-count = 1 to 24
+			if ws-to-fields = zero 
+				if ws-from-fields = zero 
+					set ws-detail-row[lf-count] += 1 
+				else	
+					set ws-from-row[lf-count] += 1 
+					set ws-detail-row[lf-count] += ws-from-fields + 3 
+				endif 
+			else
+				set ws-to-row[lf-count] += 1
+				if ws-from-fields = zero 
+					set ws-detail-row[lf-count] += ws-to-fields + 3 
+				else
+					set ws-from-row[lf-count] += ws-to-fields + 3 
+					set ws-detail-row[lf-count] += ws-to-fields + 5 + ws-from-fields 
+				endif 
+			endif
+		endfor 
+	endextract 
+endprocedure //load-up-template ----------------------------------------------
+
+procedure create-job-ticket 	
+	parameter 
+		lp-key		like tftd-key	
+		lp-type		pic x	
+	local
+		lf-count		like tftd-seq
+		lf-length		pic 9(8)
+		lf-count2		pic 9(8)
+		lf-data			like ws-data-1
+	/////////////////////////////////////////////
+	//sub in any escape character 
+	/////////////////////////////////////////////
+	if lp-type = "1"
+		if tms-fax-escape-insert != space 
+		and tms-fax-escape1 != space 
+			for lf-count = 1 to 24 
+				set lf-data = GET_DATA(lf-count)
+				set lf-length = strlen(lf-data)
+				for lf-count2 = 1 to lf-length 
+					if substring(lf-data,lf-count2,lf-count2) = tms-fax-escape1
+					and substring(lf-data,lf-count2 - 1, lf-count2 - 1) != tms-fax-escape-insert
+						string lf-data inserting tms-fax-escape-insert at lf-count2
+						set lf-length += 1
+					endif
+				endfor
+			endfor 	
+		endif 	
+		if tms-fax-escape-insert != space 
+		and tms-fax-escape2 != space 
+			for lf-count = 1 to 24 
+				set lf-data = GET_DATA(lf-count)
+				set lf-length = strlen(lf-data)
+				for lf-count2 = 1 to lf-length 
+					if substring(lf-data,lf-count2,lf-count2) = tms-fax-escape2
+					and substring(lf-data,lf-count2 - 1, lf-count2 - 1) != tms-fax-escape-insert
+						string lf-data inserting tms-fax-escape-insert at lf-count2
+						set lf-length += 1
+					endif
+				endfor
+			endfor 	
+		endif 	
+	elseif lp-type = "2"
+		if tms-other-escape-insert != space 
+		and tms-other-escape1 != space 
+			for lf-count = 1 to 24 
+				set lf-data = GET_DATA(lf-count)
+				set lf-length = strlen(lf-data)
+				for lf-count2 = 1 to lf-length 
+					if substring(lf-data,lf-count2,lf-count2) = tms-other-escape1
+					and substring(lf-data,lf-count2 - 1, lf-count2 - 1) != tms-other-escape-insert
+						string lf-data inserting tms-other-escape-insert at lf-count2
+						set lf-length += 1
+					endif
+				endfor
+			endfor 	
+		endif 	
+		if tms-other-escape-insert != space 
+		and tms-other-escape2 != space 
+			for lf-count = 1 to 24 
+				set lf-data = GET_DATA(lf-count)
+				set lf-length = strlen(lf-data)
+				for lf-count2 = 1 to lf-length 
+					if substring(lf-data,lf-count2,lf-count2) = tms-other-escape2
+					and substring(lf-data,lf-count2 - 1, lf-count2 - 1) != tms-other-escape-insert
+						string lf-data inserting tms-other-escape-insert at lf-count2
+						set lf-length += 1
+					endif
+				endfor
+			endfor 	
+		endif 	
+	endif 
+	//////////////////////////////////////////////
+	//load up temp table 
+	//////////////////////////////////////////////
+	open tmp-template-indexed truncate temporary 
+	for lf-count = 1 to 24
+				set lf-data = GET_DATA(lf-count)
+		set tmp-seq2 = ws-seq[lf-count]
+		if tmp-seq2 != 0 
+			set tmp-data = lf-data
+			insert tmp-template-indexed
+		endif 	
+	endfor 
+	///////////////////////////////////////////////
+	//insert TF commands
+	///////////////////////////////////////////////
+	open tmp-jobticket truncate temporary 
+	if ws-tagged = zero 
+	and lp-type in {"1" "2"}
+		//just send tags through.... (Nothing for TF to do) 
+		//Requires Queue to be setup exact   (print , not fail)
+	else
+		set tmp-line = "%cpBegin"
+		insert tmp-jobticket
+		set tmp-line = concat("%cpParam:-s",tmp-ts-tf-project)
+		insert tmp-jobticket
+		set tmp-line = concat("%cpDate:",julian-to-date(today()))
+		insert tmp-jobticket
+		set tmp-line = concat("%cpUser:",login-id())
+		insert tmp-jobticket
+		if lp-type in { "1" "2"}
+			set tmp-line = "%cpFaxBegin"  
+			insert tmp-jobticket
+		elseif lp-type = "0"
+			set tmp-line = "%cpEmailBegin" 
+			insert tmp-jobticket
+		endif 
+	endif 	
+	////////////////////////////////////////////////
+	// Add in body / coverpage text if it exists  
+	////////////////////////////////////////////////
+	extract tmp-coverpage-text
+		all
+	before 
+		set lf-count = 1
+	detail 
+		if lp-type = "1"
+			if lf-count = 1
+				set tmp-line = strconcat(tms-fax-cover-1s,tmp-tct-text,tms-fax-cover-1e) 
+			else	
+				set tmp-line = strconcat(tms-fax-cover-2s,tmp-tct-text,tms-fax-cover-2e) 
+			endif 
+			insert tmp-jobticket
+		elseif lp-type = "2"
+			if lf-count = 1
+				set tmp-line = strconcat(tms-other-cover-1s,tmp-tct-text,tms-other-cover-1e) 
+			else	
+				set tmp-line = strconcat(tms-other-cover-2s,tmp-tct-text,tms-other-cover-2e) 
+			endif 
+			insert tmp-jobticket
+		elseif lp-type = "0"
+			if lf-count = 1
+				set tmp-line = strconcat("%cpEmail:-BODY",tmp-tct-text)
+			else	
+				set tmp-line = tmp-tct-text 
+			endif 
+			insert tmp-jobticket
+		else // Space 	
+			// No way to attach a coverpage 	
+		endif 
+		set lf-count = 0
+	endextract 
+	///////////////////////////////////////////////
+	//insert template commands/variables
+	///////////////////////////////////////////////
+	extract trueform-template-data 
+		on index tftd-key tftd-seq
+		key is lp-key 0 
+		next same tftd-key 
+	detail 
+		//////////////////////////////////////////////////
+		//Need to ignore coverpage, body text codes
+		//////////////////////////////////////////////////
+		if tftd-start in {tms-fax-cover-1s tms-fax-cover-2s "%cpEmail:-BODY"}
+			continue
+		endif 	
+		//
+		/////////////////////////////////////////////////////////////////
+		//This captures all the static and User entered fields
+		/////////////////////////////////////////////////////////////////
+		get tmp-template-indexed
+			on index tmp-seq2
+			key is tftd-seq
+		on error 
+			set tmp-data = space 
+		endon 
+		set tmp-line = strconcat(tftd-start,tmp-data,tftd-end)
+		insert tmp-jobticket
+	endextract 
+	///////////////////////
+	//Finish it off.
+	///////////////////////
+	if ws-tagged = zero 
+	and lp-type in {"1" "2"}
+		//just send faxmail tags through....
+	else
+		if lp-type in {"1" "2"} 
+			set tmp-line = "%cpFaxEnd"  
+			insert tmp-jobticket
+		elseif lp-type = "0"
+			set tmp-line = "%cpEmailEnd" 
+			insert tmp-jobticket
+		endif 
+		set tmp-line = "%cpEnd"
+		insert tmp-jobticket
+	endif 	
+endprocedure //create-job-ticket ---------------------------------------------
+
+///////////////////////////////////////////////////////
+//
+//From here down is the new proprint .......
+// Just using to select files.
+//
+// could go in separate program
+// UI is shithouse ... need to fix this up
+//
+///////////////////////////////////////////////////////
+
+//////////////////////////////////////////////////////////
+// This procedure looks like it is done this way for speed
+//////////////////////////////////////////////////////////
+screen attach-spoolfiles
+	local	
+		lf-spoolfile-number				pic x(20)
+		lf-user							type string pic x(30)
+		lf-spools-found					type numeric
+	//
+	window @19,30 to @23,80
+		title is concat("Attach Spool Files: ",ws-spoolfile-directory)
+	allow correct 
+before
+	do set-spoolfile-directory
+	//
+	if operating-system = "UNIX"
+		display "Created By    :" @21,32
+	endif
+	set	lf-user = login-id()
+	set lf-spools-found = ZERO
+detail
+	accept lf-spoolfile-number @20,48 
+		help "Enter a spool file number - (#P)nnnnn , nnnnn(.xml) or spaces = all,"
+		optional
+		title "Report File Number:" 
+	//
+	accept lf-user @21,48
+		help "Enter the name of a user, space for all users."
+		when lf-spools-found = ZERO
+		and operating-system = "UNIX"
+		no-clear
+		optional
+	confirm auto
+	confirmed
+		display "Loading Spool Files" @22,41 bold prompt
+		do load-reports-to-tmp-spoolfile
+			parameter lf-spoolfile-number lf-user   
+			returning lf-spools-found
+		//
+		if lf-spools-found = 0
+			display "No Spool File Found" @22,41 bold prompt
+			message "No Reports Found" 
+			reenter lf-spoolfile-number optional
+		else
+			//We found something.. go select one 
+			//beginning with the first one
+			get tmp-spoolfiles first
+				on index tmp-ts-owner tmp-ts-date-time desc
+			on error
+			endon
+			if ws-preview
+				do select-spool-to-print
+					 search md-show md-preview
+			else
+				if lf-spoolfile-number = SPACES
+					do select-spool-to-print
+				else
+					do select-spool-to-print
+						search md-tag md-exit md-show md-preview
+				endif
+			endif	
+		endif
+	endconfirm
+endscreen //attach-spoolfiles ------------------------------------------------
+
+procedure set-spoolfile-directory 
+	local	
+		lf-count					pic 9
+		lf-key						pic x(7)
+	//
+	//If they are running REPORTDIR use that...
+	set ws-spoolfile-directory = getenv("REPORTDIR")
+	//Otherwise, try for REPORTS, then reports in data (current) directory.
+	while ws-spoolfile-directory = SPACES
+		set lf-count += 1
+		switch on lf-count
+		case 1 
+			set lf-key = "REPORTS"
+		case 2
+			set lf-key = "reports"
+		else 
+			set ws-spoolfile-directory = "."
+			break 
+		endswitch
+		if start-dir-search(".",lf-key)
+			set ws-spoolfile-directory = next-dir-entry()
+			if finish-dir-search()
+			endif 
+		endif
+	endwhile
+endprocedure //set-spoolfile-directory  ------------------------------
+
+procedure load-reports-to-tmp-spoolfile
+	//Wrapper routine
+	//Load both Spool Files and XML Reports 
+	parameter	
+		lp-spoolnumber-in			pic x(20)
+		lp-user						type string
+	returning	
+		lr-matched					type numeric
+	local 		
+		lf-model 					type string pic x(250)
+		lf-xml-matched				type numeric
+	//
+	//First check for spool files alone
+	set lf-model = strconcat("#P",lp-spoolnumber-in)
+	do populate-tmp-spoolfile 
+		parameter lf-model lp-user "TRUNCATE"
+		returning lr-matched
+	//Now do it again for XML reports
+	set lf-model = strconcat(lp-spoolnumber-in,".xml")
+	set lf-xml-matched = 0
+    do populate-tmp-spoolfile 
+		parameter lf-model lp-user "APPEND"
+	    returning lf-xml-matched
+	set lr-matched += lf-xml-matched
+endprocedure //load-reports-to-tmp-spoolfile ---------------------------------
+
+procedure populate-tmp-spoolfile
+	parameter	
+		lp-model					type string	pic x(250)
+		lp-user						type string
+		lp-adding-xmlreports 		pic x(10)   // APPEND or TRUNCATE
+	returning	
+		lr-matched					type numeric
+	local			
+		lf-count					pic 99
+		lf-locked-rec				type boolean
+		lf-pathfile					type string pic x(80)
+		lf-data 					type string pic x(50)
+		lf-ok-to-tag				type boolean
+	//
+	set lr-matched = 0
+	//
+	if not lp-adding-xmlreports = "APPEND" 
+		open tmp-spoolfiles truncate temporary
+		set ws-total-reports = ZERO
+		set ws-selected-reports = ZERO
+		set ws-tagged = ZERO
+	endif
+	open tmp-txt-spoolfiles truncate temporary
+	if start-dir-search(ws-spoolfile-directory,lp-model)
+		repeat
+			set tmp-ts-spoolfile-id = next-dir-entry()
+			if tmp-ts-spoolfile-id > SPACES
+				if operating-system = "UNIX"
+					if pattern(strconcat(ws-spoolfile-directory),"/$")
+						set lf-pathfile = strconcat(ws-spoolfile-directory
+							,tmp-ts-spoolfile-id)
+					else
+						set lf-pathfile = strconcat(ws-spoolfile-directory
+							,"/",tmp-ts-spoolfile-id)
+					endif
+					//Don't include those files that aren't for nominated user.
+					set tmp-ts-owner = file-owner(lf-pathfile)
+					if lp-user not in { SPACES tmp-ts-owner }
+						continue
+					endif
+					//Don't include those files this user can't read.
+				else //Windows Standalone, NT or other non-UNIX
+					set tmp-ts-owner = SPACES
+				endif
+				insert tmp-txt-spoolfiles
+			endif
+		until tmp-ts-spoolfile-id = SPACES
+		endrepeat
+	endif
+	extract tmp-txt-spoolfiles all
+	detail
+		set lf-pathfile = strconcat(ws-spoolfile-directory,"/",
+							tmp-ts-spoolfile-id)
+		open tmp-spoolfile-header read-only
+			file is lf-pathfile 
+		on error 
+			//ignore spool files that cant be read....
+			continue
+		endon 
+		//
+		set tmp-ts-seq = ZERO
+		get tmp-spoolfiles lock
+		on error
+			set lf-locked-rec = FALSE
+		else
+			set lf-locked-rec = TRUE
+			if tmp-ts-seq != ZERO
+				set ws-tagged += 1
+			endif
+		endon
+		set ws-total-reports += 1
+		initialise tmp-spoolfiles leaving
+			tmp-ts-owner tmp-ts-spoolfile-id tmp-ts-seq
+		set lf-count = 0
+		extract tmp-spoolfile-header all
+		detail
+			//Read info from the spool or XML file itself
+			if pattern(tmp-ts-spoolfile-id ,"xml")
+				set lf-count += 1
+				//Handle XML Reports as well
+				if pattern(tmp-tsh-record,"</report_info>")
+					//End of header section - get out
+					break
+				endif
+				if tmp-ts-description = SPACES
+					do parse-xml-line
+						parameter "title" tmp-tsh-record
+						returning tmp-ts-description
+				endif
+				if tmp-ts-form = SPACES
+					do parse-xml-line
+						parameter "form_type" tmp-tsh-record
+						returning tmp-ts-form 
+				endif
+				if tmp-ts-pages = 0
+					do parse-xml-line
+						parameter "page_count" tmp-tsh-record
+						returning lf-data
+					if lf-data <> SPACES
+						set tmp-ts-pages = integer(num(lf-data))
+					endif
+				endif
+			else
+				//Spool files
+				if pattern(tmp-tsh-record,ascii-char(12))
+					//Break when we hit the form feed
+					break
+				endif
+				set lf-count += 1
+				switch on lf-count
+				case 1
+					set tmp-ts-description = 
+						substring(tmp-tsh-record,2,strlen(tmp-tsh-record))
+				case 3
+					set tmp-ts-pages = num(strconcat(tmp-tsh-record))
+				case 4
+					set tmp-ts-form = uppercase(strconcat(tmp-tsh-record))
+				endswitch
+			endif
+		endextract
+		set lr-matched += 1
+		set tmp-ts-numeric-lt-seq = zstr(lr-matched,5,0)
+		set tmp-ts-key = tmp-ts-numeric-lt-seq
+		set ws-selected-reports += 1
+		//What about an exact match
+		//in case where user request specific spool file
+		if tmp-ts-spoolfile-id > SPACES
+		and tmp-ts-spoolfile-id = lp-model
+			set lf-ok-to-tag = TRUE
+			set ws-mapped-form = SPACES
+			if lf-ok-to-tag 
+				if tmp-ts-seq = ZERO
+					set tmp-ts-seq = 1
+					set ws-tagged += 1
+				else
+					set tmp-ts-seq = ZERO
+					set ws-tagged -= 1
+				endif
+			endif
+		endif
+		set tmp-ts-date-time = modification-time(lf-pathfile)
+		//
+		if tmp-ts-form != space 
+			//need to get the project related to this spool file
+			//by mapping back to trueform-document-types.
+			//cant just rely on form-name as it can be duplicated
+			//and you might get the wrong one. Instead use
+			//source and form type to get the layout.
+			//then compare report name to get the right one.
+			//works as long as report name is unique by layout
+			extract trueform-document-types
+				on index tdt-form-name tdt-document
+				key is tmp-ts-form SPACES
+				next same tdt-form-name
+			detail
+				//If multiple records setup with the same form-name
+				//the layout, source and type details have to entered
+				//to select the correct trueform project
+				if tdt-layout != SPACES
+					get system-forms-header
+						on index ssh-layout-code ssh-order-source 
+								 ssh-order-status
+						key is tdt-layout tdt-source tdt-form-type
+					on error
+						continue
+					else
+						if tmp-ts-description = ssh-report-name
+							set tmp-ts-tf-project = tdt-project
+						endif
+					endon
+				else
+					set tmp-ts-tf-project = tdt-project
+				endif
+			endextract
+		endif
+		if tmp-ts-tf-project = SPACES 
+			set tmp-ts-tf-project = tms-default-project
+		endif	
+		//
+		if lf-locked-rec 
+			update tmp-spoolfiles no-warning
+		else
+			insert tmp-spoolfiles
+		endif
+	endextract
+endprocedure //populate-tmp-spoolfile --------------------------------
+
+procedure parse-xml-line
+	parameter 
+		lp-key 					type string pic x(50)
+	  	lp-text 				type string pic x(80)
+	return    
+		lr-data      			type string pic x(80)
+	local 	  
+		lf-startag 				pic 9(2)
+	    lf-endtag 				pic 9(2)
+		lf-startkey 			type string pic x(80)
+		lf-endkey 				type string pic x(80)
+	//
+	//Pass in the value of the KEY minus tags
+	//Pass lp-key : title
+	//Pass lp-text: <title>Debtors Report</title>
+	//Returns: Debtors Report
+	set lf-startkey = strconcat("<",lp-key,">")
+	set lf-endkey = strconcat("</",lp-key,">")
+	set lf-startag = pattern(lp-text,lf-startkey)
+	if lf-startag 
+		set lf-startag += strlen(lf-startkey)
+		set lf-endtag = pattern(lp-text,lf-endkey)
+		set lr-data = substring(lp-text, lf-startag,lf-endtag - 1)
+	else
+		set lr-data = SPACES
+	endif
+endprocedure //parse-xml-line ------------------------------------------------
+
+screen select-spool-to-print
+	local 	
+		lf-displayed-header			type boolean
+	//
+	window @1,1 to @23,106
+		title is "Spool Files"
+	help-context 'index_CSH.htm' 90204
+	primary tmp-spoolfiles 
+		on index tmp-ts-owner tmp-ts-date-time desc
+	datagrid occurs 18
+	allow search md-select1 md-tag md-exit md-show md-preview
+before
+	box @1,1 to @3,106
+		title SPACES
+	if not lf-displayed-header
+		set lf-displayed-header = TRUE
+		display "Selected Reports :" @2,1 
+				"Total Reports :" @2,41
+		display ws-total-reports @2,57 pic z(4)9 foreground data
+	endif
+detail
+	display tmp-ts-spoolfile-id @4,6 color TAGGED pic x(10) 
+		title "File"
+	display tmp-ts-owner @4,14 color TAGGED
+		title "Owner"
+	display tmp-ts-date-time @4,32 color TAGGED
+		title "Date/Time"
+	display tmp-ts-pages @4,45 pic z(5)9 color TAGGED
+		title "Pages"
+	display tmp-ts-description @4,50 color TAGGED pic x(20)
+		title "Report Name"
+	display tmp-ts-form @4,55 pic x(20) color TAGGED
+		title "Form Name"
+	display tmp-ts-tf-project @4,57 pic x(20) color TAGGED
+		title "TrueForm Project"
+	display ws-tagged @2,20 pic z(4)9 
+	confirm auto
+	confirmed
+		if screenmode() = md-tag
+		or screenmode() = md-select1 
+			get tmp-spoolfiles current lock
+			if tmp-ts-seq = ZERO
+				set tmp-ts-seq = 1
+				set ws-tagged += 1
+			else
+				set tmp-ts-seq = ZERO
+				set ws-tagged -= 1
+			endif
+			update tmp-spoolfiles
+			//
+			if screenmode = md-select1
+				exit
+			endif	
+		elseif screenmode() = md-exit
+			exit
+		elseif screenmode() = md-show
+			command 'proprint'	parameters '-v' tmp-ts-spoolfile-id 
+		elseif screenmode = md-preview
+			do print-preview
+				parameter tmp-ts-spoolfile-id tmp-ts-tf-project
+		endif
+	endconfirm
+after 
+	initialise tmp-spoolfiles
+endscreen //select-spool-to-print ------------------------------------
+
+screen setup-screen 
+local 
+	lf-folder			pic x
+	lf-password			pic x
+	lf-delete			pic x
+	//
+	window @1,1 to @25,115 
+		title ws-screen-title
+	allow search correct md-preload
+	primary trueform-manual-settings
+	form-entry 
+before
+	box @1,1 to @7,115
+		title "Manual Send Templates"
+	box @8,1 to @15,62
+		title "Fax Settings (Type: 1)"
+	box @8,63 to @15,115
+		title "Direct Fax Settings"
+	box @16,1 to @24,62
+		title "Custom Settings (Type: 2)"
+	box @16,63 to @24,115
+		title "Other Settings"
+	display "Preview Security" @22,65 bold color red
+	//
+	set lf-folder = substring(tms-preview-extra,1,1)
+	set lf-password = substring(tms-preview-extra,2,2)
+	set lf-delete = substring(tms-preview-extra,3,3)
+detail 	
+	accept	tms-prompt1 @2,11	
+		default tms-prompt1
+		title "Template 1:"
+	accept	tms-queue1 @2,51	
+		default tms-queue1
+		title "Queue 1:"
+	on help-key
+		do printer-review
+		if tmp-printer-name <> spaces
+			set tms-queue1 = tmp-printer-name
+			reenter optional
+		endif
+	endon
+	validations
+		if tms-queue1 != space 
+			do load-printers
+			get tmp-printer-review
+				on index tmp-printer-name
+				key is tms-queue1
+			on error
+				message "Printer not valid"
+				reenter
+			endon
+		endif	
+	endvalidations
+	//
+	accept	tms-type1 @2,91	
+		default tms-type1
+		title "Type:"
+		help "0 - TrueForm Email, 1 - Fax setting, 2 - Other Setting, space" 
+	accept	tms-prompt2 @3,11	
+		title "Template 2:"
+		default tms-prompt2
+	accept	tms-queue2 @3,51	
+		default tms-queue2
+		title "Queue 2:"
+	on help-key
+		do printer-review
+		if tmp-printer-name <> spaces
+			set tms-queue2 = tmp-printer-name
+			reenter optional
+		endif
+	endon
+	validations
+		if tms-queue2 != space 
+			do load-printers
+			get tmp-printer-review
+				on index tmp-printer-name
+				key is tms-queue2
+			on error
+				message "Printer not valid"
+				reenter
+			endon
+		endif	
+	endvalidations
+	//
+	accept	tms-type2 @3,91	
+		default tms-type2
+		title "Type:"
+		help "0 - TrueForm Email, 1 - Fax setting, 2 - Other Setting, space" 
+	accept	tms-prompt3 @4,11	
+		title "Template 3:"
+		default tms-prompt3
+	accept	tms-queue3 @4,51	
+		default tms-queue3
+		title "Queue 3:"
+	on help-key
+		do printer-review
+		if tmp-printer-name <> spaces
+			set tms-queue3 = tmp-printer-name
+			reenter optional
+		endif
+	endon
+	validations
+		if tms-queue3 != space 
+			do load-printers
+			get tmp-printer-review
+				on index tmp-printer-name
+				key is tms-queue3
+			on error
+				message "Printer not valid"
+				reenter
+			endon
+		endif	
+	endvalidations
+	//
+	accept	tms-type3 @4,91	
+		default tms-type3
+		title "Type:"
+		help "0 - TrueForm Email, 1 - Fax setting, 2 - Other Setting, space" 
+	accept	tms-prompt4 @5,11	
+		title "Template 4:"
+		default tms-prompt4
+	accept	tms-queue4 @5,51	
+		default tms-queue4
+		title "Queue 4:"
+	on help-key
+		do printer-review
+		if tmp-printer-name <> spaces
+			set tms-queue4 = tmp-printer-name
+			reenter optional
+		endif
+	endon
+	validations
+		if tms-queue4 != space 
+			do load-printers
+			get tmp-printer-review
+				on index tmp-printer-name
+				key is tms-queue4
+			on error
+				message "Printer not valid"
+				reenter
+			endon
+		endif 	
+	endvalidations
+	accept	tms-type4 @5,91	
+		default tms-type4
+		title "Type:"
+		help "0 - TrueForm Email, 1 - Fax setting, 2 - Other Setting, space" 
+	accept	tms-prompt5 @6,11	
+		title "Template 5:"
+		default tms-prompt5
+	accept	tms-queue5 @6,51	
+		default tms-queue5
+		title "Queue 5:"
+	on help-key
+		do printer-review
+		if tmp-printer-name <> spaces
+			set tms-queue5 = tmp-printer-name
+			reenter optional
+		endif
+	endon
+	validations
+		if tms-queue5 != space 
+			do load-printers
+			get tmp-printer-review
+				on index tmp-printer-name
+				key is tms-queue5
+			on error
+				message "Printer not valid"
+				reenter
+			endon
+		endif 	
+	endvalidations
+	accept	tms-type5 @6,91	
+		default tms-type5
+		title "Type:"
+		help "0 - TrueForm Email, 1 - Fax setting, 2 - Other Setting, space" 
+	/////////////////////////////////////////////////
+	// Fax (F)
+	/////////////////////////////////////////////////	
+	accept tms-fax-escape1  @9,28
+		title "Fax character to escape:"
+	accept tms-fax-escape2  @10,28
+		title "2nd character to escape:"
+	accept tms-fax-escape-insert  @11,28
+		title "Fax escape character:"
+	accept tms-fax-cover-1s  @12,28 pic x(20)
+		title "Coverpage line 1 Start:"
+	accept tms-fax-cover-1e  @12,55 pic x(5)
+		title "End:"
+	accept tms-fax-cover-2s  @13,28 pic x(20)
+		title "Coverpage line 2 Start:"
+	accept tms-fax-cover-2e  @13,55 pic x(5)
+		title "End:"
+	/////////////////////////////////////////////////
+	// Other (G)
+	/////////////////////////////////////////////////	
+	accept tms-other-escape1  @17,28
+		title "Character to escape:"
+	accept tms-other-escape2  @18,28
+		title "2nd character to escape:"
+	accept tms-other-escape-insert  @19,28
+		title "Escape character:"
+	accept tms-other-cover-1s  @20,28 pic x(20)
+		title "Coverpage line 1 Start:"
+	accept tms-other-cover-1e  @20,55 pic x(5)
+		title "End:"
+	accept tms-other-cover-2s  @21,28 pic x(20)
+		title "Coverpage line 2 Start:"
+	accept tms-other-cover-2e  @21,55 pic x(5)
+		title "End:"
+	//////////////////////////////////////////////////////	
+	//Direct Fax Settings
+	//////////////////////////////////////////////////////
+	accept tms-fax-queue @9,80 pic x(29)
+		title "Direct Fax Queue:"
+		help "Enter a the queue to be used for direct faxing (not TrueForm faxing)"
+	on help-key
+		do printer-review
+		if tmp-printer-name <> spaces
+			set tms-fax-queue = tmp-printer-name
+			reenter optional
+		endif
+	endon
+	validations
+		if tms-fax-queue != space 
+			do load-printers
+			get tmp-printer-review
+				on index tmp-printer-name
+				key is tms-fax-queue
+			on error
+				message "Printer not valid"
+				reenter
+			endon
+		endif 	
+	endvalidations
+	accept tms-fax-type @10,80 
+		title "Type:"
+		help "Enter a the queue to be used for PDF previews (Not implemented yet)"
+	accept tms-fax-enabled @11,80 
+		title "Enabled:"
+		help "Y - enabled , N - May use faxmail to send fax if setup"
+	//////////////////////////////////////////////////////	
+	//Other Settings
+	//////////////////////////////////////////////////////
+	accept tms-default-project @17,80 pic x(29)
+		title "Default Project:"
+		help "Enter a default project to be used when no form is defined"
+	accept tms-preview-queue @18,80 pic x(29)
+		title "Preview Queue:"
+		help "Enter a the queue to be used for PDF previews (Not implemented yet)"
+	on help-key
+		do printer-review
+		if tmp-printer-name <> spaces
+			set tms-preview-queue = tmp-printer-name
+			reenter optional
+		endif
+	endon
+	validations
+		if tms-preview-queue != space 
+			do load-printers
+			get tmp-printer-review
+				on index tmp-printer-name
+				key is tms-preview-queue
+			on error
+				message "Printer not valid"
+				reenter
+			endon
+		endif 	
+	endvalidations
+	accept tms-preview-project @19,80 pic x(29)
+		title "Preview Project:"
+		help "Enter the print preview director project"
+	accept tms-preview-directory @20,80 pic x(29)
+		title "Preview directory:"
+		help "Enter the directory to store the preview .pdf documents"
+	check-box lf-folder @21,80 
+		values "Y" "N"
+		default "Y"
+		title "Directory per user"
+		help "This will create pdf documents in a separate directory per user"
+	validation 
+		string tms-preview-extra replacing lf-folder at 1
+	endvalidation 
+	check-box lf-password @22,80 
+		values "Y" "N"
+		default "Y"
+		title "Password protection"
+		help "This will ask user for password when creating"   
+	validation 
+		string tms-preview-extra replacing lf-password at 2
+	endvalidation 
+	check-box lf-delete @23,80 
+		values "Y" "N"
+		default "Y"
+		title "Delete file after preview"
+	validation 
+		string tms-preview-extra replacing lf-delete at 3
+	endvalidation 
+	/////////////////////////////////////////////////////////////////
+	//    Option section
+	/////////////////////////////////////////////////////////////////	
+	option "Detail" @2,100 
+		do template-detail 
+			parameter "1"
+	endoption 
+	option "Detail" @3,100 
+		do template-detail 
+			parameter "2"
+	endoption 
+	option "Detail" @4,100 
+		do template-detail 
+			parameter "3"
+	endoption 
+	option "Detail" @5,100 
+		do template-detail 
+			parameter "4"
+	endoption 
+	option "Detail" @6,100 
+		do template-detail 
+			parameter "5"
+	endoption 
+	option "Detail" @11,100 
+		do auto-template-detail   
+			parameter "A"
+	endoption 
+confirm auto 
+confirmed
+	if screenmode() = md-preload
+		do trueform-manual-email-fax
+		get trueform-manual-settings first 
+		on error 
+		endon 
+		refresh 
+	endif 	
+endconfirm
+endscreen //setup-screen --------------------------------------------------------
+
+screen template-detail 
+	parameter 
+		lp-key		like tftd-key
+	//
+	window @1,1 to @30,98 
+		title "Interactive send templates"
+	help-context 'index_CSH.htm' 90205
+	allow search correct entry remove// md-load 
+	primary trueform-template-data
+		same tftd-key 
+	datagrid occurs 27
+before
+	set tftd-key = lp-key
+detail 	
+	if screenmode() = entry 
+		set tftd-key = lp-key
+	endif 	
+	//
+	accept tftd-seq @1,5	pic z(4)9.9	
+		title "Order"
+	validations
+		if tftd-seq = 0 
+			message "Display Order value must be greater than 0 "
+			reenter
+		endif 	
+	endvalidations	
+	accept tftd-prompt @1,15 pic x(20)
+		title "Prompt"
+	accept tftd-start @1,25 pic x(35)
+		title "Start Tag"
+	accept tftd-end	 @1,35 pic x(10)
+		title "End Tag"
+	accept tftd-accept @1,45 pic x(6)
+		title "Accept"
+	accept tftd-mandatory	 @1,55	pic x(7)
+		title "Manditory"
+		when tftd-accept = "Y"
+		uppercase
+	accept tftd-help		 @1,65 pic x(6)
+		title "Help/Validation"
+		when tftd-accept = "Y"
+		uppercase
+		help "E=Email, F=Fax, A=Attachment, B-D & G-Z = Custom Help"
+	accept tftd-section	 @1,75 pic x(7)
+		title "Section"
+		when tftd-accept = "Y"
+		help "T - To , F - From , D - Detail"
+	validations
+		if tftd-accept = "Y"
+		and tftd-section = " "
+			message "You must enter a valid accept section (T,F,D)"
+			reenter
+		endif 	
+	endvalidations
+confirm auto 
+confirmed
+//	if screenmode() = md-load
+//		do load-up-template2 
+//			parameter lp-key
+//	endif 	
+endconfirm
+endscreen //template-detail --------------------------------------------------
+
+//procedure load-up-template2
+//	parameter 
+//		lp-key		like tftd-key
+//	local
+//		lf-line			pic 9(8)
+//		lf-count		pic 9(8)
+//		lf-start-marker pic 999
+//		lf-end-marker	pic 999
+//		lf-template			pic x(200)
+//	//
+//	window @1,1 to @3,100
+//	title "Load up TrueForm Job ticket template"
+//	//
+//	accept lf-template @2,20 pic x(77)
+//		title "Template:"
+//		help "Enter full path to an existing trueform jtt"
+//	validations
+//		open tmp-template 
+//			file is lf-template 
+//		on error 
+//			message "Could not open template file"
+//			reenter 
+//		else
+//			extract trueform-template-data lock 
+//				on index tftd-key
+//				key is lp-key 	
+//				next same tftd-key 
+//			detail 
+//				delete trueform-template-data
+//			endextract 
+//			//
+//			set lf-line = 0
+//			//
+//			extract tmp-template 
+//				all
+//			detail 
+//				set lf-line += 1
+//				set tftd-seq = lf-line
+//				if pattern(tmp-line,"#!")
+//					set lf-start-marker = 	pattern(tmp-line,"#!")
+//					set lf-end-marker = 	pattern(tmp-line,"!#")
+//					set tftd-prompt = substring(tmp-line,lf-start-marker + 2, lf-end-marker - 1) 
+//					set tftd-start = substring(tmp-line,1,lf-start-marker - 1) 
+//					set tftd-end = substring(tmp-line,lf-end-marker + 2,strlen(tmp-line)) 
+//				else
+//					set tftd-start = tmp-line 
+//					set tftd-prompt = space 
+//					set tftd-end = space 
+//				endif 
+//				//
+//				set tftd-help = space 
+//				set tftd-key = lp-key
+//				set tftd-section = space  
+//				set tftd-mandatory = "N"
+//				set tftd-accept = "N"
+//				if lf-count <= 24    // too ridiculous to have more ......	
+//				and tftd-prompt != space 
+//					set tftd-accept = "Y"
+//					set tftd-section = "T"   //recipent
+//				endif 
+//				insert trueform-template-data
+//			endextract 
+//			//
+//			message "Please remove any non Fax/Email statements as TrueForm statements are added automaticly"
+//		endon 
+//	endvalidations
+//endprocedure //load-up-template2 ---------------------------------------------
+
+screen get-email
+	parameter lp-email		pic x(1000)
+	returning lr-email		pic x(1000)
+	local	lf-who			pic x
+		lf-account			like accountcode
+	//
+	window @1,1 to @30,100
+	title "Email Help"
+	form-entry
+	allow entry 
+	no-ok-cancel
+before
+	box @1,1 to @3,100
+		title "Who"
+	box @23,1 to @27,100
+		title "Email"
+	set lr-email = lp-email 	
+detail
+	radio-button lf-who
+		@2,12  "C" title "Customer" 
+		@2,24  "S" title "Supplier"	
+		@2,36  "W" title "Warehouse"
+	//	
+	accept lf-account @2,60 
+		default lf-account
+		show-value 
+	on help-key 
+		switch on lf-who
+		case "C"
+			do m1enqdeb-enquire-on-debtors
+				parameter lf-account
+				returning accountcode
+			if accountcode != SPACES
+				set lf-account = accountcode
+			endif
+		case "S"
+			do m2enqcre-enquire-on-creditors
+				parameters lf-account M2ENQDEF_SHOW_BALANCE SPACES
+				returning cre-accountcode
+			if cre-accountcode != SPACES
+				set lf-account = cre-accountcode 
+			endif
+		case "W"
+			do i85whse-warehouse-maint
+			if sys-tbl-code > SPACES
+				set lf-account = sys-tbl-code
+			endif
+		endswitch 
+		reenter optional
+	endon 	
+confirm auto 
+before 
+	if lf-account = space 
+		message "Need an account to find email addresses"
+		reenter lf-account
+	endif	
+confirmed
+	do data-grid-email
+		parameter lp-email lf-account lf-who
+		returning lr-email 
+	exit	
+endconfirm 
+endscreen //get-email --------------------------------------------------------
+
+screen get-fax
+	parameter lp-fax		pic x(1000)
+	returning lr-fax		pic x(1000)
+	local	lf-who			pic x
+		lf-account			like accountcode
+	//
+	window @1,1 to @24,100
+	title "Fax Help"
+	form-entry
+	allow entry 
+	no-ok-cancel
+before
+	box @1,1 to @3,100
+		title "Who"
+	set lr-fax = lp-fax 	
+detail
+	radio-button lf-who
+		@2,12  "C" title "Customer" 
+		@2,24  "S" title "Supplier"	
+		@2,36  "W" title "Warehouse"
+	//	
+	accept lf-account @2,60 
+		show-value 
+	on help-key 
+		switch on lf-who
+		case "C"
+			do m1enqdeb-enquire-on-debtors
+				parameter lf-account
+				returning accountcode
+			if accountcode != SPACES
+				set lf-account = accountcode
+			endif
+		case "S"
+			do m2enqcre-enquire-on-creditors
+				parameters lf-account M2ENQDEF_SHOW_BALANCE SPACES
+				returning cre-accountcode
+			if cre-accountcode != SPACES
+				set lf-account = cre-accountcode 
+			endif
+		case "W"
+			do i85whse-warehouse-maint
+			if sys-tbl-code > SPACES
+				set lf-account = sys-tbl-code
+			endif
+		endswitch 
+		reenter optional
+	endon 	
+	validations
+		if lf-account = space 
+			message "Need an account to find email addresses"
+			reenter 
+		endif 
+	endvalidations
+confirm auto 
+confirmed
+	do data-grid-fax
+		parameter lp-fax lf-account lf-who
+		returning lr-fax 
+	exit	
+endconfirm 
+endscreen //get-fax ----------------------------------------------------------
+
+screen data-grid-email 
+	parameter lp-email		pic x(1000)
+		lp-account			like accountcode 
+		lp-type				pic x
+	returning lr-email		pic x(1000)
+	//
+	primary tmp-email 
+	allow md-select search md-done 
+	// no window , use previous
+	datagrid occurs 19
+	no-ok-cancel
+before
+	////////////////////////////
+	//Load up emails
+	////////////////////////////
+	do load-address-es
+		parameters
+			lp-type		
+			lp-account		 
+	get tmp-email first 
+	on error 
+	endon
+	//	
+	set lr-email = lp-email 
+	display substring(lr-email,1,98) @24,2 
+	display substring(lr-email,99,196) @25,2 
+	display substring(lr-email,197,304) @26,2 
+detail 
+	display tmp-name @4,1
+		title "Name"
+	accept tmp-email @4,12 pic x(50)
+		title "Email Address"
+	display tmp-type @4,16
+		title "Email Address Type"
+confirm auto 
+confirmed
+	if screenmode() = md-select 
+		if lr-email = space 
+			set lr-email = tmp-email 
+		else
+			set lr-email = strconcat(lr-email,";",tmp-email)
+		endif 
+		display substring(lr-email,1,98) @24,2 background
+		display substring(lr-email,99,196) @25,2 background 
+		display substring(lr-email,197,304) @26,2 background 
+	elseif screenmode() = md-done 
+		exit 
+	endif 	
+endconfirm 
+endscreen //data-grid-email --------------------------------------------------
+
+screen data-grid-fax 
+	parameter lp-fax		pic x(1000)
+		lp-account			like accountcode 
+		lp-type				pic x
+	returning lr-fax		pic x(1000)
+	//
+	primary tmp-email 
+	allow md-select search 
+	// no window , use previous
+	datagrid occurs 19
+	no-ok-cancel
+before
+	////////////////////////////
+	//Load up fax numbers
+	////////////////////////////
+	do load-address-fax
+		parameters
+			lp-type		
+			lp-account		 
+	get tmp-email first 
+	on error 
+	endon
+	//	
+	set lr-fax = lp-fax 
+detail 
+	display tmp-name @4,1
+		title "Name"
+	accept tmp-fax @4,12 pic x(50)
+		title "Fax Number"
+	display tmp-type @4,16
+		title "Fax number Type"
+confirm auto 
+confirmed
+	if screenmode() = md-select 
+		set lr-fax = tmp-fax
+		exit 
+	endif 	
+endconfirm 
+endscreen //data-grid-fax ----------------------------------------------------
+
+screen custom-help export
+//////////////////////////////////////////////////////////////////////////////
+//<CLIB> 
+//<DESC> Custom help routines for use with manual email/fax send 
+//<P1> Help Code
+//<P2> Current Field value
+//<R1> Choosen field value
+//</CLIB>
+///////////////////////////////////////////////////////////////////////////
+	parameter
+		lp-help	pic x
+		lp-email		pic x(1000)
+	returning
+		lr-email		pic x(1000)
+	//
+	window 
+	title "Custom Help"
+before
+	message "Modify custom-help component to use this feature" 
+	exit
+detail
+confirm auto 
+confirmed
+endconfirm 
+endscreen //custom-help ------------------------------------------------------
+
+
+screen interactive-send-2
+////////////////////////////////////////////////////////////////
+//Changes made to this procedure need to be replicated in     //
+// interactive-send1 <-> 5                                    //  
+////////////////////////////////////////////////////////////////
+parameter 
+	lp-key				like tftd-key 
+	lp-type				pic x
+	lp-queue			pic x(50)
+	//
+	window @1,1,to @ws-window,100
+		title is ws-screen-title
+	form-entry	
+	allowed correct md-attachments md-prowp md-send
+before
+	do common-before 
+		parameter  
+			lp-type
+detail
+	accept ws-dummy @1,ws-col
+		when not ws-fields
+		help "Choose send options"
+	///////////////////////////////
+	// to options	
+	///////////////////////////////	
+	F_ACCEPT(1,"T",ws-to-row[1])
+	F_ACCEPT(2,"T",ws-to-row[2])
+	F_ACCEPT(3,"T",ws-to-row[3])
+	F_ACCEPT(4,"T",ws-to-row[4])
+	F_ACCEPT(5,"T",ws-to-row[5])
+	F_ACCEPT(6,"T",ws-to-row[6])
+	F_ACCEPT(7,"T",ws-to-row[7])
+	F_ACCEPT(8,"T",ws-to-row[8])
+	F_ACCEPT(9,"T",ws-to-row[9])
+	F_ACCEPT(10,"T",ws-to-row[10])
+	F_ACCEPT(11,"T",ws-to-row[11])
+	F_ACCEPT(12,"T",ws-to-row[12])
+	F_ACCEPT(13,"T",ws-to-row[13])
+	F_ACCEPT(14,"T",ws-to-row[14])
+	F_ACCEPT(15,"T",ws-to-row[15])
+	F_ACCEPT(16,"T",ws-to-row[16])
+	F_ACCEPT(17,"T",ws-to-row[17])
+	F_ACCEPT(18,"T",ws-to-row[18])
+	F_ACCEPT(19,"T",ws-to-row[19])
+	F_ACCEPT(20,"T",ws-to-row[20])
+	F_ACCEPT(21,"T",ws-to-row[21])
+	F_ACCEPT(22,"T",ws-to-row[22])
+	F_ACCEPT(23,"T",ws-to-row[23])
+	F_ACCEPT(24,"T",ws-to-row[24])
+	///////////////////////////////
+	// From options	
+	///////////////////////////////	
+	F_ACCEPT(1,"F",ws-from-row[1])
+	F_ACCEPT(2,"F",ws-from-row[2])
+	F_ACCEPT(3,"F",ws-from-row[3])
+	F_ACCEPT(4,"F",ws-from-row[4])
+	F_ACCEPT(5,"F",ws-from-row[5])
+	F_ACCEPT(6,"F",ws-from-row[6])
+	F_ACCEPT(7,"F",ws-from-row[7])
+	F_ACCEPT(8,"F",ws-from-row[8])
+	F_ACCEPT(9,"F",ws-from-row[9])
+	F_ACCEPT(10,"F",ws-from-row[10])
+	F_ACCEPT(11,"F",ws-from-row[11])
+	F_ACCEPT(12,"F",ws-from-row[12])
+	F_ACCEPT(13,"F",ws-from-row[13])
+	F_ACCEPT(14,"F",ws-from-row[14])
+	F_ACCEPT(15,"F",ws-from-row[15])
+	F_ACCEPT(16,"F",ws-from-row[16])
+	F_ACCEPT(17,"F",ws-from-row[17])
+	F_ACCEPT(18,"F",ws-from-row[18])
+	F_ACCEPT(19,"F",ws-from-row[19])
+	F_ACCEPT(20,"F",ws-from-row[20])
+	F_ACCEPT(21,"F",ws-from-row[21])
+	F_ACCEPT(22,"F",ws-from-row[22])
+	F_ACCEPT(23,"F",ws-from-row[23])
+	F_ACCEPT(24,"F",ws-from-row[24])
+	///////////////////////////////
+	// Detail options	
+	///////////////////////////////	
+	F_ACCEPT(1,"D",ws-detail-row[1])
+	F_ACCEPT(2,"D",ws-detail-row[2])
+	F_ACCEPT(3,"D",ws-detail-row[3])
+	F_ACCEPT(4,"D",ws-detail-row[4])
+	F_ACCEPT(5,"D",ws-detail-row[5])
+	F_ACCEPT(6,"D",ws-detail-row[6])
+	F_ACCEPT(7,"D",ws-detail-row[7])
+	F_ACCEPT(8,"D",ws-detail-row[8])
+	F_ACCEPT(9,"D",ws-detail-row[9])
+	F_ACCEPT(10,"D",ws-detail-row[10])
+	F_ACCEPT(11,"D",ws-detail-row[11])
+	F_ACCEPT(12,"D",ws-detail-row[12])
+	F_ACCEPT(13,"D",ws-detail-row[13])
+	F_ACCEPT(14,"D",ws-detail-row[14])
+	F_ACCEPT(15,"D",ws-detail-row[15])
+	F_ACCEPT(16,"D",ws-detail-row[16])
+	F_ACCEPT(17,"D",ws-detail-row[17])
+	F_ACCEPT(18,"D",ws-detail-row[18])
+	F_ACCEPT(19,"D",ws-detail-row[19])
+	F_ACCEPT(20,"D",ws-detail-row[20])
+	F_ACCEPT(21,"D",ws-detail-row[21])
+	F_ACCEPT(22,"D",ws-detail-row[22])
+	F_ACCEPT(23,"D",ws-detail-row[23])
+	F_ACCEPT(24,"D",ws-detail-row[24])
+	//
+	confirm auto 
+	confirmed
+		if screenmode() = md-prowp
+		or (screenmode() = entry 
+		and lp-type in {"0" "1" "2"})
+			do coverpage 
+		endif	
+		if screenmode() = md-attachments
+		or screenmode() = entry
+			do get-attachments 
+			if lp-type = "0"
+				do set-file-name
+				refresh data	
+			endif 	
+		endif	
+		if screenmode() = md-send
+			do manual-validations
+			if ws-reenter = TRUE
+				continue
+			else
+				do send-to-queue
+					parameter 
+						lp-key		
+						lp-type		
+						lp-queue	
+			endif 
+		endif		
+	endconfirm 
+endscreen //interactive-send-2 -----------------------------------------------
+
+screen interactive-send-3
+////////////////////////////////////////////////////////////////
+//Changes made to this procedure need to be replicated in     //
+// interactive-send1 <-> 5                                    //  
+////////////////////////////////////////////////////////////////
+parameter 
+	lp-key				like tftd-key 
+	lp-type				pic x
+	lp-queue			pic x(50)
+	//
+	window @1,1,to @ws-window,100
+		title is ws-screen-title
+	form-entry	
+	allowed correct md-attachments md-prowp md-send
+before
+	do common-before 
+		parameter  
+			lp-type
+detail
+	accept ws-dummy @1,ws-col
+		when not ws-fields
+		help "Choose send options"
+	///////////////////////////////
+	// to options	
+	///////////////////////////////	
+	F_ACCEPT(1,"T",ws-to-row[1])
+	F_ACCEPT(2,"T",ws-to-row[2])
+	F_ACCEPT(3,"T",ws-to-row[3])
+	F_ACCEPT(4,"T",ws-to-row[4])
+	F_ACCEPT(5,"T",ws-to-row[5])
+	F_ACCEPT(6,"T",ws-to-row[6])
+	F_ACCEPT(7,"T",ws-to-row[7])
+	F_ACCEPT(8,"T",ws-to-row[8])
+	F_ACCEPT(9,"T",ws-to-row[9])
+	F_ACCEPT(10,"T",ws-to-row[10])
+	F_ACCEPT(11,"T",ws-to-row[11])
+	F_ACCEPT(12,"T",ws-to-row[12])
+	F_ACCEPT(13,"T",ws-to-row[13])
+	F_ACCEPT(14,"T",ws-to-row[14])
+	F_ACCEPT(15,"T",ws-to-row[15])
+	F_ACCEPT(16,"T",ws-to-row[16])
+	F_ACCEPT(17,"T",ws-to-row[17])
+	F_ACCEPT(18,"T",ws-to-row[18])
+	F_ACCEPT(19,"T",ws-to-row[19])
+	F_ACCEPT(20,"T",ws-to-row[20])
+	F_ACCEPT(21,"T",ws-to-row[21])
+	F_ACCEPT(22,"T",ws-to-row[22])
+	F_ACCEPT(23,"T",ws-to-row[23])
+	F_ACCEPT(24,"T",ws-to-row[24])
+	///////////////////////////////
+	// From options	
+	///////////////////////////////	
+	F_ACCEPT(1,"F",ws-from-row[1])
+	F_ACCEPT(2,"F",ws-from-row[2])
+	F_ACCEPT(3,"F",ws-from-row[3])
+	F_ACCEPT(4,"F",ws-from-row[4])
+	F_ACCEPT(5,"F",ws-from-row[5])
+	F_ACCEPT(6,"F",ws-from-row[6])
+	F_ACCEPT(7,"F",ws-from-row[7])
+	F_ACCEPT(8,"F",ws-from-row[8])
+	F_ACCEPT(9,"F",ws-from-row[9])
+	F_ACCEPT(10,"F",ws-from-row[10])
+	F_ACCEPT(11,"F",ws-from-row[11])
+	F_ACCEPT(12,"F",ws-from-row[12])
+	F_ACCEPT(13,"F",ws-from-row[13])
+	F_ACCEPT(14,"F",ws-from-row[14])
+	F_ACCEPT(15,"F",ws-from-row[15])
+	F_ACCEPT(16,"F",ws-from-row[16])
+	F_ACCEPT(17,"F",ws-from-row[17])
+	F_ACCEPT(18,"F",ws-from-row[18])
+	F_ACCEPT(19,"F",ws-from-row[19])
+	F_ACCEPT(20,"F",ws-from-row[20])
+	F_ACCEPT(21,"F",ws-from-row[21])
+	F_ACCEPT(22,"F",ws-from-row[22])
+	F_ACCEPT(23,"F",ws-from-row[23])
+	F_ACCEPT(24,"F",ws-from-row[24])
+	///////////////////////////////
+	// Detail options	
+	///////////////////////////////	
+	F_ACCEPT(1,"D",ws-detail-row[1])
+	F_ACCEPT(2,"D",ws-detail-row[2])
+	F_ACCEPT(3,"D",ws-detail-row[3])
+	F_ACCEPT(4,"D",ws-detail-row[4])
+	F_ACCEPT(5,"D",ws-detail-row[5])
+	F_ACCEPT(6,"D",ws-detail-row[6])
+	F_ACCEPT(7,"D",ws-detail-row[7])
+	F_ACCEPT(8,"D",ws-detail-row[8])
+	F_ACCEPT(9,"D",ws-detail-row[9])
+	F_ACCEPT(10,"D",ws-detail-row[10])
+	F_ACCEPT(11,"D",ws-detail-row[11])
+	F_ACCEPT(12,"D",ws-detail-row[12])
+	F_ACCEPT(13,"D",ws-detail-row[13])
+	F_ACCEPT(14,"D",ws-detail-row[14])
+	F_ACCEPT(15,"D",ws-detail-row[15])
+	F_ACCEPT(16,"D",ws-detail-row[16])
+	F_ACCEPT(17,"D",ws-detail-row[17])
+	F_ACCEPT(18,"D",ws-detail-row[18])
+	F_ACCEPT(19,"D",ws-detail-row[19])
+	F_ACCEPT(20,"D",ws-detail-row[20])
+	F_ACCEPT(21,"D",ws-detail-row[21])
+	F_ACCEPT(22,"D",ws-detail-row[22])
+	F_ACCEPT(23,"D",ws-detail-row[23])
+	F_ACCEPT(24,"D",ws-detail-row[24])
+	//
+	confirm auto 
+	confirmed
+		if screenmode() = md-prowp
+		or (screenmode() = entry 
+		and lp-type in {"0" "1" "2"})
+			do coverpage 
+		endif	
+		if screenmode() = md-attachments
+		or screenmode() = entry
+			do get-attachments 
+			if lp-type = "0"
+				do set-file-name
+				refresh data	
+			endif 	
+		endif	
+		if screenmode() = md-send
+			do manual-validations
+			if ws-reenter = TRUE
+				continue
+			else
+				do send-to-queue
+					parameter 
+						lp-key		
+						lp-type		
+						lp-queue	
+			endif 
+		endif		
+	endconfirm 
+endscreen //interactive-send-3 -----------------------------------------------
+
+screen interactive-send-4
+////////////////////////////////////////////////////////////////
+//Changes made to this procedure need to be replicated in     //
+// interactive-send1 <-> 5                                    //  
+////////////////////////////////////////////////////////////////
+parameter 
+	lp-key				like tftd-key 
+	lp-type				pic x
+	lp-queue			pic x(50)
+	//
+	window @1,1,to @ws-window,100
+		title is ws-screen-title
+	form-entry	
+	allowed correct md-attachments md-prowp md-send
+before
+	do common-before 
+		parameter  
+			lp-type
+detail
+	accept ws-dummy @1,ws-col
+		when not ws-fields
+		help "Choose send options"
+	///////////////////////////////
+	// to options	
+	///////////////////////////////	
+	F_ACCEPT(1,"T",ws-to-row[1])
+	F_ACCEPT(2,"T",ws-to-row[2])
+	F_ACCEPT(3,"T",ws-to-row[3])
+	F_ACCEPT(4,"T",ws-to-row[4])
+	F_ACCEPT(5,"T",ws-to-row[5])
+	F_ACCEPT(6,"T",ws-to-row[6])
+	F_ACCEPT(7,"T",ws-to-row[7])
+	F_ACCEPT(8,"T",ws-to-row[8])
+	F_ACCEPT(9,"T",ws-to-row[9])
+	F_ACCEPT(10,"T",ws-to-row[10])
+	F_ACCEPT(11,"T",ws-to-row[11])
+	F_ACCEPT(12,"T",ws-to-row[12])
+	F_ACCEPT(13,"T",ws-to-row[13])
+	F_ACCEPT(14,"T",ws-to-row[14])
+	F_ACCEPT(15,"T",ws-to-row[15])
+	F_ACCEPT(16,"T",ws-to-row[16])
+	F_ACCEPT(17,"T",ws-to-row[17])
+	F_ACCEPT(18,"T",ws-to-row[18])
+	F_ACCEPT(19,"T",ws-to-row[19])
+	F_ACCEPT(20,"T",ws-to-row[20])
+	F_ACCEPT(21,"T",ws-to-row[21])
+	F_ACCEPT(22,"T",ws-to-row[22])
+	F_ACCEPT(23,"T",ws-to-row[23])
+	F_ACCEPT(24,"T",ws-to-row[24])
+	///////////////////////////////
+	// From options	
+	///////////////////////////////	
+	F_ACCEPT(1,"F",ws-from-row[1])
+	F_ACCEPT(2,"F",ws-from-row[2])
+	F_ACCEPT(3,"F",ws-from-row[3])
+	F_ACCEPT(4,"F",ws-from-row[4])
+	F_ACCEPT(5,"F",ws-from-row[5])
+	F_ACCEPT(6,"F",ws-from-row[6])
+	F_ACCEPT(7,"F",ws-from-row[7])
+	F_ACCEPT(8,"F",ws-from-row[8])
+	F_ACCEPT(9,"F",ws-from-row[9])
+	F_ACCEPT(10,"F",ws-from-row[10])
+	F_ACCEPT(11,"F",ws-from-row[11])
+	F_ACCEPT(12,"F",ws-from-row[12])
+	F_ACCEPT(13,"F",ws-from-row[13])
+	F_ACCEPT(14,"F",ws-from-row[14])
+	F_ACCEPT(15,"F",ws-from-row[15])
+	F_ACCEPT(16,"F",ws-from-row[16])
+	F_ACCEPT(17,"F",ws-from-row[17])
+	F_ACCEPT(18,"F",ws-from-row[18])
+	F_ACCEPT(19,"F",ws-from-row[19])
+	F_ACCEPT(20,"F",ws-from-row[20])
+	F_ACCEPT(21,"F",ws-from-row[21])
+	F_ACCEPT(22,"F",ws-from-row[22])
+	F_ACCEPT(23,"F",ws-from-row[23])
+	F_ACCEPT(24,"F",ws-from-row[24])
+	///////////////////////////////
+	// Detail options	
+	///////////////////////////////	
+	F_ACCEPT(1,"D",ws-detail-row[1])
+	F_ACCEPT(2,"D",ws-detail-row[2])
+	F_ACCEPT(3,"D",ws-detail-row[3])
+	F_ACCEPT(4,"D",ws-detail-row[4])
+	F_ACCEPT(5,"D",ws-detail-row[5])
+	F_ACCEPT(6,"D",ws-detail-row[6])
+	F_ACCEPT(7,"D",ws-detail-row[7])
+	F_ACCEPT(8,"D",ws-detail-row[8])
+	F_ACCEPT(9,"D",ws-detail-row[9])
+	F_ACCEPT(10,"D",ws-detail-row[10])
+	F_ACCEPT(11,"D",ws-detail-row[11])
+	F_ACCEPT(12,"D",ws-detail-row[12])
+	F_ACCEPT(13,"D",ws-detail-row[13])
+	F_ACCEPT(14,"D",ws-detail-row[14])
+	F_ACCEPT(15,"D",ws-detail-row[15])
+	F_ACCEPT(16,"D",ws-detail-row[16])
+	F_ACCEPT(17,"D",ws-detail-row[17])
+	F_ACCEPT(18,"D",ws-detail-row[18])
+	F_ACCEPT(19,"D",ws-detail-row[19])
+	F_ACCEPT(20,"D",ws-detail-row[20])
+	F_ACCEPT(21,"D",ws-detail-row[21])
+	F_ACCEPT(22,"D",ws-detail-row[22])
+	F_ACCEPT(23,"D",ws-detail-row[23])
+	F_ACCEPT(24,"D",ws-detail-row[24])
+	//
+	confirm auto 
+	confirmed
+		if screenmode() = md-prowp
+		or (screenmode() = entry 
+		and lp-type in {"0" "1" "2"})
+			do coverpage 
+		endif	
+		if screenmode() = md-attachments
+		or screenmode() = entry
+			do get-attachments 
+			if lp-type = "0"
+				do set-file-name
+				refresh data	
+			endif 	
+		endif	
+		if screenmode() = md-send
+			do manual-validations
+			if ws-reenter = TRUE
+				continue
+			else
+				do send-to-queue
+					parameter 
+						lp-key		
+						lp-type		
+						lp-queue	
+			endif 
+		endif		
+	endconfirm 
+endscreen //interactive-send-4 -----------------------------------------------
+
+screen interactive-send-5
+////////////////////////////////////////////////////////////////
+//Changes made to this procedure need to be replicated in     //
+// interactive-send1 <-> 5                                    //  
+////////////////////////////////////////////////////////////////
+parameter 
+	lp-key				like tftd-key 
+	lp-type				pic x
+	lp-queue			pic x(50)
+	//
+	window @1,1,to @ws-window,100
+		title is ws-screen-title
+	form-entry	
+	allowed correct md-attachments md-prowp md-send
+before
+	do common-before 
+		parameter  
+			lp-type
+detail
+	accept ws-dummy @1,ws-col
+		when not ws-fields
+		help "Choose send options"
+	///////////////////////////////
+	// to options	
+	///////////////////////////////	
+	F_ACCEPT(1,"T",ws-to-row[1])
+	F_ACCEPT(2,"T",ws-to-row[2])
+	F_ACCEPT(3,"T",ws-to-row[3])
+	F_ACCEPT(4,"T",ws-to-row[4])
+	F_ACCEPT(5,"T",ws-to-row[5])
+	F_ACCEPT(6,"T",ws-to-row[6])
+	F_ACCEPT(7,"T",ws-to-row[7])
+	F_ACCEPT(8,"T",ws-to-row[8])
+	F_ACCEPT(9,"T",ws-to-row[9])
+	F_ACCEPT(10,"T",ws-to-row[10])
+	F_ACCEPT(11,"T",ws-to-row[11])
+	F_ACCEPT(12,"T",ws-to-row[12])
+	F_ACCEPT(13,"T",ws-to-row[13])
+	F_ACCEPT(14,"T",ws-to-row[14])
+	F_ACCEPT(15,"T",ws-to-row[15])
+	F_ACCEPT(16,"T",ws-to-row[16])
+	F_ACCEPT(17,"T",ws-to-row[17])
+	F_ACCEPT(18,"T",ws-to-row[18])
+	F_ACCEPT(19,"T",ws-to-row[19])
+	F_ACCEPT(20,"T",ws-to-row[20])
+	F_ACCEPT(21,"T",ws-to-row[21])
+	F_ACCEPT(22,"T",ws-to-row[22])
+	F_ACCEPT(23,"T",ws-to-row[23])
+	F_ACCEPT(24,"T",ws-to-row[24])
+	///////////////////////////////
+	// From options	
+	///////////////////////////////	
+	F_ACCEPT(1,"F",ws-from-row[1])
+	F_ACCEPT(2,"F",ws-from-row[2])
+	F_ACCEPT(3,"F",ws-from-row[3])
+	F_ACCEPT(4,"F",ws-from-row[4])
+	F_ACCEPT(5,"F",ws-from-row[5])
+	F_ACCEPT(6,"F",ws-from-row[6])
+	F_ACCEPT(7,"F",ws-from-row[7])
+	F_ACCEPT(8,"F",ws-from-row[8])
+	F_ACCEPT(9,"F",ws-from-row[9])
+	F_ACCEPT(10,"F",ws-from-row[10])
+	F_ACCEPT(11,"F",ws-from-row[11])
+	F_ACCEPT(12,"F",ws-from-row[12])
+	F_ACCEPT(13,"F",ws-from-row[13])
+	F_ACCEPT(14,"F",ws-from-row[14])
+	F_ACCEPT(15,"F",ws-from-row[15])
+	F_ACCEPT(16,"F",ws-from-row[16])
+	F_ACCEPT(17,"F",ws-from-row[17])
+	F_ACCEPT(18,"F",ws-from-row[18])
+	F_ACCEPT(19,"F",ws-from-row[19])
+	F_ACCEPT(20,"F",ws-from-row[20])
+	F_ACCEPT(21,"F",ws-from-row[21])
+	F_ACCEPT(22,"F",ws-from-row[22])
+	F_ACCEPT(23,"F",ws-from-row[23])
+	F_ACCEPT(24,"F",ws-from-row[24])
+	///////////////////////////////
+	// Detail options	
+	///////////////////////////////	
+	F_ACCEPT(1,"D",ws-detail-row[1])
+	F_ACCEPT(2,"D",ws-detail-row[2])
+	F_ACCEPT(3,"D",ws-detail-row[3])
+	F_ACCEPT(4,"D",ws-detail-row[4])
+	F_ACCEPT(5,"D",ws-detail-row[5])
+	F_ACCEPT(6,"D",ws-detail-row[6])
+	F_ACCEPT(7,"D",ws-detail-row[7])
+	F_ACCEPT(8,"D",ws-detail-row[8])
+	F_ACCEPT(9,"D",ws-detail-row[9])
+	F_ACCEPT(10,"D",ws-detail-row[10])
+	F_ACCEPT(11,"D",ws-detail-row[11])
+	F_ACCEPT(12,"D",ws-detail-row[12])
+	F_ACCEPT(13,"D",ws-detail-row[13])
+	F_ACCEPT(14,"D",ws-detail-row[14])
+	F_ACCEPT(15,"D",ws-detail-row[15])
+	F_ACCEPT(16,"D",ws-detail-row[16])
+	F_ACCEPT(17,"D",ws-detail-row[17])
+	F_ACCEPT(18,"D",ws-detail-row[18])
+	F_ACCEPT(19,"D",ws-detail-row[19])
+	F_ACCEPT(20,"D",ws-detail-row[20])
+	F_ACCEPT(21,"D",ws-detail-row[21])
+	F_ACCEPT(22,"D",ws-detail-row[22])
+	F_ACCEPT(23,"D",ws-detail-row[23])
+	F_ACCEPT(24,"D",ws-detail-row[24])
+	//
+	confirm auto 
+	confirmed
+		if screenmode() = md-prowp
+		or (screenmode() = entry 
+		and lp-type in {"0" "1" "2"})
+			do coverpage 
+		endif	
+		if screenmode() = md-attachments
+		or screenmode() = entry
+			do get-attachments 
+			if lp-type = "0"
+				do set-file-name
+				refresh data	
+			endif 	
+		endif	
+		if screenmode() = md-send
+			do manual-validations
+			if ws-reenter = TRUE
+				continue
+			else
+				do send-to-queue
+					parameter 
+						lp-key		
+						lp-type		
+						lp-queue	
+			endif 
+		endif		
+	endconfirm 
+endscreen //interactive-send-5 -----------------------------------------------
+
+procedure load-address-es 
+parameter 
+	lp-type			pic x
+	lp-account		like tdm-account
+	//
+	open tmp-email truncate temporary
+	/////////////////////////////
+	//Emails 
+	/////////////////////////////
+	if lp-type = "C"
+		get deb-master
+			on index accountcode
+			key is lp-account
+		on error
+		else
+			do clib800-determine-email-address 
+				parameter "C" lp-account 0   
+				returning tmp-email 
+					tmp-name
+			if tmp-email != space 
+				set tmp-type = "Account"
+				insert tmp-email 
+			endif	
+			//
+			do clibbillto-get-bill-to
+				parameter
+					accountcode
+				returning
+					bill-to
+			//
+			do clib800-determine-email-address 
+				parameter "C" bill-to 0   
+				returning tmp-email 
+					tmp-name
+			if tmp-email != space 
+				set tmp-type = "Bill to"
+				insert tmp-email 
+			endif	
+		endon 
+		extract mailer-master 
+			on index accountcode
+			key is lp-account
+			next same accountcode 
+		detail 
+			extract crm-account-contacts 
+				on index mailer-item-number 
+				key is mailer-item-number 	
+				next same mailer-item-number 	
+			detail 
+				get mailer-names  
+					on index mailer-name-seq 
+					key is mailer-name-seq
+				on error
+				else
+					set tmp-name = concat(strconcat(mailer-name-first)," ",mailer-name-surname)
+					if mailer-name-email != space 
+						set tmp-email = mailer-name-email
+						set tmp-type = "CRM primary"
+						insert tmp-email 
+					endif	
+					if mn-secondary-email != space 
+						set tmp-email = mn-secondary-email
+						set tmp-type = "CRM secondary"
+						insert tmp-email 
+					endif	
+				endon 
+			endextract 
+		endextract 
+	elseif lp-type = "S"
+		get cre-master
+			on index cre-accountcode
+			key is lp-account
+		on error 
+		else
+			do clib800-determine-email-address 
+				parameter "S" lp-account 0  
+				returning tmp-email 
+					tmp-name
+			if tmp-email != space  
+				set tmp-type = "Account"
+				insert tmp-email 
+			endif	
+			do clib800-determine-email-address 
+				parameter "S" cr-pay-to-code 0  
+				returning tmp-email 
+					tmp-name
+			if tmp-email != space 
+				set tmp-type = "Pay to"
+				insert tmp-email 
+			endif	
+		endon 
+	elseif lp-type = "W"
+		get name-and-address-master 
+			on index accountcode 
+			key is lp-account
+		on error
+		else
+			get name-and-address-master
+				on index accountcode na-type
+				key is lp-account 'E'
+			on error
+			else
+				set tmp-email = strconcat(na-name,na-company)
+				if tmp-email != space 
+					set tmp-name = lp-account 
+					set tmp-type = "Warehouse"
+					insert tmp-email 
+				endif	
+			endon
+		endon 
+	endif
+endprocedure //load-address-es -----------------------------------------------
+
+procedure load-address-fax  
+parameter 
+	lp-type			pic x
+	lp-account		like tdm-account
+	//
+	open tmp-email truncate temporary
+	/////////////////////////////
+	//Fax 
+	/////////////////////////////
+	if lp-type = "C"
+		get deb-master
+			on index accountcode
+			key is lp-account
+		on error
+		else
+			get name-and-address-master
+				on index accountcode na-type
+				key is lp-account 'C'
+			on error
+			else
+				if na-fax-no != SPACES
+					set tmp-fax = strconcat(na-country-code,na-fax-no)
+					if na-country-code != SPACES
+					and ws-idd-code != space 
+						string tmp-fax inserting substring(ws-idd-code,1,strlen(ws-idd-code)) at 1
+					endif
+					while pattern(substring(tmp-fax,1,strlen(tmp-fax)),"[(|)| |-]")
+						string tmp-fax deleting pattern(tmp-fax,"[(|)| |-]")
+					endwhile
+					if tmp-fax != space 
+						set tmp-type = "Account"
+						set tmp-name = na-name 
+						insert tmp-email 
+					endif	
+				endif
+				//
+				do clibbillto-get-bill-to
+					parameter
+						accountcode
+					returning
+						bill-to
+				//
+				get name-and-address-master
+					on index accountcode na-type
+					key is bill-to 'C'
+				on error
+				else
+					if na-fax-no != SPACES
+						set tmp-fax = strconcat(na-country-code,na-fax-no)
+						if na-country-code != SPACES
+						and ws-idd-code != space 
+							string tmp-fax inserting substring(ws-idd-code,1,strlen(ws-idd-code)) at 1
+						endif
+						while pattern(substring(tmp-fax,1,strlen(tmp-fax)),"[(|)| |-]")
+							string tmp-fax deleting pattern(tmp-fax,"[(|)| |-]")
+						endwhile
+						if tmp-fax != space 
+							set tmp-type = "Bill to"
+							set tmp-name = na-name 
+							insert tmp-email 
+						endif	
+					endif
+				endon
+			endon
+		endon 	
+		extract mailer-master 
+			on index accountcode
+			key is lp-account
+			next same accountcode 
+		detail 
+			extract crm-account-contacts 
+				on index mailer-item-number 
+				key is mailer-item-number 	
+				next same mailer-item-number 	
+			detail 
+				get mailer-names  
+					on index mailer-name-seq 
+					key is mailer-name-seq
+				on error
+				else
+					set tmp-name = concat(strconcat(mailer-name-first)," ",mailer-name-surname)
+					if mn-fax != space 
+						set tmp-fax = strconcat(mn-fax-country,mn-fax-area,mn-fax)
+						while pattern(substring(tmp-fax,1,strlen(tmp-fax)),"[(|)| |-]")
+							string tmp-fax deleting pattern(tmp-fax,"[(|)| |-]")
+						endwhile
+						set tmp-type = "CRM primary"
+						insert tmp-email 
+					endif	
+					if mn-home-fax != space 
+						set tmp-fax = strconcat(mn-home-fax-country,mn-home-fax-area,mn-home-fax)
+						while pattern(substring(tmp-fax,1,strlen(tmp-fax)),"[(|)| |-]")
+							string tmp-fax deleting pattern(tmp-fax,"[(|)| |-]")
+						endwhile
+						set tmp-type = "CRM secondary"
+						insert tmp-email 
+					endif	
+				endon 
+			endextract 
+		endextract 
+	elseif lp-type = "S"
+		get cre-master
+			on index cre-accountcode
+			key is lp-account
+		on error
+		else
+			get name-and-address-master
+				on index accountcode na-type
+				key is lp-account 'C'
+			on error
+			else
+				if na-fax-no != SPACES
+					set tmp-fax = concat(na-country-code,na-fax-no)
+					if na-country-code != SPACES
+					and ws-idd-code != space 
+						string tmp-fax inserting substring(ws-idd-code,1,strlen(ws-idd-code)) at 1
+					endif
+					while pattern(substring(tmp-fax,1,strlen(tmp-fax)),"[(|)| |-]")
+						string tmp-fax deleting pattern(tmp-fax,"[(|)| |-]")
+					endwhile
+					if tmp-fax != space 
+						set tmp-type = "Account"
+						set tmp-name = na-name 
+						insert tmp-email 
+					endif	
+				endif
+			endon
+			get name-and-address-master
+				on index accountcode na-type
+				key is cr-pay-to-code 'C'
+			on error
+			else
+				if na-fax-no != SPACES
+					set tmp-fax = concat(na-country-code,na-fax-no)
+					if na-country-code != SPACES
+					and ws-idd-code != space 
+						string tmp-fax inserting substring(ws-idd-code,1,strlen(ws-idd-code)) at 1
+					endif
+					while pattern(substring(tmp-fax,1,strlen(tmp-fax)),"[(|)| |-]")
+						string tmp-fax deleting pattern(tmp-fax,"[(|)| |-]")
+					endwhile
+					if tmp-fax != space 
+						set tmp-type = "Pay to"
+						set tmp-name = na-name 
+						insert tmp-email 
+					endif	
+				endif
+			endon
+		endon 	
+	elseif lp-type = "W"
+		extract name-and-address-master
+			on index accountcode na-type
+			key is lp-account 'WH'
+			next same accountcode  	
+			when substring(na-type,1,1) = "W"
+		detail 	
+			if na-fax-no != SPACES
+				set tmp-fax = concat(na-country-code,na-fax-no)
+				if na-country-code != SPACES
+				and ws-idd-code != space 
+					string tmp-fax inserting substring(ws-idd-code,1,strlen(ws-idd-code)) at 1
+				endif
+				while pattern(substring(tmp-fax,1,strlen(tmp-fax)),"[(|)| |-]")
+					string tmp-fax deleting pattern(tmp-fax,"[(|)| |-]")
+				endwhile
+				if tmp-fax != space 
+					set tmp-type = concat("Warehouse-",na-type)
+					set tmp-name = na-name 
+					insert tmp-email 
+				endif	
+			endif
+		endextract 		
+	endif
+endprocedure //load-address-fax ----------------------------------------------
+
+procedure data-validations export
+//////////////////////////////////////////////////////////////////////////////
+//<CLIB> 
+//<DESC> Routine that can be used to validate user entered fields in the 
+//       Manual email/fax program
+//		 If validations fail , set ws-reenter = TRUE , else ws-reenter = FALSE
+//<P1> Prompt Name 
+//<P2> Data value
+//<P3> Mandatory flag
+//<P4> Help value
+//
+//</CLIB>
+///////////////////////////////////////////////////////////////////////////
+	parameter
+		lp-prompt	pic x(50)
+		lp-data		pic x(1000)
+		lp-mand		pic x
+		lp-help		pic x
+		lp-tag		like tftd-start
+		lp-tag2		like tftd-end
+	//	
+	set ws-reenter = FALSE 
+	//
+	if lp-data = space 
+	and lp-mand = "Y"
+		message strconcat(lp-prompt) " is a mandatory field, Please enter a valid value"
+		set ws-reenter = TRUE 
+	endif 	
+	if lowercase(lp-tag) = "%cpemail:-this"
+		do set-file-name
+	endif 
+endprocedure //data-validations ----------------------------------------------
+
+procedure get-idd-code
+	get system-table
+		on index sys-tbl-type sys-tbl-code
+		key is "PR" "DIALOUT"
+	on error
+		set ws-idd-code = SPACES
+	else
+		set ws-idd-code = sys-description
+	endon
+endprocedure //get-idd-code --------------------------------------------------
+
+procedure common-before 
+parameter 
+	lp-type				pic x
+local
+	lf-box-row			pic 99	
+	lf-end				pic 99
+	//	
+	if lp-type in {"0" "1" "2"}
+		set ws-cover-ok = TRUE 
+	else
+		set ws-cover-ok = FALSE 
+	endif
+	//
+	open tmp-coverpage-text truncate temporary 
+	set lf-box-row = 1
+	if ws-to-fields > 0 
+		if ws-from-fields = 0 
+		and ws-detail-fields = 0 
+		and ws-to-fields < 3
+			set lf-end = 5
+		else	
+			set lf-end = 2 + ws-to-fields
+		endif 
+		box @lf-box-row,1 to @lf-end,80
+			title "To"
+		set lf-box-row = lf-end + 1
+	endif	
+	if ws-from-fields > 0 
+		if ws-detail-fields = 0 
+		and lf-box-row + 1 + ws-from-fields < 5
+			set lf-end = 5
+		else	
+			set lf-end = lf-box-row + 1 + ws-from-fields
+		endif 
+		box @lf-box-row,1 to @lf-end,80
+			title "From"
+		set lf-box-row = lf-end + 1
+	endif	
+	if ws-detail-fields > 0 
+		if lf-box-row + 1 + ws-detail-fields < 5 
+			set lf-end = 5
+		else
+			set lf-end = lf-box-row + 1 + ws-detail-fields  
+		endif 
+		box @lf-box-row,1 to @lf-end,80
+			title "Detail"
+		set lf-box-row = lf-end + 1 
+	endif 	
+	//	
+	if ws-to-fields = 0 
+	and ws-from-fields = 0 
+	and ws-detail-fields = 0 
+		set ws-fields = FALSE		
+		box @1,1 to @5,80
+			title "Detail"
+		box @1,81 to @5,100
+			title "Spool Files"
+		set ws-spoolfile-display = 3	 
+	else	
+		box @1,81 to @ws-window - 6,100
+			title "Spool Files"
+		set ws-spoolfile-display = ws-window - 8	 
+		set ws-fields = TRUE		
+	endif 
+	//
+	if lf-box-row < 6 
+		set lf-box-row = 6
+	endif 	
+	box @lf-box-row,1 to @ws-window - 1,100
+		title "Coverpage / Body text"
+	set ws-cp-display = lf-box-row	
+endprocedure //common-before -------------------------------------------------
+
+procedure manual-validations
+////////////////////////////////////////////////////////
+//Only way to ensure all fields are valid
+// (ie if esc pressed values are not confirmed
+////////////////////////////////////////////////////////
+local 
+	lf-field	pic 99 
+	//
+	set ws-reenter = FALSE
+	for lf-field = 1 to 24
+		do data-validations
+			parameter ws-prompt[lf-field] GET_DATA(lf-field) ws-mand[lf-field] ws-help[lf-field] ws-tag[lf-field] ws-tag2[lf-field]
+		if ws-reenter 
+			exit
+		endif 	
+	endfor 
+endprocedure //manual-validations --------------------------------------------
+
+screen get-attachment 
+	parameter lp-file		pic x(255)
+	returning lr-file		pic x(255)
+	local
+		lf-file				pic x(255)	
+	//
+	window @1,1 to @3,110
+	title "Attachment Help"
+	form-entry
+	allow entry 
+	no-ok-cancel
+detail
+	accept lp-file @2,15 pic x(90)
+		title "Attachment:"
+		default is lp-file 
+	on help-key 
+		spl 'lib/browse' leave-files-open
+			parameters
+				'-client-browse'
+			returning 
+				lf-file
+		on error
+		endon
+		if lf-file != space 
+			set lp-file = lf-file 
+		endif 	
+		reenter optional 
+	endon 
+confirm auto 
+confirmed
+	set lr-file = lp-file 
+	exit	
+endconfirm 
+endscreen //get-attachment ---------------------------------------------------
+
+procedure help-me	
+	parameter lp-row		pic 99
+		lp-data				like ws-data-1
+	returning 
+		lr-data				like ws-data-1
+	//
+	if ws-help[lp-row] = "E"
+		do get-email entry once
+			parameter lp-data
+			returning lr-data
+	elseif ws-help[lp-row] = "F"
+		do get-fax entry once
+			parameter lp-data
+			returning lr-data
+	elseif ws-help[lp-row] = "A"
+		do get-attachment entry once
+			parameter lp-data
+			returning lr-data
+	elseif ws-help[lp-row] != space
+		do custom-help
+			parameter ws-help[lp-row] lp-data
+			returning lr-data
+	else
+		message "No help setup for this option"
+	endif 
+endprocedure //help-me -------------------------------------------------------
+
+procedure trueform-manual-email-fax
+	confirm
+		prompt "Are you sure you want to restore all the default settings?"
+	confirmed 
+		extract trueform-manual-settings lock  
+		detail
+			delete trueform-manual-settings 
+		endextract 	
+		extract trueform-template-data lock
+		detail 	
+			delete  trueform-template-data
+		endextract 	
+		//
+		do load-initial-data
+	endconfirm 
+endprocedure //trueform-manual-email-fax -------------------------------------
+
+procedure load-initial-data
+	////////////////////////////////////////////////
+	//Called from m99upgrade - cant crash
+	////////////////////////////////////////////////
+	open trueform-manual-settings 
+	on error
+		// this is called before m99opencreate is run, so
+		// need to do the open create here
+		open trueform-manual-settings create  
+		on error 
+		endon 
+	endon 	
+	initialise trueform-manual-settings
+	set tms-seq = 0 	
+	set tms-prompt1 = "Email"
+	set tms-queue1 = "Please setup"
+	set tms-type1 = "0"
+	set tms-prompt2 = "Fax"		
+	set tms-queue2 = "Please setup"			
+	set tms-type2 = "1"	
+	set tms-prompt3 = "Email (Active Fax)"		
+	set tms-queue3 = "Please setup"			
+	set tms-type3 = "2"	
+	///////////////////////////////////////////////////
+	// default with active fax syntax for time being......
+	set tms-fax-escape1 = "@"
+	set tms-fax-escape2 = space 
+	set tms-fax-escape-insert = "\"
+	set tms-fax-cover-1s = "@F316"
+	set tms-fax-cover-1e = "@"
+	set tms-fax-cover-2s = "@F317\n"
+	set tms-fax-cover-2e = "@"
+	///////////////////////////////////////////////////
+	// default with active fax (email) syntax for time being......
+	set tms-other-escape1 = "@"
+	set tms-other-escape2 = space 
+	set tms-other-escape-insert = "\"
+	set tms-other-cover-1s = "@F603"
+	set tms-other-cover-1e = "@"
+	set tms-other-cover-2s = "@F604\n"
+	set tms-other-cover-2e = "@"
+	//////////////////////////////////////////////////
+	set tms-default-project = "xml"	
+	set tms-preview-project = "spool-preview"
+	set tms-preview-queue = "Please setup"
+	//////////////////////////////////////////////////
+	set tms-fax-queue = "Please Setup"
+	set tms-fax-type = "1"
+	set tms-fax-enabled = "N"
+	set tms-preview-extra = "NNN"
+	//////////////////////////////////////////////////
+	insert trueform-manual-settings
+	on error 
+	endon 
+	//
+	open trueform-template-data 
+	on error 
+		// this is called before m99opencreate is run, so
+		// need to do the open create here
+		open trueform-template-data create 
+	endon 
+	DO_LOAD_TEMPLATE("1",1,"To Address","%cpEmail:-TO"," ","Y","Y","E","T")
+	DO_LOAD_TEMPLATE("1",2,"CC Address","%cpEmail:-CC"," ","Y","N","E","T")
+	DO_LOAD_TEMPLATE("1",3,"BCC Address","%cpEmail:-BCC"," ","Y","N","F","T")
+	DO_LOAD_TEMPLATE("1",4,"From Address","%cpEmail:-FROM"," ","Y","Y","E","F")
+	DO_LOAD_TEMPLATE("1",5,"Subject","%cpEmail:-S"," ","Y","N"," ","D")
+	DO_LOAD_TEMPLATE("1",6,"Attachment 1","%cpEmail:-AT"," ","Y","N","A","D")
+	DO_LOAD_TEMPLATE("1",7,"Attachment 2","%cpEmail:-AT"," ","Y","N","A","D")
+	DO_LOAD_TEMPLATE("1",8,"Template","%cpEmail:-TMPL"," ","N","N","A","D")
+	DO_LOAD_TEMPLATE("1",9,"Replace With 1","%cpEmail:-PReplace1="," ","N","N"," ","D")
+	DO_LOAD_TEMPLATE("1",10,"Replace With 2","%cpEmail:-PReplace2="," ","N","N"," ","D")
+	DO_LOAD_TEMPLATE("1",11,"Spool Attachment Name","%cpEmail:-THIS"," ","Y","N"," ","D")
+	//
+	DO_LOAD_TEMPLATE("2",1,"Recipient Name","@F201","@","Y","N"," ","T")
+	DO_LOAD_TEMPLATE("2",2,"Recipient Fax","@F211","@","Y","N","F","T")
+	DO_LOAD_TEMPLATE("2",3,"Senders Name","@F101","@","Y","N"," ","F")
+	DO_LOAD_TEMPLATE("2",4,"Senders Fax","@F110","@","N","N"," ","F")
+	DO_LOAD_TEMPLATE("2",5,"CoverPage","@F305","@","Y","N"," ","D")
+	// 
+	DO_LOAD_TEMPLATE("3",1,"Recipient Name","@F201","@","Y","N"," ","T")
+	DO_LOAD_TEMPLATE("3",2,"Recipient Email","@F212","@","Y","N","E","T")
+	DO_LOAD_TEMPLATE("3",3,"Senders Name","@F101","@","Y","N"," ","F")
+	DO_LOAD_TEMPLATE("3",4,"Senders Email","@F111","@","Y","N","E","F")
+	DO_LOAD_TEMPLATE("3",5,"Subject","@F307","@","Y","N"," ","D")
+	DO_LOAD_TEMPLATE("3",5,"Attachment Name","@F602","@","Y","N"," ","D")
+	//
+	DO_LOAD_TEMPLATE("A",1,"Recipient Name","@F201","@","Y"," "," "," ")
+	DO_LOAD_TEMPLATE("A",2,"Recipient Name(line 2)","@F202","@","Y"," "," "," ")
+	DO_LOAD_TEMPLATE("A",3,"Recipient Name(line 3)","@F203","@","Y"," "," "," ")
+	DO_LOAD_TEMPLATE("A",4,"Recipient Department","@F206","@","Y"," "," "," ")
+	DO_LOAD_TEMPLATE("A",5,"Recipient Fax","@F211","@","Y"," "," "," ")
+	DO_LOAD_TEMPLATE("A",6,"Senders Name","@F101","@","Y"," "," "," ")
+	DO_LOAD_TEMPLATE("A",7,"Senders Name(Line 2)","@F102","@","Y"," "," "," ")
+	DO_LOAD_TEMPLATE("A",8,"Senders Name(line 3)","@F103","@","Y"," "," "," ")
+	DO_LOAD_TEMPLATE("A",9,"Senders Department","@F106","@","Y"," "," "," ")
+	DO_LOAD_TEMPLATE("A",10,"Senders Fax","@F110","@","Y"," "," "," ")
+	DO_LOAD_TEMPLATE("A",11,"Subject","@F307","@","Y"," "," "," ")
+	DO_LOAD_TEMPLATE("A",12,"CoverPage","@F305","@","Y"," "," "," ")
+endprocedure //load-initial-data ---------------------------------------------
+
+procedure check-window-size
+	parameter lp-screen			like tftd-key
+	//	
+	do load-up-template 	
+		parameter lp-screen
+	set ws-window = 1 
+	//
+	if ws-to-fields > 0 
+		if ws-from-fields = zero 
+		and ws-detail-fields = zero 
+		else
+			set ws-window += ws-to-fields + 2
+		endif 	
+	endif	
+	if ws-from-fields > 0 
+		if ws-detail-fields = zero 
+		else
+			set ws-window += ws-from-fields + 2
+		endif 	
+	endif	
+	if ws-detail-fields > 0 
+		set ws-window += ws-detail-fields + 2
+	endif	
+	set ws-window += 5 
+	if ws-window < 11 
+		set ws-window = 11
+	endif 	
+endprocedure //check-window-size ---------------------------------------------
+
+procedure send-fax  
+parameter 
+	//senders info
+	lp-senders-name			pic x(60) //like name
+	lp-senders-name-2		pic x(60) //like address1
+	lp-senders-name-3		pic x(60) //like address2
+	lp-senders-dept			pic x(60)
+	lp-senders-fax			pic x(30)
+	//recipent info
+	lp-recipient-name		pic x(60) //like na-name
+	lp-recipient-name-2		pic x(60) //like address1
+	lp-recipient-name-3		pic x(60) //like address2
+	lp-recipient-dept		pic x(30)
+	lp-recipient-fax		pic x(30)
+	//coverpage
+	lp-subject				pic x(120)
+	lp-coverpage			pic x(80)
+	lp-cover-file			pic x(250)//word or text document..... doc or docx extension...for word
+	lp-fax-file				pic x(250)//text document
+local
+	lf-feed					type boolean
+	lf-count				pic 99
+	//
+	open tmp-jobticket truncate temporary  
+	//
+	extract trueform-template-data 
+		on index tftd-key tftd-seq
+		key is "A" 0 
+		where tftd-start != space 
+		next same tftd-key 
+	detail 
+		switch on tftd-seq
+		case 1
+			set tmp-line = strconcat(tftd-start,lp-senders-name,tftd-end)
+			insert tmp-jobticket
+		case 2
+			set tmp-line = strconcat(tftd-start,lp-senders-name-2,tftd-end)
+			insert tmp-jobticket
+		case 3
+			set tmp-line = strconcat(tftd-start,lp-senders-name-3,tftd-end)
+			insert tmp-jobticket
+		case 4
+			set tmp-line = strconcat(tftd-start,lp-senders-dept,tftd-end)
+			insert tmp-jobticket
+		case 5
+			set tmp-line = strconcat(tftd-start,lp-senders-fax	,tftd-end)
+			insert tmp-jobticket
+		case 6
+			set tmp-line = strconcat(tftd-start,lp-recipient-name,tftd-end)
+			insert tmp-jobticket
+		case 7
+			set tmp-line = strconcat(tftd-start,lp-recipient-name-2,tftd-end)
+			insert tmp-jobticket
+		case 8
+			set tmp-line = strconcat(tftd-start,lp-recipient-name-3,tftd-end)
+			insert tmp-jobticket
+		case 9
+			set tmp-line = strconcat(tftd-start,lp-recipient-dept,tftd-end)
+			insert tmp-jobticket
+		case 10
+			set tmp-line = strconcat(tftd-start,lp-recipient-fax,tftd-end)
+			insert tmp-jobticket
+		case 11
+			set tmp-line = strconcat(tftd-start,lp-subject,tftd-end)
+			insert tmp-jobticket
+		case 12
+			set tmp-line = strconcat(tftd-start,lp-coverpage,tftd-end)
+			insert tmp-jobticket
+		endswitch 
+	endextract 
+	if lp-cover-file != space 
+		open tmp-coverpage-text  
+			file is lp-cover-file 
+		on error 
+		else
+			extract tmp-coverpage-text
+				all
+			before 
+				set lf-count = 1
+			detail 
+				if tms-fax-type = "1"
+					if lf-count = 1
+						set tmp-line = strconcat(tms-fax-cover-1s,tmp-tct-text,tms-fax-cover-1e) 
+					else	
+						set tmp-line = strconcat(tms-fax-cover-2s,tmp-tct-text,tms-fax-cover-2e) 
+					endif 
+					insert tmp-jobticket
+				elseif tms-fax-type = "2"
+					if lf-count = 1
+						set tmp-line = strconcat(tms-other-cover-1s,tmp-tct-text,tms-other-cover-1e) 
+					else	
+						set tmp-line = strconcat(tms-other-cover-2s,tmp-tct-text,tms-other-cover-2e) 
+					endif 
+					insert tmp-jobticket
+				else // Space 	
+					// No way to attach a coverpage 	
+				endif 
+				set lf-count = 0
+			endextract 
+		endon 	
+	endif
+	//
+	if lp-fax-file != space 
+		open tmp-reportfile 
+			file is lp-fax-file 
+		on error
+			message "Could not open file to send"
+			exit
+		else	
+			extract tmp-reportfile 
+				all
+			before	
+				set lf-feed = FALSE 
+			detail 
+				//////////////////////////////////////////////////////////////////
+				//Need to insert a formfeed here to separate from the last report
+				//////////////////////////////////////////////////////////////////
+				if not lf-feed
+					if substring(tmp-line,1,1) != ascii-char(12) 
+						string tmp-line inserting ascii-char(12) at 1
+					endif 
+					set lf-feed = true 	
+				endif 	
+				insert tmp-jobticket
+			endextract 
+		endon  
+	endif 	
+	///////////////////////////////////////////////////////////////	
+	//
+	// if faxmail (use faxmail queue) 
+	if tms-fax-enabled = YES  
+		do send-mail-fax	
+			parameter tms-fax-queue 
+	else
+		spl 'faxmail/runfax'
+			parameters '-f' filename(tmp-jobticket)
+	endif
+endprocedure //send-fax ------------------------------------------------------
+
+screen auto-template-detail 
+	parameter 
+		lp-key		like tftd-key
+	//
+	window @1,1 to @18,65 
+		title "Direct Fax Settings"
+	help-context 'index_CSH.htm' 90206
+	allow search correct 
+	primary trueform-template-data
+		same tftd-key 
+	datagrid occurs 15
+before
+	set tftd-key = lp-key
+detail 	
+	//
+	display tftd-prompt @1,15 pic x(20)
+		title "Prompt"
+	accept tftd-start @1,25 pic x(35)
+		title "Start Tag"
+	accept tftd-end	 @1,35 pic x(10)
+		title "End Tag"
+confirm auto 
+confirmed
+endconfirm
+endscreen //auto-template-detail ---------------------------------------------
+
+screen printer-review												
+	window @1,13 to @23,27
+	title is "Printers"	
+	allowed md-select-mode search
+	primary tmp-printer-review
+		on index tmp-printer-name
+	review-from-start
+	no-prompt-for-search
+	datagrid occurs 21
+before
+	do load-printers
+detail
+	display tmp-printer-name @1,13
+		title is "Printer Name"
+	confirm auto
+	confirmed
+		if screenmode() = md-select-mode
+			exit
+		endif
+	endconfirm
+after
+	set tmp-printer-name = spaces
+endscreen //printer-review ---------------------------------------------------
+
+procedure load-printers
+	if not ws-printers-loaded
+		open tmp-printer-review truncate temporary
+		open pronto-printers read-only
+			file is "$PRONTO/lib/printers"
+		on error
+			message "Can not find printer file " file-status()
+			exit
+		endon
+		set tmp-sequence = zero
+		extract pronto-printers all
+			where substring(tmp-printer-name,1,1) not in {"#" " " "	"}
+		detail
+			set tmp-sequence += 1
+			insert tmp-printer-review
+		endextract
+		position tmp-printer-review
+			key is zero
+		set ws-printers-loaded = true
+	endif
+endprocedure //load-printers -------------------------------------------------
+
+/////////////////////////////////////////////////////////
+//needs to be current on spool file directory....
+//	* Project   ...  (project comes from the spool) 
+//	* spool     ...
+/////////////////////////////////////////////////////////
+procedure print-preview
+	parameter lp-spool-file				pic x(256)
+			  lp-project				pic x(256)
+local	
+	lf-i		pic 99
+	lf-directory	pic x(256) 
+	lf-password		pic x(30)
+	//
+	window @5,1 to @9,70
+		title "TrueForm Preview"
+		no-hide
+	////////////////////////////////////////////
+	//
+	// Add in protection here..........	
+	//	
+	////////////////////////////////////////////	
+	if substring(tms-preview-extra,1,1) = YES
+		//Save to a separate directory....
+		set lf-directory = strconcat(tms-preview-directory,"\",login-id()) 
+	else
+		set lf-directory = strconcat(tms-preview-directory) 
+	endif 
+	if substring(tms-preview-extra,2,2) = YES
+		//add in password 
+		accept lf-password @6,20
+			title "Set PDF Password:"
+			help "Enter a password to use to protect preview PDF, Leave blank for no Password"
+			default lf-password
+	endif 
+	//
+	do iprogbar-progress-bar
+		parameter	FALSE 8 15 1 	 	
+	display "Progress:" @8,2 background bold	
+	//
+	if lp-project = space 
+		message "No matching form project found"
+		exit	
+	endif 
+	//
+	display "Sending to TrueForm server (1/3)" @8,39 background 	
+	do send-preview-to-queue
+		parameter 
+			tms-preview-queue	
+			lp-spool-file		
+			lp-project			
+			lf-password	
+			lf-directory
+	//		
+	display "Waiting for file (2/3)" @8,39 background 	
+	for lf-i = 1 to ws-wait-1 
+		if sleep(1)		
+		endif 
+		do iprogbar-progress-bar
+			parameter	FALSE 8 15 1 	 	
+		if file-exists(ws-preview-file,1)
+			display "Opening file (3/3)" @8,39 background 	
+			do iprogbar-progress-bar
+				parameter	TRUE 8 15 1 	 	
+			if sleep(ws-wait-2)		
+				//Give it a second before opening 
+			endif 
+			if substring(tms-preview-extra,3,3) = YES
+				//wait and delete
+				command ws-preview-file 		
+					external 
+					no-message 
+				on error 
+					// Adobe acrobat returns error , even though there is no error
+				endon 
+				///////////////////////////////////////////////
+				//Need to send a delete command down the line
+				///////////////////////////////////////////////	
+				do send-delete-to-queue
+					parameter 
+						tms-preview-queue	
+			else
+// rjb start ------------------------------------------------------------
+//				command ws-preview-file 		
+//					external no-wait
+//					no-message 
+//				on error 
+//					// Adobe acrobat returns error , even though there is no error
+//				endon 
+				if get-system-metrics(7) = 0
+					command ws-preview-file 		
+						external no-wait
+						no-message 
+					on error 
+						// Adobe acrobat returns error , even though there is no error
+					endon 
+				else
+					message ws-preview-file pause
+					command ws-preview-file 		
+						external no-wait
+						no-message 
+					on error 
+						message error-description(exit-status())
+					endon 
+				endif
+// rjb end ------------------------------------------------------------
+			endif 
+			break	
+		endif 	
+		if lf-i = 20
+			message "Could not find generated file:" ws-preview-file 
+			break
+		endif
+	endfor	
+endprocedure //print-preview -------------------------------------------------
+
+procedure send-preview-to-queue
+parameter 
+	lp-queue			pic x(50)
+	lp-spool-file		pic x(256)
+	lp-project			pic x(256)
+	lp-password			pic x(30)
+	lp-directory		pic x(256)
+local 
+	lf-feed				type boolean
+	//
+	set ws-tod = str(gmt())
+	open tmp-jobticket truncate temporary 
+	set tmp-line = "%cpBegin"
+	insert tmp-jobticket
+	set tmp-line = concat("%cpParam:-s",tms-preview-project)
+	insert tmp-jobticket
+	set tmp-line = concat("%cpUserData:",lp-project)
+	insert tmp-jobticket
+	set tmp-line = concat("%cpUsrDefData:",lp-password)
+	insert tmp-jobticket
+	set tmp-line = concat("%cpUsrDefOptions:",substring(tms-preview-extra,1,1))
+	insert tmp-jobticket
+	set tmp-line = concat("%cpDate:",ws-tod)
+	insert tmp-jobticket
+	set tmp-line = concat("%cpUser:",login-id())
+	insert tmp-jobticket
+	set tmp-line = "%cpEnd"
+	insert tmp-jobticket
+	set ws-preview-file = strconcat(lp-directory,"\",login-id(),ws-tod,".pdf")
+	//
+	set ws-report-file = strconcat(ws-tmp-dir,'/',lp-spool-file,"-",str(pid()),".txt")
+	command 'proprint'	parameters '-t' lp-spool-file ws-report-file
+	////////////////////////////////////////////////////////
+	//consolidate like projects 
+	////////////////////////////////////////////////////////
+	open tmp-reportfile 
+		file is ws-report-file
+	on error 
+		message "There was an error processing the spool file(s)" ws-report-file
+	else
+		extract tmp-reportfile 
+			all
+		before	
+			set lf-feed = FALSE 
+		detail 
+			//////////////////////////////////////////////////////////////////
+			//Need to insert a formfeed here to separate from the last report
+			//////////////////////////////////////////////////////////////////
+			if not lf-feed
+				if substring(tmp-line,1,1) != ascii-char(12) 
+					string tmp-line inserting ascii-char(12) at 1
+				endif 
+				set lf-feed = true 	
+			endif 	
+			insert tmp-jobticket
+		endextract 
+		close tmp-reportfile and remove 
+	endon 	
+	//
+	do send-mail-fax	
+		parameter lp-queue
+	//	
+endprocedure //send-preview-to-queue -----------------------------------------
+
+procedure find-form
+parameter 
+	lp-spool-file			pic x(256)
+local	
+	lf-form					pic x(60) 		
+	lf-count				pic 99
+	//	
+	do set-spoolfile-directory
+	open tmp-spoolfile-header read-only
+		file is strconcat(ws-spoolfile-directory,"/",lp-spool-file) 
+	on error 
+		message "Could not open spool file: "   strconcat(ws-spoolfile-directory,"/",lp-spool-file)
+		exit
+	endon 
+	//	
+	extract tmp-spoolfile-header all
+	detail
+		//Read info from the spool or XML file itself
+		if pattern(lp-spool-file ,"xml")
+			do parse-xml-line
+				parameter "form_type" tmp-tsh-record
+				returning lf-form 
+			if lf-form != space 
+				break
+			endif 	
+		else
+			set lf-count += 1
+			if lf-count = 4
+				set lf-form = uppercase(strconcat(tmp-tsh-record))
+				break
+			endif
+		endif
+		//
+		if pattern(tmp-tsh-record,"</report_info>")
+		or pattern(tmp-tsh-record,ascii-char(12))
+			break
+		endif
+	endextract
+	//	
+	if lf-form != space 
+		get trueform-document-types 
+			on index tdt-form-name
+			key is lf-form
+		on error 
+			set ws-project = tms-default-project
+		else	
+			set ws-project = tdt-project
+		endon
+	else	
+		set ws-project = tms-default-project
+	endif	
+endprocedure //find-form -----------------------------------------------------
+
+procedure set-file-name
+local 
+	lf-field	    pic 999
+	lf-data			pic x(1000)
+	lf-i			pic 999
+	//
+	set lf-field = 999
+	// find the field 
+	for lf-i = 1 to 24
+		if lowercase(ws-tag[lf-i]) = "%cpemail:-this"
+			set lf-field = lf-i
+			set lf-data = GET_DATA(lf-i)
+			break
+		endif 
+	endfor 
+	if lf-data != space
+		if not pattern(lf-data,".pdf") 
+			string lf-data inserting ".pdf" at strlen(lf-data) + 1	
+		endif 
+		set ws-attachment-name = lf-data
+		set lf-data = space 
+	endif 	
+	//
+	if lf-data = space
+		switch on lf-field
+		case 1
+			set SET_DATA(1) = ws-attachment-name
+		case 2
+			set SET_DATA(2) = ws-attachment-name
+		case 3
+			set SET_DATA(3) = ws-attachment-name
+		case 4
+			set SET_DATA(4) = ws-attachment-name
+		case 5
+			set SET_DATA(5) = ws-attachment-name
+		case 6
+			set SET_DATA(6) = ws-attachment-name
+		case 7
+			set SET_DATA(7) = ws-attachment-name
+		case 8
+			set SET_DATA(8) = ws-attachment-name
+		case 9
+			set SET_DATA(9) = ws-attachment-name
+		case 10
+			set SET_DATA(10) = ws-attachment-name
+		case 11
+			set SET_DATA(11) = ws-attachment-name
+		case 12
+			set SET_DATA(12) = ws-attachment-name
+		case 13
+			set SET_DATA(13) = ws-attachment-name
+		case 14
+			set SET_DATA(14) = ws-attachment-name
+		case 15
+			set SET_DATA(15) = ws-attachment-name
+		case 16
+			set SET_DATA(16) = ws-attachment-name
+		case 17
+			set SET_DATA(17) = ws-attachment-name
+		case 18
+			set SET_DATA(18) = ws-attachment-name
+		case 19
+			set SET_DATA(19) = ws-attachment-name
+		case 20
+			set SET_DATA(20) = ws-attachment-name
+		case 21
+			set SET_DATA(21) = ws-attachment-name
+		case 22
+			set SET_DATA(22) = ws-attachment-name
+		case 23
+			set SET_DATA(23) = ws-attachment-name
+		case 24
+			set SET_DATA(24) = ws-attachment-name
+		endswitch 
+	endif 	
+	set ws-attachment-name = space 
+endprocedure //set-file-name -------------------------------------------------
+
+procedure send-delete-to-queue
+parameter 
+	lp-queue			pic x(50)
+	//
+	open tmp-jobticket truncate temporary 
+	set tmp-line = "%cpBegin"
+	insert tmp-jobticket
+	set tmp-line = concat("%cpParam:-s",tms-preview-project)
+	insert tmp-jobticket
+	set tmp-line = concat("%cpUserData:delete-preview-file")
+	insert tmp-jobticket
+	set tmp-line = concat("%cpUsrDefOptions:",substring(tms-preview-extra,1,1))
+	insert tmp-jobticket
+	set tmp-line = concat("%cpUser:",login-id())
+	insert tmp-jobticket
+	set tmp-line = concat("%cpDate:",ws-tod)
+	insert tmp-jobticket
+	set tmp-line = "%cpEnd"
+	insert tmp-jobticket
+	set tmp-line = "Delete: Dummy-file to delete from TrueForm server"
+	insert tmp-jobticket
+	//
+	do send-mail-fax	
+		parameter lp-queue
+endprocedure //send-delete-to-queue ------------------------------------------
+
+//  

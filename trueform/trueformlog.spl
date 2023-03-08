@@ -1,0 +1,820 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : 
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2016
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: trueform/emaillog.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 29Jul16  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+ 
+#define NO_OF_SELECTION_PARAMETERS '1'
+#define REPORT_NAME 'Process Trueform Logs'
+
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+#include "../include/rbtchproc.spl"
+
+
+link "clib/clibvfile"
+ 
+field
+	ws-function-title					type string
+	ws-mail-recipients					pic x(1024) type string
+	ws-spool-id							pic x(20) type string
+	ws-exec-start						type datetime
+	ws-exec-end							type datetime
+	// Parameters
+	ws-folder							type string pic x(256)
+	ws-nfs-folder						type string pic x(256)
+	// The system can process the emailq, a range of printer q's or both.
+	// The filenames are :
+	// Email server.log and Email serveryyyymmdd.log
+	// for the printer q's it is:
+	// qname.log and qnameyyyymmdd.log
+	// 
+	// The following is a boolean saying whether you want top process email
+	// queues or not
+	ws-email-log						type boolean
+	// The following is a boolean saying whether you want to process the queue
+	// with no date at the end of it.  This is the most current data (ie.
+	// today or today when it was moved from the trueform server
+	ws-email-current					type boolean
+	// Start and end dates are the dates for the files that have a date at the
+	// end of them,
+	ws-email-start						type date
+	ws-email-end						type date
+	// The printer q parameters are the same as the email queue with the added
+	// range of the q names you want to process.
+	ws-printerq							type boolean
+	ws-printerq-current					type boolean
+	ws-printerq-q-start					type string
+	ws-printerq-q-end					type string
+	ws-printerq-start					type date
+	ws-printerq-end						type date
+	ws-action-code						pic x
+
+// Sample log line:
+// 06/14/16 16:40:06,00000022,2000,Create!email(TRUEFORMDIR),Success: From: accounts@jj.co.nz, To: rcreynolds@slingshot.co.nz;;;;, Subject: 552782 Invoice From J J LIMITED for REYNOLDSRC
+//
+object emaillogfile
+	type is external
+	separator is ","
+	record is 
+		log-datetime					pic x(50) type string // mm/dd/yy hh:mm:ss
+		log-seq							type number
+		log-code						pic x(20)
+		// service is either the q name or the email service
+		log-service						pic x(100) type string
+		log-from						pic x(4096) type varchar
+		log-to							pic x(4096) type varchar
+		log-subject						pic x(4096) type varchar
+	end-record
+
+object mem-files
+	type is memory
+	record is 
+		mf-filename						pic x(256) type string
+	end-record
+	key is mf-filename unique
+
+object mem-log
+	type is memory
+	record is
+		ml-key							pic 9(8)
+		ml-filename						pic x(256) type string
+		ml-datetime						type datetime
+		ml-seq							pic 9(8)
+		ml-code							pic x(20)
+		ml-service						pic x(100) type string
+		ml-success-fail					pic x(50) type string
+		ml-from							pic x(256) type string
+		ml-to							pic x(100) type string occurs 5
+		ml-subject						pic x(256) type string
+		ml-type							pic x(4) // PO INV STMT EFT
+		ml-partner						like accountcode
+		ml-reference					pic x(20) type string
+	end-record 
+	key is ml-key unique
+
+procedure main
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8secabt-check-abort
+		parameters are sys-consolidation-division login-id() "ZVG" "T007"
+		returning ws-function-title 
+	do i8proglog-write-log
+	RBTCHPROC_RUN_PROGRAM(REPORT_NAME)
+end-procedure
+
+screen rbtchproc-report-parameters
+	allow entry
+	window @1,1 to @24,80
+	title ws-function-title
+	form-entry
+before
+	clear
+	box @1,1 to @19,80
+		title "Report Parameters"
+	box @20,1 to @23,80
+		title "Output Options"
+	set ws-folder = getenv("TFLOG")
+	if ws-folder = spaces
+		set ws-folder = "/pro/data/winfiles/tflog"
+	endif
+	set ws-nfs-folder = getenv("TFNFSLOG") // this is the location of the NFS system
+	if ws-nfs-folder = spaces
+		set ws-nfs-folder = "/pro/data/winfiles/nfstrueform/temp"
+	endif
+	set ws-email-log = TRUE
+	set ws-email-current = TRUE
+	set ws-email-start = today() - 5
+	set ws-email-end = today()
+	set ws-printerq = TRUE
+	set ws-printerq-current = TRUE
+	set ws-printerq-q-start = max-value(ws-printerq-q-start)
+	set ws-printerq-q-end = max-value(ws-printerq-q-end)
+	set ws-printerq-start = today - 5
+	set ws-printerq-end = today
+detail
+	accept ws-folder @2,25
+		pic is x(50)
+		title "Log Folder:"
+		help "Full path to the log file."
+		default ws-folder
+	validations
+		if file-exists(ws-folder,0) <> 2
+			message "Invalid Folder.  This should be a folder on the current Machine"
+			re-enter
+		endif
+	end-validations
+	accept ws-nfs-folder @3,25
+		pic is x(50)
+		title "NFS Log Folder:"
+		help "Full path to the log file on an NFS Share."
+		default ws-nfs-folder
+	validations
+		if file-exists(ws-nfs-folder,0) <> 2
+			message "Invalid Folder.  This should be a folder on the current Machine that is the NFS share from windows"
+			re-enter
+		endif
+	end-validations
+	check-box ws-email-log @4,25
+		values TRUE FALSE
+		title "Process EMail Logs"
+		right-coordinate
+		default is TRUE
+	end-check-box 
+	check-box ws-email-current @5,25
+		values TRUE FALSE
+		title "Include Current Queue"
+		right-coordinate
+		default is TRUE
+	end-check-box 
+	accept ws-email-start @6,25
+		title 'Date Range :'
+		optional
+		help "Starting Date"
+		default ws-email-start
+	accept ws-email-end @6,45
+		title "To:"
+		optional
+		help "End Date"
+		uppercase
+		default ws-email-end
+	//
+	check-box ws-printerq @8,25
+		values TRUE FALSE
+		title "Process printerq Logs"
+		right-coordinate
+		default is TRUE
+	end-check-box 
+	check-box ws-printerq-current @9,25
+		values TRUE FALSE
+		title "Include Current Queue"
+		right-coordinate
+		default is TRUE
+	end-check-box 
+	accept ws-printerq-q-start @10,25 pic x(15)
+		title "Queue Range:"
+		optional
+		help "Start Queue:"
+		default ws-printerq-q-start
+	accept ws-printerq-q-end @10,45 pic x(15)
+		title "To:"
+		optional
+		help "Start Queue:"
+		default ws-printerq-q-start
+	accept ws-printerq-start @11,25
+		title 'Date Range :'
+		optional
+		help "Starting Date"
+		default ws-printerq-start
+	accept ws-printerq-end @11,45
+		title "To:"
+		optional
+		help "End Date"
+		uppercase
+		default ws-printerq-end
+	radio-button ws-action-code
+		@21,18 "U" title "Update Database"
+		@21,33 "D" title "View Datagrid"
+		@21,46 "R" title "Print Report"
+		default "D"
+	on change
+		refresh ws-mail-recipients
+	endon
+	accept ws-mail-recipients @22,10 pic x(68)
+		title "Email:"
+		help "Enter space, comma or semi-colon separated list of email recipients"
+		when ws-action-code = "R" 
+		optional
+	confirm auto
+	confirmed
+		RBTCHPROC_EXECUTION
+	endconfirm
+endscreen //rbtchproc-report-parameters --------------------------------------
+
+procedure rbtchproc-set-parameters
+	RBTCHPROC_LOAD_SET_ALPHA(ws-folder)
+	RBTCHPROC_LOAD_SET_ALPHA(ws-nfs-folder)
+	RBTCHPROC_LOAD_SET_ALPHA(ws-action-code)
+	RBTCHPROC_LOAD_SET_NUM(ws-email-log)
+	RBTCHPROC_LOAD_SET_NUM(ws-email-current)
+	RBTCHPROC_LOAD_SET_DATE(ws-email-start)
+	RBTCHPROC_LOAD_SET_DATE(ws-email-end)
+	RBTCHPROC_LOAD_SET_NUM(ws-printerq)
+	RBTCHPROC_LOAD_SET_NUM(ws-printerq-current)
+	RBTCHPROC_LOAD_SET_ALPHA(ws-printerq-q-start)
+	RBTCHPROC_LOAD_SET_ALPHA(ws-printerq-q-end)
+	RBTCHPROC_LOAD_SET_DATE(ws-printerq-start)
+	RBTCHPROC_LOAD_SET_DATE(ws-printerq-end)
+	RBTCHPROC_LOAD_SET_ALPHA(ws-mail-recipients)
+endprocedure //rbtchproc-set-parameters --------------------------------------
+
+procedure start-report
+	set rbtchproc-report-name = REPORT_NAME
+	report rbtchproc-report-name		
+		header is skeleton-report-header
+		no-message
+		width 132
+		full-xml
+		name  detailreport
+	set ws-report-started = TRUE
+	if rbtchproc-in-background
+		RBTCHPROC_MESSAGE_REPORT_STARTED
+	else
+		display 'Report :' @20,59 background right bold
+		display spool-file-name() @20,68 pic x(12) foreground prompts
+		display "Accessing Database" @21,59 background left bold
+	endif
+	set ws-exec-start = sys-time()
+	set ws-spool-id = spool-file-name()
+endprocedure //start-report ----------------------------------------------------
+
+procedure skeleton-report-header
+	if report-is-xml()
+		report section "headings_section"
+			on detailreport
+	endif
+	print company-name col 1
+		rbtchproc-report-name col 51 bold
+		"Date:" col 85
+		tod() col 110
+		today() col 91
+		"Time:" col 104
+		'Page:' col 120
+		left-justify(str(page-no)) col 126 pic x(4)
+		on detailreport
+	skip
+		on detailreport
+	print
+		"Item" in col    1
+		"Item" in col   19
+		"Whse" in col   51
+		"Location" in col   57
+		right-justify("Location",14) in col   67 pic x(14) right
+		right-justify("Capactiy",14) in col   83 pic x(14) right
+		on detailreport
+	print
+		"Code" in col    1
+		"Description" in col   19
+		right-justify("Qty",14) in col   67 pic x(14) right
+		on detailreport
+	if report-is-xml()
+		report section finished
+			on detailreport
+	endif
+endprocedure //skeleton-report-header ------------------------------------------
+
+procedure rbtchproc-report-detail
+	window @19,44 to @24,80
+	    title is "Report Progress"
+	    color white
+	    no-hide
+	if not rbtchproc-in-background
+		display bitmap concat(getenv('BMS')'/images/repedge.gif') @19,44
+	endif
+	do start-report
+	page on detailreport
+	report "Log Audit"
+		no-xml
+		name auditreport
+	// Remember: a print statement with no "on " clause will use the LAST
+	// report it wrote to as the  place to print
+	print "Start of Audit" on auditreport
+	do build-memory-files
+	if ws-action-code = "D" and not batched
+		do displayit
+	endif
+end-procedure
+
+procedure build-memory-files
+local
+	lf-seq								type number
+	if ws-email-log 
+		open mem-files temporary
+		open mem-log temporary
+		on error
+			message "Unable to create Memory File"
+			exit 1
+		endon
+		print "folder " ws-nfs-folder
+			on auditreport
+		do process-email-queues parameters are ws-nfs-folder lf-seq returning lf-seq
+		print "folder " ws-folder
+			on auditreport
+		do process-email-queues parameters are ws-folder lf-seq returning lf-seq
+		close mem-files and remove
+	endif
+end-procedure
+
+procedure get-date-from-filename
+parameters
+	lf-file-name						pic x(100) type string
+returning
+	lr-date								type date
+local
+	lf-year								type number
+	lf-month							type number
+	lf-day								type number
+	lf-suffix							type number
+	lf-date-string						pic x(8)
+//
+	set lf-suffix = pattern(lf-file-name,".log")
+	if lf-suffix = 0 
+		exit
+	endif
+	set lf-date-string = substring(lf-file-name,lf-suffix - 8, lf-suffix )
+	set lf-year = num(substring(lf-date-string,1,4))
+	set lf-month = num(substring(lf-date-string,5,6))
+	set lf-day = num(substring(lf-date-string,7,8))
+	set lr-date = julian(lf-day,lf-month,lf-year)
+end-procedure
+
+procedure process-email-queues
+parameters are 
+	lp-folder							pic x(256) type string
+	lp-next-seq							type number
+returning
+	lr-next-seq							type number
+local
+	lf-next-seq							type number
+	lf-file								pic x(256) type string
+	lf-log-date							type date
+	set lf-next-seq = lp-next-seq
+	if  start-dir-search(lp-folder,"^Email server?*.log$") 
+		repeat
+			set lf-file = next-dir-entry()  // does this have the path or just the file?
+		until lf-file = spaces
+			print strconcat("found file:" lf-file " in " lp-folder)
+				on auditreport
+			if lf-file = "Email server.log" 
+				if not ws-email-current
+					continue
+				endif
+			else
+				do get-date-from-filename parameters are lf-file
+					returning lf-log-date
+				if lf-log-date not between ws-email-start and ws-email-end
+					continue
+				endif
+			endif
+			get mem-files 
+				on index mf-filename
+				key is lf-file
+			on error
+				print "Not processed so having a crack"
+					on auditreport
+			else
+				// already processed from other folder
+				print "Already done this from somewhere else"
+					on auditreport
+				continue
+			endon
+			print "Importing File" lf-file
+				on auditreport
+			display "Importing File" @21,59 background left bold
+			display "Now at :" @23,45 background prompts left
+			display lf-file @23,54 foreground prompts
+			insert mem-files
+			on error
+				print "Could not insert" error-description(file-status) on auditreport
+			endon
+			string lf-file inserting concat(lp-folder,"/") at 1
+			do build-one-email-file parameters are 
+				lf-file lf-next-seq
+				returning lf-next-seq
+			set mf-filename = lf-file
+		end-repeat
+	end-if
+	if finish-dir-search() endif
+	set lr-next-seq = lf-next-seq
+end-procedure
+
+procedure build-one-email-file
+parameters
+	lp-textfile							pic x(256) type string
+	lp-next-seq							type number
+returning
+	lr-next-seq							type number
+local
+	lf-counter							type number
+//
+	if lp-textfile = spaces
+		exit
+	endif
+	open emaillogfile
+		file is lp-textfile
+		read-only
+	on error
+		message "Unable to open log file:" error-description(file-status())
+		exit 1
+	endon
+	set lf-counter = 0
+	select * from emaillogfile
+	detail
+		set lf-counter += 1
+		if lf-counter = 1
+			continue
+		endif
+		initialise mem-log
+		set ml-key = lp-next-seq
+		do get-datetime parameters are log-datetime
+			returning ml-datetime
+		set ml-seq = log-seq
+		set ml-code = log-code
+		set ml-service = log-service
+		do split-header parameters are log-from
+			returning
+				ml-success-fail
+				ml-from
+		do split-to parameters are log-to
+			returning
+				ml-to
+		set ml-subject = substring(log-subject,11,999999)
+		do get-reference parameters are ml-subject
+			returning ml-type ml-partner ml-reference
+		set ml-filename = filename(emaillogfile)
+		insert mem-log
+		set lp-next-seq += 1
+	end-select
+	set lr-next-seq = lp-next-seq
+end-procedure
+
+procedure get-datetime
+parameters are 
+	lp-input					pic x(100) type string
+// 06/14/16 16:40:06
+returning
+	lr-output					type datetime
+local
+	lf-dd						type number
+	lf-mm						type number
+	lf-yy						type number
+	lf-hh						type number
+	lf-min						type number
+	lf-ss						type number
+	lf-date						type date
+	lf-time						type time
+	//
+	set lf-dd = num(substring(lp-input,4,5))
+	set lf-mm = num(substring(lp-input,1,2))
+	set lf-yy = num(substring(lp-input,7,8))
+	set lf-hh = num(substring(lp-input,10,11))
+	set lf-min = num(substring(lp-input,13,14))
+	set lf-ss = num(substring(lp-input,16,17))
+	//
+	set lf-date = julian(lf-dd,lf-mm,lf-yy)
+	set lf-time = (lf-hh * 3600) + (lf-min * 60) + lf-ss
+	//
+	set lr-output = date-time(lf-date,lf-time,true)
+end-procedure
+
+#define NEXTCOLON pattern(lp-input,":")
+
+procedure split-header
+parameters are
+	lp-input					pic x(4096) type varchar
+// Success: From: accounts@jj.co.nz, To: rcreynolds@slingshot.co.nz;;;;, 
+returning
+	lr-success-fail				pic x(20) type string
+	lr-from						pic x(256) type string
+//
+	set lr-success-fail = substring(lp-input,1,NEXTCOLON - 1)
+	string lp-input deleting 1 to NEXTCOLON + 1
+	string lp-input deleting 1 to NEXTCOLON + 1
+	set lr-from = lp-input
+end-procedure
+
+procedure split-to
+parameters are
+	lp-input					pic x(4096) type varchar
+// To: rcreynolds@slingshot.co.nz;;;;, 
+returning
+	lr-to						pic x(256) type string occurs 5
+local
+	i							type number
+	lf-next-semi-colon			type number
+//
+	string lp-input deleting 1 to NEXTCOLON + 1
+	set i = 1
+	set lf-next-semi-colon = pattern(lp-input,";")
+	while lf-next-semi-colon > 0 and i < occurence(lr-to) and str-len(lp-input) > 0
+		set lr-to[i] = substring(lp-input,1,lf-next-semi-colon - 1)
+		string lp-input deleting 1 to pattern(lp-input,";") + 1
+		set i += 1
+		set lf-next-semi-colon = pattern(lp-input,";")
+	endwhile
+	if str-len(lp-input) > 0 
+		for i = 1 to occurence(lr-to)
+			if lr-to[i] <> spaces
+				set lr-to[i] = lp-input
+			endif
+		endfor
+	endif
+end-procedure
+
+procedure get-reference
+parameter 
+	lp-subject					pic x(1024) type string
+returning 
+	lr-type						like ml-type
+	lr-partner					like ml-partner
+	lr-reference				like ml-reference
+local
+	lf-words					pic x(100) type string occurs 100
+	lf-word-count				type number
+	i							type number
+	lf-found					type boolean
+//
+	// type
+	// Note that the sequence is important.
+	// we have customers with "PO" in their name!!
+	set lp-subject = uppercase(lp-subject)
+	if pattern(lp-subject,"STATEMENT")
+		set lr-type = "STMT"
+	elseif pattern(lp-subject,"REMITTANCE")
+		set lr-type = "EFT"
+	elseif pattern(lp-subject,"PURCHASE")
+		set lr-type = "PO"
+	elseif pattern(lp-subject,"EFT")
+		set lr-type = "EFT"
+	elseif pattern(lp-subject,"STMT")
+		set lr-type = "STMT"
+	elseif pattern(lp-subject,"INV")
+		set lr-type = "INV"
+	elseif pattern(lp-subject,"PO")
+		set lr-type = "PO"
+	endif
+	//
+	// Parter
+	//
+	do clibvfile-split parameters are lp-subject " " 
+		returning lf-words lf-word-count
+	switch lr-type
+	case "INV"
+		do find-in-words
+			parameters are lf-words 1 FALSE "I"
+			returning lr-reference lr-partner
+		if lr-partner = spaces
+			do find-in-words
+				parameters are lf-words lf-word-count TRUE "D"
+				returning lr-partner
+		endif
+	case "EFT"
+		do find-in-words
+			parameters are lf-words lf-word-count TRUE "C"
+			returning lr-partner
+	case "STMT"
+		do find-in-words
+			parameters are lf-words lf-word-count TRUE "D"
+			returning lr-partner
+	case "PO"
+		do find-in-words
+			parameters are lf-words 2 FALSE "P"
+			returning lr-reference lr-partner
+		if lr-partner = spaces
+			do find-in-words
+				parameters are lf-words lf-word-count TRUE "C"
+				returning lr-partner
+		endif
+	end-switch
+end-procedure
+
+procedure find-in-words
+//
+// We pass to this the words (lp-words) and what we are looking for (lp-what)
+// Because a) there is a database read for every word and b) we know basically
+// where we will find what we are looking for, we also pass two other
+// parameters:  lp-start is the starting index to look, and lp-desc is a
+// boolean to say whether we want to look ascending or descinding through the
+// array.
+// The invoice and po numbers are typically at the start whereas the partner
+// code is typically at the end.
+parameters 
+	lp-words						pic x(256) type string occurs 100
+	lp-start						type number
+	lp-desc							type boolean
+	lp-what							pic x // I invoice P Po D debtor C creditor
+returning
+	lr-value						pic x(100) type string
+	lr-value2						pic x(100) type string
+local
+	i								type number
+	lf-counter						type number
+	lf-sql-number					type number
+	lf-invoice						like so-invoice-no
+	set i = lp-start 
+	while TRUE
+		set lf-counter += 1
+		// end conditions
+		if lp-desc 
+			if i < 1  
+				exit
+			endif
+		else
+			if lp-words[i] = spaces
+				exit
+			endif
+		endif
+		// catch to stop infinite loops
+		if lf-counter > 30
+			exit	
+		endif
+		// find what it is
+		switch lp-what
+		case "D"
+			get deb-master  lookup
+				on index accountcode
+				key is lp-words[i]
+			on error ENOREC
+			else
+				set lr-value = lp-words[i]
+				exit
+			endon
+		case "C"
+			get cre-master  lookup
+				on index cre-accountcode
+				key is lp-words[i]
+			on error ENOREC
+			else
+				set lr-value = lp-words[i]
+				exit
+			endon
+		case "I"
+			if num(lp-words[i]) <> 0
+				set lf-invoice = right-justify(lp-words[i],size-of(lf-invoice))
+//				select *
+//					from sales-order-archive
+//					where so-invoice-no like str-concat("%" lp-words[i] "%")
+//				detail
+//					set lr-value = lp-words[i]
+//					exit
+//				end-select
+				get sales-order-archive
+					on index so-invoice-no
+					key is lf-invoice
+				on error ENOREC
+				else
+					set lr-value = lp-words[i]
+					set lr-value2 = so-cust-code
+				endon
+			endif
+		case "P"
+			if num(lp-words[i]) <> 0
+				set lf-sql-number = num(lp-words[i])
+				select *
+					from purchase-order
+					where po-order-no = :lf-sql-number
+				detail
+					set lr-value = lp-words[i]
+					set lr-value2 = cre-accountcode
+					exit
+				end-select
+			endif
+		endswitch
+		// alter the subscript
+		if lp-desc
+			set i -= 1
+		else
+			set i += 1
+		endif
+	endwhile
+end-procedure
+
+
+screen displayit
+	window @1,1 to @40,140
+	title "logs"
+	select * from mem-log
+		order by ml-datetime
+	datagrid occurs 35
+	allowed search
+detail
+	accept ml-key @1,1
+		title "ml-key"
+	display ml-datetime @1,2
+		title "ml-datetime"
+	display ml-type @1,3
+		title "Type"
+	display ml-partner @1,4
+		title "Partner"
+	display ml-reference @1,5
+		title "Reference"
+	display ml-seq @1,6
+		title "ml-seq"
+	display ml-code @1,7 pic x(5)
+		title "ml-code"
+	display ml-service @1,8 pic x(20)
+		title "ml-service"
+	display ml-success-fail @1,9 pic x(15)
+		title "ml-success-fail"
+	display ml-from @1,10 pic x(30)
+		title "ml-from"
+	display ml-to[1] @1,11 pic x(30)
+		title "ml-to"
+	display ml-to[2] @1,12 pic x(30)
+		title "ml-to"
+	display ml-subject @1,13 pic x(30)
+		title "ml-subject"
+	display ml-filename @1,14 pic x(40)
+		title "Filename"
+end-screen
+
+procedure finish-report
+	set ws-exec-end = sys-time()
+	if report-is-xml()
+		page on detailreport
+		report section "options_page" on detailreport
+	endif
+	if ws-report-started
+		skip 2
+		print 'Options selected : ' col 2 no-newline
+			tag  'options_print'
+			on detailreport
+		skip
+	endif
+	if report-is-xml()
+		report section finished on detailreport
+	endif
+	RBTCHPROC_SCREEN_FINISH_MESSAGE(ws-report-started,23,45)
+	if ws-mail-recipients <> spaces
+		do mail-spool-file
+	endif
+endprocedure //finish-report ---------------------------------------------------
+
+procedure mail-spool-file
+local
+	lf-address				pic x(256) type string
+	//
+	if mail-start(REPORT_NAME) endif
+	if mail-add-line("Here is the content of the report") endif
+	if mail-attach(ws-spool-id,str-concat(REPORT_NAME,".html"),0,1,1) endif
+	while ws-mail-recipients <> spaces
+		if lf-address <> spaces and substring(ws-mail-recipients,1,1) in { space "," ";" }
+			// someone to email
+			if mail-send(lf-address,FALSE,FALSE) endif
+			set lf-address = spaces
+		else
+			string lf-address appending substring(ws-mail-recipients,1,1)
+		endif
+		string ws-mail-recipients deleting 1
+	end-while
+	// at the end there may be one more address left over
+	if lf-address <> spaces
+		// someone to email
+		if mail-send(lf-address,FALSE,FALSE) endif
+	endif
+	if mail-cancel() endif
+end-procedure
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                

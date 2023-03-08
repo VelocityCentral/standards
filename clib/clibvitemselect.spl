@@ -1,0 +1,163 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : Generic item selector
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2020
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: clib/clibvitemselect.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 29Jun20  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+/*
+
+	This documentation is in RST format.  To view this as a nice pdf goto
+	https://overbits.herokuapp.com/rsteditor/ or rst.ninjs.org and paste this content.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|           |           |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+
+	Alternatively
+
+	 =========== =========== ======================================================== 
+	  Direction   Data Type   Description                                             
+	 =========== =========== ======================================================== 
+	 =========== =========== ======================================================== 
+
+===============
+clibvitemselect
+===============
+
+clibvitemselect-select 
+~~~~~~~~~~~~~~~~~~~~~~
+
+This clib is a simple item selector
+You pass a big varchar that is a list of items separated by a character
+and you get to select one and it is returned.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |varchar 16k|List of values separated by parameters 2                |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |String 1   |Separator Character                                     |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |String 64  |Screen title                                            |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |string 128 |Selected value                                          |
+	+-----------+-----------+--------------------------------------------------------+
+
+*/
+ 
+#include "../include/i8proglogparam.spl"
+
+field 
+	ws-title							pic x(64) type string
+ 
+object itemlist
+	type memory
+	record is 
+		il-seq							type number
+		il-name							pic x(128) type string
+	end-record
+	key is il-seq
+
+mode md-select
+	prompt "Select"
+
+procedure library-init
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8proglogparam-write-log parameters are "clibvitemselect"
+end-procedure
+
+procedure clibvitemselect-select export
+parameters
+	lp-list								pic x(16000) type varchar
+	lp-separator						pic x
+	lp-screen-title						like ws-title
+returning
+	lr-item								pic x(128) type string
+	//
+	set ws-title = "Please Select Item from List"
+	if lp-screen-title != spaces
+		set ws-title = lp-screen-title
+	endif
+	do build-mem-from-list parameter are lp-list lp-separator
+	do select-from-list returning lr-item
+end-procedure
+
+procedure build-mem-from-list
+parameters
+	lp-list								pic x(16000) type varchar
+	lp-separator						pic x
+local
+	lf-sep-pos							type number
+	lf-brake							type number
+	close itemlist and remove
+	open itemlist temporary
+	//
+	while lp-list != spaces
+		set lf-brake += 1
+		if lf-brake > 1000
+			message "Loop brake exceeded"
+			exit 1
+		endif
+		set lf-sep-pos = pattern(lp-list,lp-separator) 
+		if lf-sep-pos = 0
+			do add-list-item parameters are lp-list
+			set lp-list = spaces
+		else
+			do add-list-item parameters are substring(lp-list,1,lf-sep-pos - 1)
+			string lp-list deleting 1 to lf-sep-pos
+		endif
+	endwhile
+end-procedure
+
+procedure add-list-item
+parameters
+	lp-item								like il-name
+local
+	lf-next-seq							like il-seq
+	//
+	select lf-next-seq = max(il-seq)
+		from itemlist
+	end-select
+	initialise itemlist
+	set il-seq = lf-next-seq + 1
+	set il-name = lp-item
+	insert itemlist
+end-procedure
+
+screen select-from-list
+returning
+	lr-item								like il-name
+	window @1,1 to @10,50
+		window-position 5
+	title ws-title
+	select * from itemlist
+	allowed search md-select
+	datagrid occurs 8
+	no-prompt-for-search
+detail
+	if screenmode = md-select
+		set lr-item = il-name
+		exit
+	endif
+	accept il-seq @1,1 pic z(6)
+		when screenmode = search
+		show-value
+		title "Seq"
+	display il-name @1,2
+		title "Item"
+end-screen

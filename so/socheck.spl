@@ -1,0 +1,1053 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : Check program to verify order is correctly picked.
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2020
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: so/socheck.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 19May20  rjb LOG 4498written 
+/*
+
+	This program is intended to provide a packing-bench check on a sales order
+	after it has been picked.
+
+	The picker picks and then returns the order to packing bench in a tote bin.
+	The packer identifies the order and then SCANS all the items in the tote bin.
+	When complete they select the validate option which then verifies the scanned
+	items match the sales order. 
+
+	If the packer is happy with the results then the order is processed in much
+	the same way as m5delfifo.
+*/
+////////////////////////////////////////////////////////////////////////////////
+/*
+
+TODO:  Automatically updates back orders
+		test for customers not accepting back orders.
+
+
+*/
+ 
+#include "../include/i8ologdesc.spl"
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+#include "../include/i8gparam.spl"
+#include "../include/i5linecalc.spl"
+#include "../so/i50headso.spl"  
+
+link "clib/clib500"
+
+// The following define is intended to be used to determine whether the order
+// is checked against the qty the customer has ordered or the qty the computer
+// THINKS we should ship.
+// At time of writing this is the ordered qty but as stock accuracy changes
+// the shipped qty could be used.
+
+#define QTY_TO_USE sol-ordered-qty
+//#defint QTY_TO_USE sol-shipped-qty
+
+ 
+field
+	ws-function-title					type string
+	ws-start-datetime					type datetime
+	ws-end-datetime						type datetime
+	ws-called-with-parameter			type boolean
+
+object mem-order-lines
+	type memory
+	record is
+		m-seq							type number
+		m-bar-code						like stock-code
+		m-stock-code					like stock-code
+		m-qty							like sol-shipped-qty
+		m-extended-qty					like sol-shipped-qty
+		m-weight						like stk-pack-weight
+		m-status						pic x
+										// spaces - entered
+										// V - Validated
+										// E - Error
+	end-record
+	key is m-seq
+
+object mem-validated-lines
+	type memory
+	record is
+		m-seq	
+		m-bar-code
+		m-qty
+		m-weight
+		m-error							pic x(100) type string
+	end-record
+	key is m-bar-code
+
+object mem-errors
+	type memory
+	record is
+		m-seq	
+		m-line							like sol-line-seq
+		m-bar-code
+		m-error							
+	end-record
+	key is m-bar-code
+
+mode md-select
+	prompt "Select"
+
+mode md-order
+	prompt "Order Enq"
+	help "Full Order Enquiry"
+
+mode md-validate
+	prompt "Validate"
+
+mode md-partial-validate
+	prompt "Partial"
+	help "Do not check for missing lines"
+
+mode md-update-shipped-qty
+	prompt "Update Shipped"
+	help "Update order with scanned qty's"
+
+mode md-despatch
+	prompt "Despatch"
+	help "Complete Despatch Process"
+
+mode md-exit
+	prompt "Exit"
+	help "Return to scan screen"
+
+procedure main
+local
+	lf-so-order-no 					like so-order-no
+	lf-so-bo-suffix					like so-bo-suffix
+	set ws-called-with-parameter = FALSE
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8secabt-check-abort
+		parameters are sys-consolidation-division login-id() "ZVG" "T012"
+		returning ws-function-title 
+	do i8proglog-write-log
+	I8GPARAM_NUM_ALPHA('-order',0,lf-so-order-no,lf-so-bo-suffix)
+	if lf-so-order-no != 0
+		get sales-order
+			on index so-order-no so-bo-suffix
+			key is lf-so-order-no lf-so-bo-suffix
+		on error
+			message-box param-text("<<P1>><<BR>><<p2>>"
+				,"Unable to scan order at this time"
+				,str-concat(str(lf-so-order-no) lf-so-bo-suffix))
+				title is ws-function-title
+				message-buttons  MSG_BOX_CANCEL
+				icon MSG_BOX_STOP
+				bell
+			exit
+		else
+			set ws-called-with-parameter = TRUE
+			do scan-order parameters are so-order-no so-bo-suffix
+		endon
+	else
+		do prompt-for-order
+	endif
+end-procedure
+
+screen prompt-for-order
+	window
+		title ws-function-title
+	datagrid occurs 22
+	select *
+		from sales-order 
+		sales-order-status-desc 
+		deb-master
+		where so-order-status between '40' and '69'
+		and sosd-status = so-order-status
+		and sosd-language = spaces
+		and accountcode = so-cust-code
+		order by so-order-no so-bo-suffix
+	allowed search md-select md-order //md-despatch
+detail
+	if screenmode = md-select
+		do scan-order parameters are so-order-no so-bo-suffix
+	endif
+	if screenmode = md-order
+		spl "so/m5ordenq" parameters are '-e' so-order-no so-bo-suffix
+	endif
+	if screenmode = md-despatch
+		spl "so/m5delfifo" parameters are "-single" so-order-no so-bo-suffix
+	endif
+	accept so-order-no @1,1
+		title "Order"
+		when screenmode = search
+		show-value
+	accept so-bo-suffix @1,2
+		title "Order"
+		when screenmode = search
+		show-value
+	display sosd-description @1,3 pic x(20)
+		title "Status"
+	display so-order-date @1,4
+		title "Order Date"
+	display so-cust-code @1,5
+		title "Customer"
+	display shortname @1,6 pic x(40)
+		title "Cust Name"
+	display so-date-stamp @1,7
+		title "Date Received"
+	display so-time-stamp @1,8
+		title "Time Received"
+end-screen
+
+screen scan-order
+parameters
+	lp-so-order-no						like so-order-no
+	lp-bo-suffix						like so-bo-suffix
+	window
+	title concat("Sales Order Scanning : " str(lp-so-order-no) lp-bo-suffix)
+	select * from mem-order-lines
+	datagrid occurs 20
+	allowed search entry correct remove md-validate md-partial-validate
+local
+	lf-seq								type number
+	lf-message							pic x(100) type string
+	lf-last-mode						type number
+	lf-last-stock-code					like stock-code
+	lf-order-update-occurred			type boolean
+before
+	set ws-start-datetime = gmt
+	close mem-order-lines and remove
+	open mem-order-lines temporary
+	on error
+		message "Unable to open Memory table"
+		exit 1
+	endon
+detail
+	if screenmode = md-validate
+		do validate-lines parameters lp-so-order-no lp-bo-suffix TRUE
+			returning lf-order-update-occurred
+		if lf-order-update-occurred
+			exit
+		endif
+	end-if
+	if screenmode = md-partial-validate
+		do validate-lines parameters lp-so-order-no lp-bo-suffix FALSE
+	end-if
+	if screenmode = entry
+		select lf-seq = max(m-seq)
+			from mem-order-lines
+		end-select
+		set m-seq = lf-seq + 1
+	endif
+	accept m-seq @1,1 pic s(5)
+		title "Seq"
+		when screenmode = search
+		show-value
+	accept m-bar-code @1,2
+		title "Stock Code"
+		uppercase
+	validations
+		do validate-stock-code parameters are m-bar-code
+			returning m-stock-code m-qty m-weight lf-message
+		if exit-status != 0
+			message-box lf-message
+				title is ws-function-title
+				message-buttons  MSG_BOX_CANCEL
+				icon MSG_BOX_STOP
+				bell
+			re-enter m-bar-code
+		endif
+		if m-qty = 0
+			set m-qty = 1
+		endif
+		if screenmode = entry
+			if lf-last-stock-code != m-stock-code and lf-last-stock-code != spaces
+				do validate-one-stock-code parameters lf-last-stock-code
+					lp-so-order-no lp-bo-suffix
+				if exit-status != 0
+					re-enter m-bar-code
+				endif
+			endif
+			do validate-stock-on-order parameters are m-stock-code
+				lp-so-order-no lp-bo-suffix
+		endif
+	end-validations
+	display m-stock-code @1,4
+		title "Code"
+	accept m-qty @1,5
+		title "Qty"
+		default m-qty
+		when screenmode = correct
+		show-value
+//	display m-extended-qty @1,6
+//		title "Outer"
+	display m-weight @1,7
+		title "Weight"
+//	display m-status @1,8
+//		title "Status"
+	confirm auto
+	before 
+		if screenmode = entry
+			set m-status = spaces
+		endif
+	confirmed
+		set lf-last-mode = screen-mode
+		set lf-last-stock-code = m-stock-code
+	end-confirm 
+after
+	message-box param-text("<<P1>><<BR>><<p2>>"
+		,"You are about to exit order scanning"
+		,"Are You Sure?")
+		title is ws-function-title
+		message-buttons  MSG_BOX_OK_CANCEL
+		icon MSG_BOX_WARNING
+		optional bell 
+	if message-status() = MSG_BOX_CANCEL
+		back-to-detail
+	endif
+end-screen // scan-order ----------------------------------------
+
+procedure validate-lines
+parameters
+	lp-order-no							like so-order-no
+	lp-bo-suffix						like so-bo-suffix
+	lp-complete-mode					type boolean
+										// TRUE - The user thinks all lines
+										// have been scanned and the order is
+										// now complete
+										// FALSE - Do not check for lines on
+										// the order that missing from the
+										// scanned items.
+returning
+	lr-order-update-occurred			type boolean
+local
+	lf-stock-code						like stock-code
+	lf-qty								like sol-shipped-qty
+	lf-weight							like stk-pack-weight
+	lf-message							pic x(100) type string
+	lf-seq								like m-seq
+	lf-error-count						type number
+	lf-count							type number
+	lf-tot-qty							type number
+	close mem-validated-lines and remove
+	open mem-validated-lines temporary
+	on error
+		message "Unable to open temp file"
+		exit 1
+	endon
+// step 1 - validate the products
+	select *
+		from mem-order-lines
+	detail
+		do validate-stock-code parameters are m-bar-code
+			returning lf-stock-code lf-qty lf-weight lf-message
+		if exit-status != 0
+			initialise mem-validated-lines
+				leaving m-seq m-bar-code
+			set m-error = lf-message
+			insert mem-validated-lines
+			do display-messages
+			exit 1
+		endif
+	end-select
+//  if here then all the lines are valid product codes
+//  summarise and check against order
+	select *
+		from mem-order-lines
+	detail
+		do validate-stock-code parameters are m-bar-code
+			returning lf-stock-code lf-qty lf-weight lf-message
+		if exit-status != 0
+			// can't happen- see above
+			exit 1
+		endif
+		set lf-qty = m-qty
+//		set lf-qty = m-qty * lf-qty
+		get mem-validated-lines 
+			on index m-bar-code
+			key is lf-stock-code
+		on error ENOREC
+			initialise mem-validated-lines
+			select lf-seq = max(m-seq)
+				from mem-validated-lines
+			end-select
+			set m-seq = lf-seq + 1
+			set m-bar-code = lf-stock-code
+			set m-qty = lf-qty
+			set m-weight = lf-weight
+			insert mem-validated-lines
+			on error
+				exit 1
+			endon
+		else
+			set m-qty += lf-qty
+			set m-weight += lf-weight
+			update mem-validated-lines
+			on error
+				exit 1
+			endon 
+		endon
+	end-select
+// check against order
+	close mem-errors and remove
+	open mem-errors temporary
+	set lf-error-count = 0
+	select stock-code, lf-tot-qty = sum(QTY_TO_USE)
+		from sales-order-line
+		where so-order-no = :lp-order-no
+		and so-bo-suffix = :lp-bo-suffix
+		and sol-line-type = "SN"
+		group by stock-code
+	detail
+		get mem-validated-lines
+			on index m-bar-code
+			key is stock-code
+		on error
+			if lp-complete-mode
+				do add-error parameters are sol-line-seq 
+					str-concat("Stock Code:" stock-code " appears on order but has not been scanned")
+				set lf-error-count += 1
+			endif
+		else
+			if m-qty != lf-tot-qty
+				do add-error parameters are sol-line-seq
+				str-concat("Stock Code:" 
+					stock-code 
+					" incorrect qty scanned (sb" 
+					concat(str(lf-tot-qty) " not " str(m-qty))
+					")"
+					)
+				set lf-error-count += 1
+			endif
+		endon
+	end-select
+	// now check for any lines not in the order
+	select * from mem-validated-lines
+	detail
+		select lf-count = count(*)
+			from sales-order-line
+			where so-order-no = :lp-order-no
+			and so-bo-suffix = :lp-bo-suffix
+			and sol-line-type = "SN"
+			and stock-code = m-bar-code
+		end-select
+		if lf-count = 0
+			do add-error parameters are 0
+				str-concat("Stock Code: " m-bar-code " has been scanned but is not on the order")
+		endif
+	end-select
+	do display-errors parameters are lp-order-no lp-bo-suffix
+		returning lr-order-update-occurred
+	if lr-order-update-occurred
+		exit
+	endif
+end-procedure
+
+procedure add-error
+parameters
+	lp-seq						like sol-line-seq
+	lp-msg						like m-error
+local
+	lf-seq						like m-seq
+	//
+	initialise mem-errors
+	select lf-seq = max(m-seq) from mem-errors
+	end-select
+	set m-seq = lf-seq + 1
+	set m-line	= lp-seq
+	set m-error = lp-msg
+	insert mem-errors
+end-procedure
+
+screen display-errors
+parameters
+	lp-order-no							like so-order-no
+	lp-bo-suffix						like so-bo-suffix
+returning
+	lr-order-update-occurred			type boolean
+local
+	lf-tot-weight								type number
+window
+	title "Errors on this order"
+	select * from mem-errors
+	datagrid occurs 20
+	allowed search md-exit md-update-shipped-qty
+before
+	set lr-order-update-occurred = FALSE
+	select lf-tot-weight = sum(m-weight)
+		from mem-validated-lines
+	end-select
+	display concat(
+		"Total Weight of this order is "
+		str(lf-tot-weight)
+		) @1,5
+detail
+	if screenmode = md-exit
+		exit
+	endif
+	if screenmode = md-update-shipped-qty
+		do update-order parameters lp-order-no lp-bo-suffix
+		message-box "Order update complete."
+			title is ws-function-title
+			message-buttons  MSG_BOX_OK
+			icon MSG_BOX_INFORMATION
+		set lr-order-update-occurred = TRUE
+		exit
+	endif
+	display m-seq pic s(6) @3,1
+		title "Seq"
+	display m-error @3,3
+		title "Errors"
+end-screen
+
+screen display-messages
+window
+	select * from mem-validated-lines
+	allowed search
+	datagrid occurs 20
+before
+	display "These lines are invalid stock codes and must be fixed first" @2,1
+detail
+	accept m-seq @3,1 pic s(5)
+		title "Seq"
+		when screenmode = search
+		show-value
+	display m-bar-code @3,2
+		title "Stock Code"
+	display m-error @3,3
+		title "Error"
+end-screen
+
+procedure validate-stock-code
+parameters
+	lp-scan							pic x(50) type string
+returning
+	lr-stock-code					like stock-code
+	lr-qty							like sol-shipped-qty
+	lr-weight						like stk-pack-weight
+	lr-message						pic x(100) type string
+	//
+	get stock-master
+		on index stock-code
+		key is lp-scan
+	on error ENOREC
+		// do nothing because the else will exit the routine
+	else
+		set lr-stock-code = stock-code
+		set lr-qty = 1
+		do scan-weight parameters are stk-pack-qty stk-pack-weight 0 0
+			returning lr-weight
+		exit 0
+	endon
+	// Check for apn
+	get stock-master
+		on index stk-apn-number
+		key is lp-scan
+	on error
+	else
+		set lr-stock-code = stock-code
+		set lr-qty = 1
+		get stock-master 
+			on index stock-code 
+			key is lr-stock-code
+		do scan-weight parameters are stk-pack-qty stk-pack-weight 0 0
+			returning lr-weight
+		exit 0
+	endon
+	// check for gtin
+	select *
+		from stock-unit-conversion
+		where suc-trade-unit-no = :lp-scan
+	detail
+		// just take the first
+		set lr-stock-code = stock-code
+		get stock-master
+			on index stock-code
+			key is lr-stock-code
+		on error
+		endon
+		if suc-unit-conversion = 0
+			set lr-message = "There is no conversion qty for this bar code."
+			exit 1
+		endif
+		set lr-qty = suc-unit-conversion
+		get stock-master 
+			on index stock-code
+			key is stock-code
+		on error ENOREC
+			set lr-message =  "Some problem - APN nor for a valid stock code"
+			exit 1
+		else
+			do scan-weight parameters are stk-pack-qty stk-pack-weight
+				suc-weight suc-unit-conversion
+				returning lr-weight
+			exit 0
+		endon
+		break // just use the first one
+	end-select
+	// if we got here then we never found anything
+	set lr-message = "Invalid Stock Code"
+	exit 1
+end-procedure
+
+procedure validate-one-stock-code
+parameters
+	lp-stock-code						like stock-code
+	lp-order-no							like so-order-no
+	lp-bo-suffix						like so-bo-suffix
+local
+	lf-scan-count						type number
+	lf-qty								type number
+	// 
+	save mem-order-lines
+	do scan-qty parameters are lp-stock-code
+		returning lf-scan-count
+	select lf-qty = sum(QTY_TO_USE)
+		from sales-order-line
+		where so-order-no = :lp-order-no
+		and so-bo-suffix = :lp-bo-suffix
+		and sol-line-type = "SN"
+		and stock-code = :lp-stock-code
+	end-select
+	if lf-scan-count != lf-qty
+		message-box param-text("<<P1>><<BR>><<p2>><<BR>><<P3>><<BR>><<P4>>"
+			,"You have not scannned the correct qty"
+			,concat("Stock Code:",ltrim(lp-stock-code), " Order:", str(lp-order-no), lp-bo-suffix)
+			,concat("Scanned/Shipped:  " str(lf-scan-count) "/" str(lf-qty)),
+			,"Select OK to continue with this new item or Cancel to change this scan")
+			title is ws-function-title
+			message-buttons  MSG_BOX_OK_CANCEL
+			icon MSG_BOX_WARNING
+				bell
+		if message-status() = MSG_BOX_CANCEL
+			restore mem-order-lines
+			exit 1
+		endif
+	endif
+	restore mem-order-lines
+end-procedure
+
+procedure scan-qty
+parameters
+	lp-stock-code						like stock-code
+returning
+	lr-qty								type number
+	//
+	select * 
+		from mem-order-lines
+		where m-stock-code = :lp-stock-code
+	detail
+		// get the scanned qty
+		select * 
+			from stock-unit-conversion
+			where suc-trade-unit-no = :m-bar-code
+			and suc-unit-conversion != 0
+		detail
+			set  lr-qty += suc-unit-conversion
+			break // just get the first one
+		end-select
+	end-select
+end-procedure
+
+procedure validate-stock-on-order
+parameters
+	lp-stock-code						like stock-code
+	lp-order-no							like so-order-no
+	lp-bo-suffix						like so-bo-suffix
+local
+	lf-tot-qty							type number
+	//
+	select lf-tot-qty = sum(QTY_TO_USE)
+		from sales-order-line
+		where so-order-no = :lp-order-no
+		and so-bo-suffix = :lp-bo-suffix
+		and sol-line-type = "SN"
+		and stock-code = :lp-stock-code
+	end-select
+	if lf-tot-qty = 0
+		message-box param-text("<<P1>><<BR>><<p2>>"
+			,"You appear to have scanned an item that is not on the order"
+			,"You may want to press escape and remove the last scanned item")
+			title is ws-function-title
+			message-buttons  MSG_BOX_OK
+			bell
+	/*
+	else
+		select lf-scanned-qty = sum(m-qty)
+			from mem-order-lines
+			where m-bar-code = :lp-stock-code
+		end-select
+		if lf-scanned-qty > lf-tot-qty
+			message-box param-text("<<P1>><<BR>><<p2>>"
+				,"You appear to have scanned more products than required"
+				,"You may want to press escape and remove the last scanned item")
+				title is ws-function-title
+				message-buttons  MSG_BOX_OK
+				icon MSG_BOX_WARNING
+		endif
+	*/
+	endif
+end-procedure
+
+procedure scan-weight 
+parameters
+	lp-stk-pack-qty						like stk-pack-qty
+	lp-stk-pack-weight					like stk-pack-weight
+	lp-suc-weight						like suc-weight
+	lp-suc-unit-conversion				like suc-unit-conversion
+returning
+	lr-weight							like suc-weight
+//	acknowledge concat("lp-stk-pack-qty:" str(lp-stk-pack-qty))
+//	acknowledge concat("lp-stk-pack-weight:" str(lp-stk-pack-weight))
+//	acknowledge concat("lp-suc-weight:" str(lp-suc-weight))
+//	acknowledge concat("lp-suc-unit-conversion:" str(lp-suc-unit-conversion))
+	if lp-suc-weight != 0
+		set lr-weight = lp-suc-weight
+	else
+		if lp-stk-pack-weight = 0
+			set lr-weight = 0
+		else
+			if lp-stk-pack-qty = 0
+				set lr-weight = lp-stk-pack-weight
+			else
+				if lp-suc-unit-conversion = 0
+					set lr-weight = lp-stk-pack-weight / lp-stk-pack-qty 
+				else
+					set lr-weight = lp-stk-pack-weight * (lp-suc-unit-conversion / lp-stk-pack-qty ) 
+				endif
+			endif
+		endif
+	endif
+end-procedure
+
+procedure update-order
+parameters
+	lp-order-no							like so-order-no
+	lp-bo-suffix						like so-bo-suffix
+local
+	lf-commit							type boolean
+	lf-available-to-allocate			type number
+	lf-processing-stock					like stock-code
+	lf-sol-line-seq						like sol-line-seq
+	//
+	get sales-order
+		on index so-order-no so-bo-suffix
+		key is lp-order-no lp-bo-suffix
+	on error ENOREC
+		message-box param-text("<<P1>><<BR>><<p2>>"
+			,"Invalid Order Number"
+			,str-concat(str(lp-order-no), lp-bo-suffix))
+			title is ws-function-title
+			message-buttons  MSG_BOX_CANCEL
+			icon MSG_BOX_STOP
+				bell
+		exit
+	endon
+	get deb-master
+		on index accountcode
+		key is so-cust-code
+	on error
+	endon
+	//
+	set lf-commit = TRUE
+	transaction begin
+		//
+	/*
+	select 
+		m-stock-code,
+		lf-available-to-allocate = sum(m-qty)
+		from mem-order-lines
+		group by 1
+		order by 1
+	detail
+		// this routine needs to deal with the same product being 
+		// on more than one line with different qtys
+		select * 
+			from sales-order-line
+			where stock-code = :m-stock-code
+			and so-order-no = :lp-order-no
+			and so-bo-suffix = :lp-bo-suffix
+			for update
+		detail
+			if sol-ordered-qty <= lf-available-to-allocate
+				set sol-shipped-qty = sol-ordered-qty
+			else
+				set sol-shipped-qty = lf-available-to-allocate
+			endif
+			set sol-backorder-qty = sol-ordered-qty - sol-shipped-qty
+			if dr-part-shipment-allowed = NO
+				set sol-backorder-qty = 0
+			endif
+			do calc-line-amounts
+			update sales-order-line
+			on error
+				set lf-commit = FALSE
+			endon
+			set lf-available-to-allocate -= sol-shipped-qty
+		end-select
+	end-select
+	*/
+	select lf-processing-stock = stock-code 
+		lf-sol-line-seq = sol-line-seq
+		from sales-order-line
+		where so-order-no = :lp-order-no
+		and so-bo-suffix = :lp-bo-suffix
+		and sol-line-type in ('SN')
+		order by stock-code
+	before lf-processing-stock
+		set lf-available-to-allocate = 0
+		select 
+			lf-available-to-allocate = sum(m-qty)
+			from mem-order-lines
+			where m-stock-code = :lf-processing-stock
+		end-select
+	detail
+		get sales-order-line
+			on index so-order-no so-bo-suffix sol-line-seq
+			key is lp-order-no lp-bo-suffix lf-sol-line-seq
+			lock
+		on error ELOCKED
+			message-box param-text("<<P1>><<BR>><<p2>>"
+				,"A Line on the order is locked by someone else"
+				,"Please Try again")
+				title is ws-function-title
+				message-buttons  MSG_BOX_CANCEL
+				icon MSG_BOX_STOP
+			exit
+		endon
+		if sol-ordered-qty <= lf-available-to-allocate
+			set sol-shipped-qty = sol-ordered-qty
+		else
+			set sol-shipped-qty = lf-available-to-allocate
+		endif
+		set sol-backorder-qty = sol-ordered-qty - sol-shipped-qty
+		if dr-part-shipment-allowed = NO
+			set sol-backorder-qty = 0
+		endif
+//		acknowledge stock-code
+//		acknowledge sol-line-seq
+//		acknowledge sol-ordered-qty
+//		acknowledge sol-shipped-qty
+//		acknowledge sol-backorder-qty
+		do calc-line-amounts
+		update sales-order-line
+		on error
+			set lf-commit = FALSE
+		endon
+		set lf-available-to-allocate -= sol-shipped-qty
+	end-select
+	do i50headso-calc-total-amounts-update
+	//  Add Audit and memo line
+	//  Memo
+	do add-note-line parameters are so-order-no so-bo-suffix 
+		concat("Checked via Scan by " login-id() " at " format-picture(today(), "ddmmmyy") " " 
+			format-picture(tod(), "HH:MM:SS"))
+		"M"
+	if exit-status != 0
+		set lf-commit = FALSE
+	endif
+	// Audiit
+	set ws-end-datetime = gmt
+	do write-checked-log parameters are so-order-no so-bo-suffix
+	if lf-commit
+		transaction commit
+	else
+		transaction rollback
+		message-box param-text("<<P1>><<BR>><<p2>>"
+			,"An error occurred during this update.  All changes to the database have been reversed."
+			,"Use the standard despatch program to update the back orders")
+			title is ws-function-title
+			message-buttons  MSG_BOX_CANCEL
+			icon MSG_BOX_STOP
+				bell
+	endif
+end-procedure
+
+procedure calc-line-amounts
+// currency assumed on sales-order-line
+	get stock-master
+		on index stock-code
+		key is stock-code
+	on error 
+	endon
+#if BMS_DICT_VER < 7000
+	I5LINECALC_SO_LINE_CALC(so-price-code,
+		so-sales-tax-exemption-no,
+		sol-item-price,
+		sol-ordered-qty,
+		sol-stk-unit-desc,
+		sol-price-uom,
+		sol-disc-rate,
+		sol-tax-rate-code,
+		sol-item-wholesale-price,
+		sol-line-amount,
+		sol-ordered-discount-amt,
+		sol-oordered-sales-tax-amt )
+	I5LINECALC_SO_LINE_CALC(so-price-code,
+		so-sales-tax-exemption-no,
+		sol-item-price,
+		sol-shipped-qty,
+		sol-stk-unit-desc,
+		sol-price-uom,
+		sol-disc-rate,
+		sol-tax-rate-code,
+		sol-item-wholesale-price,
+		sol-shipped-amount,
+		sol-shipped-discount-amt,
+		sol-shipped-sales-tax-amt )
+#else
+	// calculate sol-line-amount, sol-shipped-discount-amt and
+	// sol-shippped-sales-tax-amt
+	I5LINECALC_SO_LINE_CALC(so-price-code,
+		spaces,
+		sol-item-price,
+		sol-ordered-qty,
+		sol-stk-unit-desc,
+		sol-price-uom,
+		sol-disc-rate,
+		spaces,
+		sol-item-wholesale-price,
+		sol-line-amount,
+		sol-ordered-disc-amt,
+		sol-ordered-sales-tax-amt )
+	// Now the shipped qty
+	I5LINECALC_SO_LINE_CALC(so-price-code,
+		spaces,
+		sol-item-price,
+		sol-shipped-qty,
+		sol-stk-unit-desc,
+		sol-price-uom,
+		sol-disc-rate,
+		spaces,
+		sol-item-wholesale-price,
+		sol-shipped-amount,   				// returned
+		sol-shipped-discount-amt,   		// returned
+		sol-shipped-sales-tax-amt )   		// returned
+	
+#endif
+	set sol-shipped-amount = sol-shipped-qty * (sol-item-price / sol-price-uom) - sol-shipped-discount-amt
+	set sol-line-cost = sol-shipped-qty * sol-item-cost
+endprocedure 
+
+
+procedure add-note-line
+parameters are
+	lp-order-no							like so-order-no
+	lp-bo-suffix						like so-bo-suffix
+	lp-note								like sol-line-description
+	lp-type								pic x // M-memo N-note
+returning 
+	lr-display-text						type string
+local
+	lf-next-line						like sol-line-seq
+	lf-added							type boolean
+	//
+	set lf-added = FALSE
+	//
+	select * from sales-order-line
+		where so-order-no = :lp-order-no
+		and so-bo-suffix = :lp-bo-suffix
+		order by so-order-no so-bo-suffix sol-line-seq
+	detail
+		set lf-next-line = sol-line-seq
+	endselect
+	set lf-next-line += 1
+	// 
+	// Check if standard note
+	//
+	get system-table
+		on index sys-tbl-type sys-tbl-code
+		key is "QX" lp-note
+	on error
+		//
+		// It's just a normal note
+		//
+		initialise sales-order-line
+		set so-order-no  = lp-order-no
+		set so-bo-suffix = lp-bo-suffix
+		set sol-line-seq = lf-next-line
+		set sol-line-type = "DN"
+		if lp-type  = 'M'
+			set sol-print-line = NO
+			set stock-code = 'Memo'
+		else
+			set sol-print-line = YES
+			set stock-code = 'Note'
+		endif	
+		set sol-line-description = lp-note
+		set sol-date-stamp = today()
+		set sol-time-stamp = tod()
+		insert sales-order-line
+		on error
+			exit 1
+		endon
+		set lr-display-text = lp-note
+	else
+		//
+		// Its a short code
+		//
+		set lr-display-text = sys-description
+		select * from system-messages
+			where sys-message-type =  "QX"
+			and sys-message-code = lp-note
+			order by sys-message-type sys-message-code sys-message-line
+		detail
+			initialise sales-order-line
+			set so-order-no  = lp-order-no
+			set so-bo-suffix = lp-bo-suffix
+			set sol-line-seq = lf-next-line
+			set sol-line-type = "DN"
+			if lp-type  = 'M'
+				set sol-print-line = NO
+				set stock-code = 'Memo'
+			else
+				set sol-print-line = YES
+				set stock-code = 'Text'
+			endif	
+			set sol-line-description = sys-message-text
+			set sol-date-stamp = today()
+			set sol-time-stamp = tod()
+			insert sales-order-line
+			on error
+				exit 1
+			endon
+			set lf-next-line += 1
+		end-select
+	endon
+endprocedure //load-from-text-codes ------------------------------------------
+
+procedure write-checked-log
+parameters
+	lp-order-no							like so-order-no
+	lp-bo-suffix						like so-bo-suffix
+//
+	do clib500-write-audit-file parameters are
+		lp-order-no 
+		lp-bo-suffix 
+		0
+		str(tty())
+		login-id()
+		I8OLOG_PICKING_COMPLETED
+		format-picture(time-from-date-time(ws-start-datetime,1),"HH:MM:SS")
+		format-picture(time-from-date-time(ws-end-datetime,1),"HH:MM:SS")
+		0
+		0
+		ws-end-datetime - ws-start-datetime
+		spaces
+		0
+		0
+		0
+		0
+		spaces
+		0
+		spaces
+		spaces
+		'ZVG'
+		'T012'
+end-procedure

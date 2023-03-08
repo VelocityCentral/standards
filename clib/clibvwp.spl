@@ -1,0 +1,434 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : 
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2020
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: clib/clibvwp.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 30Jun20  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+ 
+
+/*
+	This documentation is in RST format.  To view this as a nice pdf goto
+	https://overbits.herokuapp.com/rsteditor/ or rst.ninjs.org and paste this content.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|           |           |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+
+=======
+clibvwp
+=======
+
+	This is a generic prowp processor screen. The content of the notes
+	is passed as a large varchar (not as a set of note lines).
+
+	The code can build a varchar by passing it a series of note lines one after the other.
+
+
+Here is a sample Pronto program showing how to create the xml and pass it to the clib::
+
+
+	do clibvwp-edit-notes-via-prowp "New CRM Transaction" lf-notes 0 0
+		returning lf-notes
+	if exit-status != 0
+		exit // user escaped out
+	endif
+	// No do something with the returned notes
+	repeat
+		do clibvwp-break-to-line parameters are lp-notes size-of(sol-line-description) 
+			returning sol-line-description lp-notes
+	until sol-line-description = spaces
+		// Do whatever is required to insert the line here
+	end-repeat
+
+
+clibvwp-initialise-varchar
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	Call this routine each time you wish to initialise the internal varchar
+
+	There are no parameters.
+
+clibvwp-add-text-to-varchar
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	
+	This routine will determine if a varchar already exists or whether to add to an 
+	existing (internal) varchar.  
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|    In     |  String   | String of no more than 1024 bytes to be added to varchr|
+	+-----------+-----------+--------------------------------------------------------+
+	|    Out    |  String   | Varchar so far.                                        |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvwp-add-blank-line-to-varchar
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	Add a blank line.  Use this when the input has a blank line (i.e. a paragraph) that
+	needs to be preserved in the output.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   Out     | String    | Varchar with blank line added                          |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvwp-edit-notes-via-prowp 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	This routine calls prowp and returns the text
+
+	If the user escapes from the screen then a non-zero exit status is returned.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|    In     |string 60  |Heading                                                 |
+	+-----------+-----------+--------------------------------------------------------+
+	|    In     |varchar 16k|the text to be editted                                  |
+	+-----------+-----------+--------------------------------------------------------+
+	|    In     |  int      |Width of window.                                        |
+	|           |           |                                                        |
+	|           |           |if 0 then 28 will be used                               |
+	+-----------+-----------+--------------------------------------------------------+
+	|    In     |  int      |height of window                                        |
+	|           |           |                                                        |
+	|           |           | if 0 then 10 will be used.                             |
+	+-----------+-----------+--------------------------------------------------------+
+	|    Out    |varchar 16k|the Changed text                                        |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvwp-break-to-line 
+~~~~~~~~~~~~~~~~~~~~~
+
+	This routine is designed to be called repeatedly until
+	the returning text is spaces.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|    In     |varchar 16k|the text to be editted                                  |
+	+-----------+-----------+--------------------------------------------------------+
+	|    In     |  int      |Maximum size of the line to be returned                 |
+	+-----------+-----------+--------------------------------------------------------+
+	|    Out    |varchar 16k|the next line of no more than the maximum characters    |
+	|           |           |requested                                               |
+	+-----------+-----------+--------------------------------------------------------+
+	|    Out    |varchar 16k|the input text with the returned line removed from the  |
+	|           |           |beginning                                               |
+	+-----------+-----------+--------------------------------------------------------+
+
+	An example of how to handle the returning data is as follows:
+
+Sample Code::
+
+	while lf-varchar-text != spaces // ie. there is more to print
+		do clibvwp-break-to-line parameters are  lf-varchar-text 60
+			returning lf-this-line lf-varchar-text
+		print lf-this-line 
+	end-while
+
+
+clibvwp-set-line-at-line-feed
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	The default is that line feed characters will be included in the text when a line
+	is chopped up.  Use this function to cause lines to end at line feed characters
+	and the line feed characters to be ignored.
+
+	Typically Use False (This is the default so no call needs to be made to this routine
+	to accept this default) when the text is to be stored in a table specifically 
+	designed for notes.  
+	When data is to be stored in table such as purchase order line or sales order line
+	then it is more useful to remove the line feeds.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|    In     |Boolean    |True - lines will end at line feeds and line feed       |
+	|           |           |characters are removed from the output.                 |
+	|           |           |False - line feed characters are included in the output |
+	+-----------+-----------+--------------------------------------------------------+
+*/
+ 
+#include "../include/i8proglogparam.spl"
+
+field
+	ws-line-end-at-line-feed				type boolean
+	ws-note-varchar							pic x(4096) type varchar
+
+
+procedure library-init
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	set ws-line-end-at-line-feed = FALSE
+	do i8proglogparam-write-log parameters are "clibvwp"
+end-procedure
+
+procedure main
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do test-menu
+end-procedure
+
+
+procedure clibvwp-initialise-varchar export
+	set ws-note-varchar = spaces
+end-procedure
+
+procedure clibvwp-add-blank-line-to-varchar export
+returning
+	lr-varchar								like ws-note-varchar
+	string ws-note-varchar appending " <<BR>>"
+end-procedure
+
+procedure clibvwp-add-text-to-varchar export
+parameters
+	lp-note-line							pic x(1024) type string
+returning
+	lr-varchar								like ws-note-varchar
+	//
+	if ws-note-varchar = spaces
+		set ws-note-varchar = lp-note-line
+	else
+		string ws-note-varchar appending concat(" ",lp-note-line)
+	endif
+	set lr-varchar = ws-note-varchar
+end-procedure
+
+procedure clibvwp-set-line-at-line-feed export
+parameters
+	lp-set-line-at-line-feed 				type boolean
+	set ws-line-end-at-line-feed = lp-set-line-at-line-feed
+endprocedure
+
+//------------------------------------------------------------------------------
+// generic notes screen  
+// default depth and width to support phone in portrait
+//
+// Call this routine passing a the title, a large varchar and the width and
+// depth of the screen.  If the width and depth are not passed then a default
+// suitable for a mobile phone in landscape are used.
+// eg
+/*
+	do clibmob-edit-notes-via-prowp "New CRM Transaction" lf-notes 0 0
+		returning lf-notes
+	if exit-status != 0
+		exit // user escaped out
+	endif
+*/
+// After the routine a large varchar is returned.
+// To break that into sensible line sizes for any notes file, repeatedly call 
+// clibmob-break-to-line.  eg:
+/* 
+	repeat
+		do clibmob-break-to-line parameters are lp-notes size-of(sol-line-description) 
+			returning sol-line-description lp-notes
+	until sol-line-description = spaces
+		// Do whatever is required to insert the line here
+	end-repeat
+*/
+//------------------------------------------------------------------------------
+
+object prowp-notes-file
+	type text
+record
+	prowp-tmp-notes					like sol-line-description
+endrecord
+
+#define LANDSCAPEWIDTH 40
+#define LANDSCAPEDEPTH 7
+#define PORTRAITWIDTH 28
+#define PORTRAITDEPTH 10
+
+procedure clibvwp-break-to-line export
+parameters
+	lp-text								pic x(16000) type varchar
+	lp-max-size							type number
+returning
+	lr-returned-line					pic x(16000) type varchar
+	lp-text
+local 
+	i 									type number
+//cannot use the ltrim function - as a leading ascii-char(10) will be trimmed - and we lose our line feed!
+	if lp-text > spaces
+	   while substring(lp-text,1,1) = ' '
+			string lp-text deleting 1
+	   endwhile
+	endif
+	//
+	// deal with line feeds
+	//
+	if ws-line-end-at-line-feed
+		for i = 1 to lp-max-size
+			if substring(lp-text,i,i)  = ascii-char(10)
+			or substring(lp-text,i,i)  = ascii-char(13)
+				set lr-returned-line = substring(lp-text,1,i - 1)
+				string lp-text deleting 1 to i
+				exit
+			endif
+		endfor
+	endif
+	//
+	// Deal with line breaks
+	//
+	if pattern(lp-text,"<<BR>>") = 1
+		set lr-returned-line = spaces
+		string lp-text deleting 1 to 6
+	elseif pattern(lp-text,"<<BR>>") < lp-max-size
+		and pattern(lp-text,"<<BR>>") > 0
+		set lr-returned-line = substring(lp-text,1,pattern(lp-text,"<<BR>>") - 1)
+//		string lp-text deleting 1 to pattern(lp-text,"<<BR>>") + 5
+		string lp-text deleting 1 to pattern(lp-text,"<<BR>>") - 1
+	elseif str-len(lp-text) < lp-max-size
+		// smaller than max so just return it
+		set lr-returned-line = lp-text
+		set lp-text = spaces
+	elseif pattern(lp-text," ") > lp-max-size
+		// space past max size so truncate it
+		set lr-returned-line = substring(lp-text,1,lp-max-size)
+		string lp-text deleting 1 to lp-max-size
+	else 
+		// At least one (possibly more) words will fit
+		set lr-returned-line = substring(lp-text,1,lp-max-size)
+		if substring(lp-text,lp-max-size + 1,lp-max-size + 1) = space
+		or substring(lp-text,lp-max-size,lp-max-size) = space
+			//ok we got a full word ending on the max-size - cool - uses the full line!
+			string lp-text deleting 1 to lp-max-size
+			exit
+		else
+			for i = str-len(lr-returned-line) down to 1
+				if substring(lr-returned-line,i,i) = space
+					string lr-returned-line deleting i to str-len(lr-returned-line)
+					string lp-text deleting 1 to str-len(lr-returned-line)
+					exit
+				endif
+			end-for
+		endif
+	endif
+end-procedure
+
+procedure clibvwp-edit-notes-via-prowp export
+parameters
+	lp-heading							pic x(60)
+	lp-text								pic x(16000) type varchar
+	lp-width							type number
+	lp-depth							type number
+returning
+	lr-text								pic x(16000)
+	if lp-width = 0
+		set lp-width = PORTRAITWIDTH
+	endif
+	if lp-depth = 0
+		set lp-depth = PORTRAITDEPTH
+	endif
+	close prowp-notes-file and remove
+	open prowp-notes-file temporary
+	if lp-text != spaces
+		// load file with space delimited text.
+		repeat
+			do clibvwp-break-to-line parameters are lp-text size-of(prowp-tmp-notes) 
+				returning prowp-tmp-notes lp-text
+		until prowp-tmp-notes = spaces
+			insert prowp-notes-file
+		end-repeat
+	endif
+	command "prowp" parameters are 
+		"-h" lp-heading
+		"-b" str(lp-depth) str(lp-width)  "1" "1"  
+		"-v"
+		file-name(prowp-notes-file)
+	// Exit 0 - user pressed "SAVE"  Exit 2 - User pressed cancel or closed
+	// without save
+	if exit-status() != 0
+		exit 1
+	endif
+	//
+	// Now build a varchar:
+	//
+	set lr-text = spaces
+	select * from prowp-notes-file
+	detail
+		if lr-text = spaces
+			set lr-text = prowp-tmp-notes
+		else
+			string lr-text appending concat(" " prowp-tmp-notes)
+		endif
+	end-select
+	//
+endprocedure //edit-notes-via-prowp-for-trans----------------------
+
+
+//--------------------------------------------------------------------------------
+//     * * *    T E S T     R O U T I N E S    * * *
+//--------------------------------------------------------------------------------
+//
+
+menu test-menu
+detail
+	option "Maintain Stock Notes" @1,1
+		spl 'stk/m4stkmaint'
+	option "Print reformatted German Notes" @2,1
+		do print-notes
+end-menu
+
+procedure print-notes
+local
+	lf-varchar-text			pic x(16000) type varchar
+	lf-this-line			pic x(100) type string
+	lf-counter				type number
+	lf-loop-counter			type number
+	select *
+		from stock-notes
+		where stock-note-type = 'LG'
+		order by stock-code stock-note-type stock-note-sequence
+	before
+		report "German notes"
+			no-xml
+	before stock-code
+		do clibvwp-initialise-varchar
+	detail
+		if stock-note = spaces
+			do clibvwp-add-blank-line-to-varchar returning lf-varchar-text
+		else
+			do clibvwp-add-text-to-varchar parameter are stock-note returning lf-varchar-text
+		endif
+	after stock-code
+		if lf-varchar-text != spaces
+			set lf-counter += 1
+			set lf-loop-counter = 1
+			skip
+			print stock-code
+			while lf-varchar-text != spaces // ie. there is more to print
+				and lf-loop-counter < 20
+				do clibvwp-break-to-line parameters are  lf-varchar-text 60
+					returning lf-this-line lf-varchar-text
+				print lf-this-line 
+			end-while
+		endif
+	after
+		report finished
+	end-select
+	message-box param-text("<<P1>>stock items printed"
+		,str(lf-counter))
+		title is "Test"
+		message-buttons  MSG_BOX_OK
+		icon MSG_BOX_INFORMATION
+end-procedure

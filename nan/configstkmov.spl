@@ -1,0 +1,1052 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : create stock movements from configuarable budgets
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2017
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: nan/configstkmov.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 08Feb17  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+//
+//
+//
+/*
+
+Useful qry for seeing what you get:
+
+SELECT 
+stock_Code,  
+sctd_year * 100 + MONTH(period_start) yrper, 
+sum(0-stk_trans_qty) sales
+FROM stock_movements AS t0
+JOIN system_control_time_dimension t1
+	ON t1.sctd_date = t0.stk_trans_date
+AND stk_trans_type = 'SO'
+GROUP BY 1,2
+
+*/
+ 
+#define NO_OF_SELECTION_PARAMETERS '0'
+#define REPORT_NAME 'Create Stock Movements from Budget'
+
+//#define DEBUG_MODE
+
+#include '../include/bmsdef.spl'
+#include '../include/rbtchproc.spl'
+
+#define RANDOM_BETWEEN(A,B) \
+	(((RANDOM(0) / 32767) * (B - A)) + A)
+
+#define TREND_FLAT 0
+#define TREND_UP 1
+#define TREND_DOWN 2
+#define TREND_SEASONAL 3
+
+
+link "clib/clibstk"
+
+field
+	ws-start-stk-stock-status			pic x //like stk-stock-status but no dict validation!
+	ws-end-stk-stock-status				pic x 
+	ws-include-serial-tracked			pic x
+	ws-percent-variance					pic 9.9999
+	ws-percent-above					pic 9.9999
+	ws-months							type number pic 99
+	ws-high-disc-rep					like rep-code
+	ws-low-qty-rep						like rep-code
+	ws-high-disc-cust					like accountcode
+	ws-low-qty-cust						like accountcode
+	ws-high-disc-stock					like stock-code
+	ws-low-qty-stock					like stock-code
+	ws-no-flat-months					pic 99
+	ws-flat-months-start				pic 99
+	ws-start-stock-code					like stock-code
+	ws-end-stock-code					like stock-code
+
+object bws-copy like budget-work-space
+
+
+procedure main
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	set ws-report-started = FALSE
+	disable-all-triggers
+	RBTCHPROC_RUN_PROGRAM(REPORT_NAME)
+end-procedure
+
+#if BMS_DICT_VER < 7600
+
+screen rbtchproc-report-parameters
+local x type number
+	allow entry
+before
+	clear
+	DO_SCREEN_HEADER()
+	display	REPORT_NAME @3,29 inverse
+	box @4,1 to @22,80
+	box @18,1 to @22,80
+detail
+	accept ws-start-stk-stock-status @5,25
+		uppercase
+		default spaces
+		prompt is "Start Stock Type:"
+	accept ws-end-stk-stock-status @6,25
+		uppercase
+		default ws-start-stk-stock-status
+		fill with trailing "~"
+		prompt is "End Stock Type:"
+	accept ws-include-serial-tracked @7,25
+		allow YES NO
+		default YES
+		uppercase
+		prompt is "Include Serial Tracked:"
+	accept ws-months @8,25
+		prompt is "Number of Months:"
+		help is "Number of months to create stock movements for"
+		default 24 + month(today)
+		validation
+			if ws-months <= 1
+				message "Cannot be less than 1"
+				reenter
+			endif
+		endvalidation
+	accept ws-percent-variance @9,25
+		prompt "Percent Variance"
+		help "How much do you want the actual to vary from the budget value 0.2 = +/- 10%"
+		default 0.2
+	accept ws-percent-above @10,25
+		prompt "Percent above"
+		help "What percentage of that variance do you want above the budget value 0.75 - mean that 75% of the values will exceed budget"
+		default 0.75
+	accept ws-high-disc-rep @11,25
+		title "High Disc Rep:"
+		help "Spaces- ignore otherwise rep code that is giving away too much discount"
+		default "05"
+	validations
+		if ws-high-disc-rep <> spaces
+			get rep-master 
+				on index rep-code
+				key is ws-high-disc-rep
+			on error
+				message "invalid"
+				re-enter ws-high-disc-rep
+			endon
+		endif
+	end-validations
+	accept ws-low-qty-rep @11,55
+		title "Low Qty Rep:"
+		help "Spaces- ignore otherwise rep code that is not selling enough"
+		default "03"
+	validations
+		if ws-low-qty-rep <> spaces
+			get rep-master 
+				on index rep-code
+				key is ws-low-qty-rep
+			on error
+				message "invalid"
+				re-enter ws-low-qty-rep
+			endon
+		endif
+	end-validations
+	accept ws-high-disc-cust @12,25
+		title "High Disc cust:"
+		help "Spaces- ignore otherwise cust code that is giving away too much discount"
+		default "C0003"
+	validations
+		if ws-high-disc-cust <> spaces
+			get deb-master 
+				on index accountcode
+				key is ws-high-disc-cust
+			on error
+				message "invalid"
+				re-enter ws-high-disc-cust
+			endon
+		endif
+	end-validations
+	accept ws-low-qty-cust @12,55
+		title "Low Qty cust:"
+		help "Spaces- ignore otherwise cust code that is not selling enough"
+		default "C0002"
+	validations
+		if ws-low-qty-cust <> spaces
+			get deb-master 
+				on index accountcode
+				key is ws-low-qty-cust
+			on error
+				message "invalid"
+				re-enter ws-low-qty-cust
+			endon
+		endif
+	end-validations
+	accept ws-high-disc-stock @13,25
+		title "High Disc stock:"
+		help "Spaces- ignore otherwise stock code that is giving away too much discount"
+		default "BU200"
+	validations
+		if ws-high-disc-stock <> spaces
+			get stock-master 
+				on index stock-code
+				key is ws-high-disc-stock
+			on error
+				message "invalid"
+				re-enter ws-high-disc-stock
+			endon
+		endif
+	end-validations
+	accept ws-low-qty-stock @13,55
+		title "Low Qty stock:"
+		help "Spaces- ignore otherwise stock code that is not selling enough"
+		default "BU220"
+	validations
+		if ws-low-qty-stock <> spaces
+			get stock-master 
+				on index stock-code
+				key is ws-low-qty-stock
+			on error
+				message "invalid"
+				re-enter ws-low-qty-stock
+			endon
+		endif
+	end-validations
+	accept ws-no-flat-months @14,25
+		title "Flat months:"
+		help "Number of depressed months"
+		default 2
+	accept ws-flat-months-start @14,55
+		title "Flat Months START"
+		help "No of months ago flat months STARTED"
+		default 5
+	confirm auto
+	confirmed
+		RBTCHPROC_EXECUTION
+	endconfirm
+endscreen //rbtchproc-report-parameters --------------------------------------
+
+#else
+
+screen rbtchproc-report-parameters
+	window 
+	title REPORT_NAME
+	allow entry
+	responsive
+detail
+	screen-group // ---- PArameters ----------------------------
+		title "Ranges"
+	field-group // ---- Stock ----------------------------
+		title "Stock"
+	accept ws-start-stock-code
+		title "Start"
+		default ws-start-stock-code
+		before-accept
+			select ws-start-stock-code = min(stock-code)
+				from stock-master
+			end-select
+		end-before-accept
+		drop-down
+			width 38
+			concat-title
+			select stock-code, stk-description
+				from stock-master 
+		end-drop-down
+	accept ws-end-stock-code
+		title "Start"
+		default ws-end-stock-code
+		before-accept
+			select ws-end-stock-code = max(stock-code)
+				from stock-master
+			end-select
+		end-before-accept
+		drop-down
+			width 38
+			concat-title
+			select stock-code, stk-description
+				from stock-master 
+		end-drop-down
+	end-field-group // ---- Stock --------------------------------------
+	field-group // ---- Status Range ----------------------------
+		title "Status Range"
+	accept ws-start-stk-stock-status 
+		uppercase
+		default ws-start-stk-stock-status
+		prompt is "Start Stock Type:"
+		before-accept
+			select ws-start-stk-stock-status = min(ssd-status)
+				from stock-status-desc
+				where ssd-language = spaces
+			end-select
+		end-before-accept
+		drop-down
+			width 38
+			concat-title
+			select ssd-status, ssd-description
+				from stock-status-desc
+				where ssd-language = spaces
+		end-drop-down
+	accept ws-end-stk-stock-status 
+		uppercase
+		default ws-end-stk-stock-status
+		prompt is "End Stock Type:"
+		before-accept
+			select ws-end-stk-stock-status = max(ssd-status)
+				from stock-status-desc
+			end-select
+		end-before-accept
+		drop-down
+			width 38
+			concat-title
+			select ssd-status, ssd-description
+				from stock-status-desc
+				where ssd-language = spaces
+		end-drop-down
+	end-field-group // ---- Status Range --------------------------------------
+	check-box ws-include-serial-tracked
+		values YES NO
+		title "Include Serial Tracked"
+		default is ws-include-serial-tracked
+		before-check-box
+			if screenmode = form-entry-defaults
+				set ws-include-serial-tracked = YES
+			endif
+		end-before-check-box
+	end-check-box 
+	accept ws-months 
+		prompt is "Number of Months:"
+		help is "Number of months to create stock movements for"
+		default 24 + month(today)
+		validation
+			if ws-months <= 1
+				message "Cannot be less than 1"
+				reenter
+			endif
+		endvalidation
+	end-screen-group 
+	screen-group // ---- Variation From Budget ----------------------------
+		title "Variation From Budget"
+	accept ws-percent-variance 
+		prompt "Percent Variance"
+		help "How much do you want the actual to vary from the budget value 0.2 = +/- 10%"
+		default 0.2
+	accept ws-percent-above 
+		prompt "Percent above"
+		help "What percentage of that variance do you want above the budget value 0.75 - mean that 75% of the values will exceed budget"
+		default 0.75
+	end-screen-group // ---- Discounting for Sales Analysis --------------------------------------
+	screen-group // ---- Discounting for Sales Analysis ----------------------------
+		title "Discounting for Sales Analysis"
+	field-group // ---- High Discounts ----------------------------
+		title "High Discounts"
+	accept ws-high-disc-rep 
+		title "High Disc Rep:"
+		help "Spaces- ignore otherwise rep code that is giving away too much discount"
+		default "05"
+		drop-down
+			width 38
+			dynamic
+			concat-title
+			select rep-code, rep-description
+				from rep-master 
+		end-drop-down
+	accept ws-high-disc-cust 
+		title "High Disc cust:"
+		help "Spaces- ignore otherwise cust code that is giving away too much discount"
+		default "C0003"
+		drop-down
+			width 38
+			concat-title
+			select accountcode, shortname
+				from deb-master 
+		end-drop-down
+	accept ws-high-disc-stock 
+		title "High Disc stock:"
+		help "Spaces- ignore otherwise stock code that is giving away too much discount"
+		default "BU200"
+		drop-down
+			width 38
+			concat-title
+			select stock-code, stk-description
+				from stock-master 
+		end-drop-down
+	end-field-group // ---- High Discounts --------------------------------------
+	field-group // ---- Low Discounts ----------------------------
+		title "Low Discounts"
+	accept ws-low-qty-rep 
+		title "Low Qty Rep:"
+		help "Spaces- ignore otherwise rep code that is not selling enough"
+		default "03"
+		drop-down
+			width 38
+			dynamic
+			concat-title
+			select rep-code, rep-description
+				from rep-master 
+		end-drop-down
+	accept ws-low-qty-cust 
+		title "Low Qty cust:"
+		help "Spaces- ignore otherwise cust code that is not selling enough"
+		default "C0002"
+		drop-down
+			width 38
+			concat-title
+			select accountcode, shortname
+				from deb-master 
+		end-drop-down
+	accept ws-low-qty-stock 
+		title "Low Qty stock:"
+		help "Spaces- ignore otherwise stock code that is not selling enough"
+		default "BU220"
+		drop-down
+			width 38
+			concat-title
+			select stock-code, stk-description
+				from stock-master 
+		end-drop-down
+	end-field-group // ---- Low Discounts --------------------------------------
+	end-screen-group 
+	screen-group // ---- Flat Periods ----------------------------
+		title "Flat Periods"
+	accept ws-no-flat-months 
+		title "Flat months:"
+		help "Number of depressed months"
+		default 2
+	accept ws-flat-months-start 
+		title "Flat Months START"
+		help "No of months ago flat months STARTED"
+		default 5
+	end-screen-group // ---- PArameters --------------------------------------
+	confirm auto
+	confirmed
+		RBTCHPROC_EXECUTION
+	endconfirm
+endscreen //rbtchproc-report-parameters --------------------------------------
+
+#endif
+
+procedure rbtchproc-set-parameters
+endprocedure //rbtchproc-set-parameters --------------------------------------
+
+procedure start-report
+	set rbtchproc-report-name = REPORT_NAME
+	report rbtchproc-report-name		
+		header is skeleton-report-header
+		no-message
+//		full-xml
+	set ws-report-started = TRUE
+	if rbtchproc-in-background
+		RBTCHPROC_MESSAGE_REPORT_STARTED
+	else
+		display 'Report :' @20,59 background right bold
+		display spool-file-name() @20,68 pic x(12) foreground prompts
+	endif
+endprocedure //start-report ----------------------------------------------------
+
+procedure skeleton-report-header
+	if report-is-xml()
+		report section "headings_section"
+	endif
+	print company-name col 1
+		rbtchproc-report-name col 51 bold
+		"Date:" col 85
+		tod() col 110
+		today() col 91
+		"Time:" col 104
+		'Page:' col 120
+		left-justify(str(page-no)) col 126 pic x(4)
+	skip
+	if report-is-xml()
+		report section finished
+	endif
+endprocedure //skeleton-report-header ------------------------------------------
+
+// Your main processing routine must be named as follows
+procedure rbtchproc-report-detail
+local
+	x									type number
+	l-trend								type number
+	l-amount-diff						type number
+//	l-back-trend						type number
+	l-qty								type number
+	l-initial-qty						type number
+	l-random							type number
+	l-start-date						type date
+	l-date								type date
+	i									type number
+	l-invoice							type number
+	l-sol-line-seq						like sol-line-seq
+	l-so-order-reason-code				like so-order-reason-code
+	l-so-rep-code						like so-rep-code
+	l-so-territory-code					like so-territory
+	l-record-counter					type number
+	l-flat-period-start					type date
+	l-flat-period-end					type date
+	l-rounding							pic 99v9(5)
+	l-offset							type number
+	lf-bws-stock-code					like bws-field-1
+	lf-bws-accountcode					like bws-field-2
+	lf-bws-year							like bws-year
+	lf-forecast-id						like bd-id
+	lf-item-cust-budget-id				like bws-type
+	lf-thisprice						type number
+	l-trend-percent						type float
+	lf-trend-type						type number
+	lf-change-direction-count			type number
+	window @19,44 to @24,80
+	    title is "Report Progress"
+	    color white
+	    no-hide
+	if not rbtchproc-in-background
+		display bitmap concat(getenv('BMS')'/images/repedge.gif') @19,44
+		display spool-file-name() @20,68 pic x(12) foreground prompts
+		display "Now at :" @23,45 background prompts left
+	endif
+	if random(tod()) endif
+	//
+	if ws-no-flat-months <> 0
+		set l-flat-period-start = addmonths(today(), 0 - ws-flat-months-start,TRUE)
+		set l-flat-period-start = julian(1,month(l-flat-period-start),year(l-flat-period-start))
+		set l-flat-period-end = addmonths(l-flat-period-start,ws-no-flat-months,true) - 1
+	end
+	//
+	//									PIC clauses are set in the print statement to enable
+	// later use of the pronto report layout tool
+	//
+	set x = 0 // to avoid warning error
+//	do build-file
+	do start-report
+	page
+	if batched()
+		print "Do not try to put this on the batch queue"
+		print "It does not work - it has to be online!!!!!"
+	endif
+	skip
+	transaction begin
+	sql-delete stock-movements
+		where stk-trans-type = "SO"
+//		and stock-code between :ws-start-stock-code and :ws-end-stock-code
+	transaction commit
+	print "Flat period " l-flat-period-start " to " l-flat-period-end
+	print " Low value sales for:" 
+	if ws-high-disc-rep <> spaces
+		print "Rep" ws-high-disc-rep
+	endif
+	if ws-high-disc-cust <> spaces
+		print "cust" ws-high-disc-cust
+	endif
+	if ws-high-disc-stock <> spaces
+		print "stock" ws-high-disc-stock
+	endif
+	print " Low qty sales for:" 
+	if ws-low-qty-rep <> spaces
+		print "Rep" ws-low-qty-rep
+	endif
+	if ws-low-qty-cust <> spaces
+		print "cust" ws-low-qty-cust
+	endif
+	if ws-low-qty-stock <> spaces
+		print "stock" ws-low-qty-stock
+	endif
+	// put the hard bits here
+	// as of about dimensions, PRONTO checks the sales-order-archive when
+	// setting abcs so you need to create a dummy record with 0 salesordernum
+	get sales-order-archive
+		on index so-order-no so-bo-suffix
+		key is 0 spaces
+	on error
+		initialise sales-order-archive
+		set so-order-no = 0
+		insert sales-order-archive
+		on error
+		endon
+	endon
+	set l-invoice = 10000
+	/*
+		Read through : customer by item budget
+		on record for the current year ONLY
+	*/
+	select *
+		from budget-work-space
+			where bd-id = 2
+			and bws-type = 0
+			order by bws-field-2 bws-field-1 
+	detail
+		if not rbtchproc-in-background
+			display accountcode @23,54 foreground prompts
+		endif
+		//check whether we want stock movements for this item
+		get stock-master
+			on index stock-code
+			key is bws-field-1
+		on error
+			print "No stock movements inserted for deb " bws-field-2 " item "  bws-field-1
+				" error: could not get stock-master"
+			continue
+		else
+			// check item code
+			if stock-code not between ws-start-stock-code and ws-end-stock-code
+				continue
+			endif
+			//check item type
+			if stk-stock-status not between ws-start-stk-stock-status and ws-end-stk-stock-status
+				continue
+			endif
+			//ignore if serialised item and we have chosen to exclude serialised items
+			if ws-include-serial-tracked = NO
+				if stk-serialized-flag != "N"
+					continue
+				endif
+			endif
+			//ignore kit parents because stock movements are at child level
+			if stk-stock-status = "K"
+				continue
+			endif
+		endon
+		get deb-master
+			on index accountcode
+			key is bws-field-2
+		on error
+			print "No stock movements inserted for deb " bws-field-2 " item "  stock-code
+				" error: could not get deb-master"
+			continue
+		endon
+		print "Processing for " accountcode stock-code
+		//is the budget trend increasing or decreasing?
+		set lf-bws-stock-code = bws-field-1
+		set lf-bws-accountcode = bws-field-2
+		set lf-bws-year = bws-year
+		set lf-forecast-id = 1
+		set lf-item-cust-budget-id = 2
+		//**************************************
+		save budget-work-space
+		//**************************************
+		// Analyse the main stock budget and determine trends and percentages.
+		get budget-work-space
+			on index bd-id bws-field-1 bws-field-2 bws-field-3 bws-field-4 bws-field-5 bws-field-6 bws-year bws-type
+			key is  lf-forecast-id lf-bws-stock-code spaces spaces spaces spaces spaces lf-bws-year 0
+		on error
+			print "No stock movements inserted for :"
+			print lf-bws-accountcode col 5 lf-bws-stock-code
+			print " error: could not get stock-aged-sales-budget record" col 5 
+			print error-description(file-status())
+			continue
+		else
+			set l-trend = (bws-num[12] - bws-num[1]) / 11
+			//is it significant? 
+			//not if change is < 100/year across all customers for that product
+			if l-trend between -10 and +10 
+				set l-trend = 0
+				set l-trend-percent = 0
+			endif
+			// check for trending up
+			// start by setting the value to trend up and as soon as we find
+			// something that is not an increase - reset and break
+			set lf-trend-type = TREND_UP
+			for i = 2 to 12
+				if bws-num[i] <= bws-num[i - 1]
+					set lf-trend-type = TREND_FLAT
+					break
+				endif
+			endfor
+			// now look for trending down
+			if lf-trend-type = TREND_FLAT // if not 0 then we have already determined the kind of trend
+				set lf-trend-type  = TREND_DOWN
+				for i = 2 to 12
+					if bws-num[i] >= bws-num[i - 1]
+						set lf-trend-type = TREND_FLAT
+						break
+					endif
+				endfor
+			endif
+			// now look for seasonal
+			if lf-trend-type = TREND_FLAT // if not 0 then we have already determined the kind of trend
+				set lf-change-direction-count = 0
+				for i = 2 to 11
+					if (bws-num[i] > bws-num[i - 1]
+					and bws-num[i + 1] < bws-num[i])
+					or (bws-num[i] = bws-num[i - 1])
+					or (bws-num[i + 1] = bws-num[i])
+						set lf-change-direction-count += 1
+					endif
+				endfor
+				// This is a bit tricky - we say 2 changes in direction.  This
+				// is because the middle two items in the season are often the
+				// same.
+				if lf-change-direction-count in ( 1, 2)
+					set lf-trend-type = TREND_SEASONAL
+				endif
+			endif
+			print "Stock Code: " lf-bws-stock-code  lf-trend-type "TREND is:"
+				if-then-else(lf-trend-type = TREND_FLAT, "FLAT",
+				if-then-else(lf-trend-type = TREND_UP, "TRENDING UP",
+				if-then-else(lf-trend-type = TREND_DOWN, "TRENDING DOWN",
+				if-then-else(lf-trend-type = TREND_SEASONAL, "SEASONAL","UNKNOWN")
+				)))
+		endon
+		//how much (qty not percentage) is the change per month?
+		// Note that we don't have to determine whether this is really a trend
+		// or not (i.e. the diff could be up in some months and down in
+		// others) but we have control over the input so we don't care....  We
+		// already know it is a trend
+		if l-trend != 0
+			set l-amount-diff = (bws-num[12] - bws-num[1]) / 11
+		// Trend percent is the amount diff divided by an AVERAGE month
+			set l-trend-percent = l-amount-diff / (sum-array(bws-num,1,12) / 12)
+		endif
+#ifdef DEBUG_MODE
+		print "Av Mth:" (sum-array(bws-num,1,12) / 12) "Diff" l-amount-diff "Trend percent" l-trend-percent
+#endif
+		//**************************************
+		//  Finished with the stock forecast one now so resture the customer
+		//  one.
+		//**************************************
+		restore budget-work-space
+		//**************************************
+		//apply that quantity difference back desired number of months
+		set l-start-date = date-to-julian(concat("01-",str(sys-stk-per),"-",str(sys-stk-yr)))
+		print "Start Date is " l-start-date " stock-code " stock-code
+		set l-date = l-start-date
+		set l-initial-qty = bws-num[sys-stk-per]
+#ifdef DEBUG_MODE
+		print "Trend : " l-trend " back Trend :" l-back-trend
+		print "Average difference per month:" l-amount-diff
+		print "Initial Qty(from the budget):" l-initial-qty
+#endif
+		set l-offset = sys-stk-per
+		if l-initial-qty = 0	
+			set l-initial-qty = 0.01
+		endif
+		set l-qty = l-initial-qty
+		for i = 1 to ws-months
+			//
+			// Establishing the starting point.
+			//
+			// The bws-num is one number per month for ONE YEAR.
+			// This is a good starting point if the trend is flat or seasonal,
+			// but if the trend is increasing or decreasing then we need to
+			// use the intial qty from the last iteration of the loop and
+			// alter by the trend percent.  Otherwise we will get a saw-tooth
+			// sales graph.
+			if lf-trend-type in ( TREND_FLAT, TREND_SEASONAL )
+				set l-initial-qty = bws-num[l-offset]
+				if l-initial-qty = 0	
+					set l-initial-qty = 0.01
+				endif
+			else // trending up or down
+				// because we are starting at the LAST item (i.e. the one with
+				// the most recent date) and working BACKWARDS to the earliest
+				// date, we need to reverse the direction of the trend-percent
+				set l-initial-qty  = l-initial-qty * ( 1 + (0 - l-trend-percent))
+				if l-initial-qty < 0
+					break
+				endif
+			endif
+			//
+			set l-qty = l-initial-qty
+			set l-offset -= 1
+			if l-offset <= 0
+				set l-offset = 12
+			endif
+			//
+			set l-date = add-month(l-date,-1,0)
+			get system-control-time-dimension
+				on index sctd-type sctd-date
+				key is spaces l-date
+			on error
+				initialise system-control-time-dimension
+				leaving sctd-date
+			endon
+			get stock-price
+				on index stock-code prc-region-code
+				key is stock-code spaces
+			on error
+				set lf-thisprice = stk-std-cost 
+			else
+				set lf-thisprice = prc-wholesale-price 
+			endon
+			print "Initialising Stock Movements" l-qty
+			initialise stock-movements
+				leaving stock-code
+			set stk-trans-type = "SO"
+			set stk-trans-whse =  warehouse
+			set stk-trans-date = l-date
+			// random number to determine where in the month
+			set l-random = RANDOM_BETWEEN(0,1)
+			set stk-trans-date = julian(
+				integer(days-in-month(month(l-date),year(l-date)) * l-random),
+				month(l-date),
+				year(l-date))
+			set stk-accountcode = accountcode
+			set stk-batch-ref = spaces
+			set stk-batch-trans-no = l-record-counter
+			set stk-trans-ref1 = spaces
+			set stk-trans-ref2 = spaces
+			set stk-trans-ref3 = spaces
+			// build ref2
+			set l-sol-line-seq = 1
+			set l-so-order-reason-code = spaces
+			set l-so-rep-code = spaces
+			set l-so-rep-code = rep-code
+			set l-so-territory-code = spaces
+			set l-so-territory-code = territory
+			set stk-trans-ref2 = fstr((l-sol-line-seq * 100),6,0)
+			set stk-trans-ref2 =
+				concat(substring(stk-trans-ref2,1,9),
+				l-so-order-reason-code)
+			set stk-trans-ref2 =
+				concat(substring(stk-trans-ref2,1,11),
+				l-so-rep-code
+				l-so-territory-code)
+			//
+			set stk-trans-rep-code = l-so-rep-code
+			set stk-trans-territory = l-so-territory-code
+			set stk-trans-financial-year = sctd-year
+			set stk-trans-financial-period = sctd-period
+			set stk-trans-date-time = date-time(l-date,0,0)
+			set stk-document-no = spaces
+			set stk-document-suffix = spaces
+			set stk-document-seq = 0
+			set stk-trans-analysis-code1 = spaces
+			set stk-trans-analysis-code2 = spaces
+			set stk-trans-created-by = uid()
+//			do get-random parameters are (1 - ws-percent-variance) 1 returning l-random		
+			set l-random = RANDOM_BETWEEN(1 - ws-percent-variance, 1)
+			set l-random += (ws-percent-variance * ws-percent-above) 
+#ifdef DEBUG_MODE
+			print "Qty calc A:  Random is " l-random
+#endif
+			set l-qty *=  l-random
+#ifdef DEBUG_MODE
+			print "Qty calc B: After applying trend:" l-qty
+#endif
+			set l-qty = integer(l-qty)
+#ifdef DEBUG_MODE
+			print "Qty Calc c: Integer value:" l-qty
+#endif
+#ifdef DEBUG_MODE
+			set stk-document-seq = l-random
+			set stk-trans-ref2 = str(l-amount-diff)	
+			if l-trend > 0
+				set stk-trans-ref1 = "up"
+			elseif l-trend < 0
+				set stk-trans-ref1 = "down"
+			elseif l-trend = 0
+				set stk-trans-ref1 = "no change"
+			endif
+#endif
+			set l-invoice += 1
+			set stk-trans-ref1 = str(l-invoice)
+			if l-qty < 0
+				set l-qty = 0
+			endif
+			/*
+			if l-back-trend < 0 and l-qty = 0
+				print "Back Trend < 0 and qty 0.  Back trend:" l-back-trend "Qty:" l-qty
+				break
+			endif
+			*/
+			print "making flat adjustments" l-qty
+//
+// now make a bunch of adjustments to qty
+			// determine start and end date of flat months
+			if ws-no-flat-months <> 0
+				if l-date between l-flat-period-start and l-flat-period-end
+					set l-qty = l-qty - (l-qty * 0.3)
+				endif
+			endif
+			if ws-low-qty-rep = l-so-rep-code
+				set l-qty = l-qty - (l-qty * 0.2)
+			endif
+			if ws-low-qty-cust = stk-accountcode
+				set l-qty = l-qty - (l-qty * 0.2)
+			endif
+			if ws-low-qty-stock = stock-code
+				set l-qty = l-qty - (l-qty * 0.2)
+			endif
+			if l-qty < 0
+				set l-qty = 0
+			endif
+//
+			do clibstk-item-rounding
+				parameters are stk-unit-desc
+				returning l-rounding
+			set l-qty = round(l-qty,l-rounding)
+			set stk-trans-qty = 0 - l-qty
+			if stk-trans-qty != 0
+//				do get-random parameters are (1 - ws-percent-variance) 1 returning l-random		
+				set l-random = RANDOM_BETWEEN( (1 - ws-percent-variance), 1)
+				set l-random += (ws-percent-variance * ws-percent-above) 
+				set stk-trans-value = 0 - ((lf-thisprice * l-random) * stk-trans-qty)
+				set stk-trans-cost = stk-sales-cost
+				if stk-trans-cost = 0
+					set stk-trans-cost = stk-std-cost 
+				endif
+				if stk-trans-cost = 0
+					select * from stock-supplier
+						where stock-code = :stock-code
+						order by sup-priority
+					detail
+						break
+					end-select
+					set stk-trans-cost =  sup-last-buy-price
+				endif
+				set stk-trans-cost *= (0 - stk-trans-qty)
+//
+// now make a bunch of adjustments to value
+				if ws-high-disc-rep = l-so-rep-code
+					set stk-trans-value = stk-trans-value - (stk-trans-value * 0.2)
+				endif
+				if ws-high-disc-cust = stk-accountcode
+					set stk-trans-value = stk-trans-value - (stk-trans-value * 0.2)
+				endif
+				if ws-high-disc-stock = stock-code
+					set stk-trans-value = stk-trans-value - (stk-trans-value * 0.2)
+				endif
+//
+				set l-record-counter += 1
+				insert stock-movements
+				on error
+					print "Could not insert stock movement for deb " accountcode 
+						" item " stock-code
+						" error: " error-description(file-status())
+				else
+					print stock-code stk-accountcode stk-trans-date l-random stk-trans-qty stk-trans-value
+				endon
+			else
+				print "Calculated Qty was zero"
+			endif
+		endfor
+	endselect
+	do finish-report
+endprocedure //rbtchproc-report-detail ---------------------------------------
+
+/*
+
+procedure get-random
+parameters are 
+	l-start							type number
+	l-end							type number
+returning
+	l-value							type number
+	if l-start < 0 
+		set l-start = 0
+	endif
+	if l-end > 1
+		set l-end = 1
+	endif
+	repeat
+		// random returns a number between 0 and 32767
+		set l-value = random(0)
+		// ensure the number is even spread between 0.0001 and +1
+		// 1. drop and amount > 10,000 ( to ensure we deal with an even range)
+		if l-value > 10000
+			set l-value = l-value - (integer(l-value / 10000) * 10000) + 1
+		endif
+		// now have a number between 0 and 9999
+		// divide by 10000 to get numbers between 0 and 0.9999
+		set l-value = l-value / 10000
+	until l-value between l-start and l-end
+	end-repeat
+end-procedure //get-random
+
+*/
+
+/*
+procedure build-file //--------------------------------------------------------
+local
+	x type number
+	set x = 0 // dummy variable for potential use.
+	open temp-file temporary create
+	select * from deb-sales-history-budget-2
+	detail
+		insert temp-file
+			on error
+			endon
+		if not rbtchproc-in-background
+			display "Building File" @20,59 background left bold
+			display  @23,54 foreground prompts
+		endif
+	end-select
+	if ws-excel-flag = YES
+		do excel-export
+	endif
+	if ws-excel-flag = "D"
+		do display-datagrid
+	endif
+end-procedure //---------------------------------------------------------------
+*/
+
+procedure finish-report
+	if report-is-xml()
+		page
+		report section "options_page"
+	endif
+	if ws-report-started
+		skip 2
+		print 'Options selected : ' col 2 no-newline
+			tag  'options_print'
+		skip
+		print "Start stock type: " in col 22 
+			ws-start-stk-stock-status
+		print "End stock type: " in col 22
+			ws-end-stk-stock-status	
+		print "Include serial tracked: " in col 22
+			ws-include-serial-tracked
+		print "Number of months: " in col 22
+			ws-months
+	endif
+	if report-is-xml()
+		report section finished
+	endif
+	RBTCHPROC_SCREEN_FINISH_MESSAGE(ws-report-started,23,45)
+endprocedure //finish-report ---------------------------------------------------
+
+/*
+procedure excel-export
+local
+	l-row		type number
+	l-col		type number
+	l-last-row	type number
+	l-last-col  type number
+	XL_CREATE_NEW()
+	set l-row = 3
+	set l-last-col = 0
+	set l-row += 1
+	select * from temp-file
+	detail
+		set l-row += 1
+		if not rbtchproc-in-background
+			display "Writing Spreadsheet" @20,59 background left bold
+			display t- @23,54 foreground prompts
+		endif
+	end-select
+	set l-last-row = l-row
+	XL_FORMAT_TEXT(3,1,3,l-last-col,"B")
+	XL_WRAP_TEXT(3,1,3,l-last-col)
+	XL_VERT_TEXT(3,1,3,l-last-col,1)
+	XL_AUTO_FIT(1,1,l-last-row,l-last-col)
+	XL_PUT(1,1,REPORT_NAME)
+	XL_FORMAT_TEXT(1,1,1,1,"20")
+	XL_FORMAT_TEXT(1,1,1,1,"U")
+	XL_HORIZ_TEXT(1,1,1,l-last-col,7)
+	XL_MAXIMISE()
+end-procedure
+*/
+
+/*
+screen display-datagrid
+	window @1,1 to @24,80
+	title REPORT_NAME
+	datagrid occurs 22
+	select * from temp-file
+	allowed search
+detail
+end-screen
+*/
+

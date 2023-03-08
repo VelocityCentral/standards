@@ -1,0 +1,258 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : Put KPI on batch Queue.
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2020
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: analytic/kpibatchcalc.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 02Sep20  rjb         written 
+//
+// The standard program puts everything as an application service.  But there
+// are lots and lots of KPI's and this is going to put unknown load on the
+// system if they all run at the same time.  
+//
+// The purpose of this program is run multiple re-calc's in sequence.
+// 
+// ************************************************************************
+//     M O S T      I M P O R T A N T
+// ************************************************************************
+//    Parameter 4 of m8kpi is whether the program runs for today or 
+//    yesterday.  This is provided so that the application service
+//    can run either before or after midnight.
+//    One of the major parts of this code is that it monitors if the 
+//    queue trips over midnight and calls m8kpi with the correct value
+//    for this parameter.
+// ************************************************************************
+//
+//
+//
+// ************************************************************************
+//      N E A R L Y      A S      I M P O R T A N T 
+// ************************************************************************
+//    The program uses kpi-user-only-alpha4-1 to determine if the kpi
+//    is selected or not.  There is a #define to document this.
+//    It should be copied into the site include file.
+// ************************************************************************
+//
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+#include "../include/i8gparam.spl"
+
+#define KPI_QUEUED kpi-user-only-alpha4-1
+
+#define HMS(A) \
+	str-concat(str(integer(A / 3600)) ":"  \
+		str(integer((A % 3600) / 60)) ":" \
+		str(A % 60))
+
+field
+	ws-function-title					type string
+	ws-run-for-yesterday				type boolean
+
+#define DISPCOLOUR \
+	colour \
+		if-then-else(KPI_QUEUED = YES, white, \
+			if-then-else(kpi-status = 1, Green, red)) \
+		on \
+		if-then-else(KPI_QUEUED = YES, blue, 0)
+
+mode md-toggle
+	prompt "Toggle Queue"
+	help "Toggle the status of rebuild"
+	when kpi-status = 1
+	always-show
+	process correct
+
+mode md-create-service
+	prompt "Create Service"
+	help "Create an application service for this program"
+
+mode md-run-now
+	prompt "Run Now"
+	help "Run now for yesterday"
+
+
+procedure main
+returning
+	lr-message							pic x(1024) type string
+local
+	lf-run-mode							type boolean
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8secabt-check-abort
+		parameters are sys-consolidation-division login-id() "ZVG" "T010"
+		returning ws-function-title 
+	do i8proglog-write-log
+	I8GPARAM_FLAG("-yesterday",false,ws-run-for-yesterday)
+	I8GPARAM_FLAG("-run",false,lf-run-mode)
+	if lf-run-mode
+		do calc-kpis returning lr-message
+	else
+		do select-kpi
+	endif
+end-procedure
+
+screen select-kpi
+	window
+	title ws-function-title
+	select 
+		*
+		from kpi-master
+		where kpi-comp-code = :sys-consolidation-division
+	allowed search md-toggle md-create-service md-run-now
+	datagrid occurs 20
+detail
+	//
+	if screenmode() = md-run-now
+		set ws-run-for-yesterday = TRUE
+		do calc-kpis 
+	endif
+	if screenmode() = md-create-service
+		do create-service entry once
+	endif
+	if screenmode() = md-toggle
+		if KPI_QUEUED = YES
+			set KPI_QUEUED = spaces
+		else
+			set KPI_QUEUED = YES
+		end
+	endif
+	accept kpi-id @1,1
+		title "ID"
+		when screenmode = search
+		show-value
+		DISPCOLOUR
+	display kpi-description @1,2
+		title "Description"
+		DISPCOLOUR
+	display kpi-status-desc @1,3 pic x(15)
+		title "Status"
+		DISPCOLOUR
+	display KPI_QUEUED @1,4
+		title "Queued"
+		DISPCOLOUR
+	confirm auto
+	confirmed
+	end-confirm
+end-screen
+
+procedure report-headings
+	print company-name in col 1
+		"Queued API Update Results" col 50
+		today() col 80
+		tod() col 95
+		"Page" col 110
+		page-no() 
+	skip
+	print 132"-"
+end-procedure
+
+procedure calc-kpis
+returning
+	lr-message							pic x(1024) type string
+local
+	lf-start							type datetime
+	lf-kpi-start						type datetime
+	lf-kpi-end							type datetime
+	lf-elapsed-seconds					type number
+	lf-yesterday						pic 9 // 0 today 1 yesterday
+	lf-message							pic x(500)
+	lf-count							type number
+	lf-spool-file-name					type string
+	//
+	set lf-start = sys-time()
+	set lr-message = "Started"
+	// 
+	report "Queued API Update"
+		no-message
+		header is report-headings
+	set lf-spool-file-name = spool-file-name()
+	page
+	select *
+		from kpi-master
+		where KPI_QUEUED = YES
+		and kpi-comp-code = 'GDR'
+	detail
+		set lf-kpi-start = sys-time()
+		if ws-run-for-yesterday 
+			set lf-yesterday = True
+		else
+			// we started "today"
+			if date-from-date-time(lf-kpi-start,FALSE) > date-from-date-time(lf-start,FALSE)
+				set lf-yesterday = TRUE
+			else
+				set lf-yesterday = FALSE
+			endif
+		endif
+		need 4
+		print kpi-id 
+			kpi-description
+		print "Started " col 10 lf-kpi-start if-then-else(lf-yesterday, "Running for Yesterday", " ")
+		spl "analytic/m8kpi" parameters are 
+				"-calc" 'GDR' kpi-id lf-yesterday 0
+			returning lf-message
+			leave-files-open
+		on error
+			print 'ERROR:' col 10 error-description(exit-status())
+		endon
+		set lf-count += 1
+		set lr-message = concat("processed " str(lf-count))
+		set lf-kpi-end = sys-time()
+		print "Finished" col 10 lf-kpi-end lf-message
+		set lf-elapsed-seconds = lf-kpi-end - lf-kpi-start
+		print "Elapsed" col 10 HMS((lf-kpi-end - lf-kpi-start))
+	end-select
+	report finished
+	set lr-message = concat( str(lf-count) " Kpis processed.  See report " lf-spool-file-name )
+end-procedure
+
+screen create-service
+local
+	lf-yesterday						type boolean
+	lf-asm-id							like asm-id
+	window
+		window-position 5
+	responsive
+detail
+	screen-group
+		check-box lf-yesterday 
+			values True False
+			title "Check if Schedule will be run after midnight but before midday"
+			default is lf-yesterday
+			help "If checked then all re-calcs will be for 'yesterday' "
+			before-check-box
+				if screenmode = form-entry-defaults
+					set lf-yesterday = False
+				endif
+			end-before-check-box
+		end-check-box 
+	end-screen-group
+	confirm auto
+	confirmed 
+		select lf-asm-id = min(asm-id) from application-services-master
+			where asm-program like '%kpibatchcalc%'
+		end-select
+		if lf-asm-id = 0
+			spl 'appservices'
+				parameters '-new-service'
+							'Execute Multiple KPI at once'
+							'analytic/kpibatchcalc' '-run' ifthenelse(lf-yesterday,'-yesterday',spaces) 
+							spaces space space TRUE
+		else
+			spl 'appservices' parameters are '-correct-service' lf-asm-id
+		endif
+	end-confirm
+end-screen
+
+

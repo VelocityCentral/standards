@@ -1,0 +1,97 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : 
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2019
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: nan/possetup.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 10Oct19  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+
+field
+	ws-function-title				type string
+
+procedure main
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	set ws-function-title = "Retail Setup"
+	do retail-setup
+end-procedure
+
+menu retail-setup
+detail
+	option "Change customers to retail pricing" @1,1
+		do cus-retail-pricing
+	option "Set invoice layouts to POS for Retail customers" @2,1
+		do pos-layout
+end-menu
+
+procedure cus-retail-pricing
+local
+	lf-count			type number
+	//
+	select *
+		from deb-master
+		where accountcode like "C000%"
+		or accountcode like "CASH%"
+		for-update
+	detail
+		set price-code = "R"
+		set dr-tax-calc-level = "L"
+		update deb-master
+		on error
+		else
+			set lf-count += 1
+		endon
+	end-select
+	message-box str-concat( str(lf-count) " Customers updated")
+		title is ws-function-title
+		message-buttons MSG_BOX_OK
+		icon MSG_BOX_INFORMATION
+end-procedure
+
+procedure pos-layout
+local
+	lf-count			type number
+	//
+	select *
+		from deb-master
+		where price-code = "R"
+	detail
+		get deb-cust-notes lock
+			on index accountcode  dcn-type dcn-seq-no
+			key is accountcode "~L" 1
+		on error
+			initialise deb-cust-notes
+				leaving accountcode  dcn-type dcn-seq-no
+			set dcn-text = "POS1 INVOICES POS1"
+			insert deb-cust-notes
+			on error
+			else
+				set lf-count += 1
+			endon
+		else
+			set dcn-text = "POS1 INVOICES POS1"
+			update deb-cust-notes
+			on error
+			else
+				set lf-count += 1
+			endon
+		endon
+	end-select
+	message-box str-concat( str(lf-count) " Customers updated")
+		title is ws-function-title
+		message-buttons MSG_BOX_OK
+		icon MSG_BOX_INFORMATION
+end-procedure
+
+

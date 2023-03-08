@@ -1,0 +1,513 @@
+/////////////////////////////////////////////////////////////////////////////
+// Program : Launch reporting URL
+//=========================================================================//
+// ©1987-2013 Pronto Software Limited. All rights reserved.
+//=========================================================================//
+//
+// Description: Launch reporting url
+//
+// File: m8rpt_launch.spl
+//
+/////////////////////////////////////////////////////////////////////////////
+
+
+
+
+
+Do not use
+
+
+
+
+
+version-number "$Header: /apps/devel/src/bms/sys/RCS/m8rpt_launch.spl,v 1.47.1.10 2018/10/03 03:40:13 sheranh Exp $"
+
+#include "../include/i8secabt.spl"
+
+//#define DEBUG(A) acknowledge A
+
+field
+	tmp-ole-ids-open		type boolean
+
+object tmp-public-key
+	type is text
+	record
+		tmp-public-key			pic x(256) type string
+	endrecord
+
+object tmp-ole-id
+	type is memory
+	record
+		toi-tag					pic x(20)
+		toi-ole-id				type ole-interface
+	endrecord
+	key is toi-tag
+
+procedure main
+	get system-control
+		first
+	//
+	do i8secabt-check-abort parameters sys-consolidation-division login-id() "EMS" "X000"
+	//
+#ifdef DEBUG
+	DEBUG("In mainline")
+#endif
+	do m8rpt_launch-launch-rpt parameter get-param(1) get-param(2) 0 0 0 0 SPACES 0 SPACES
+	//
+endprocedure //main ----------------------------------------------------------
+
+procedure library-init
+	get system-control
+		first
+#ifdef DEBUG
+	DEBUG("called from clib")
+#endif
+endprocedure //library-init --------------------------------------------------
+
+procedure m8rpt_launch-launch-rpt export no-override
+	parameter
+		lp-window				pic x
+		lp-url					pic x(1024) type string
+		lp-row					pic 999.99
+		lp-col					pic 999.99
+		lp-depth				pic 999.99
+		lp-width				pic 999.99
+		lp-title				pic x(256) type string
+		lp-position				pic 99
+		lp-tag					pic x(20)
+	//
+	local field
+		lf-user					like user-id
+		lf-comp-code			like sys-comp-code
+		lf-token				like suct-token
+		lf-html-home			pic x(1024) type string
+		lf-app-server			pic x(1024) type string
+		lf-cognos-url			pic x(1024) type string
+		lf-url					pic x(1024) type string
+		lf-public-key			pic x(256)
+		lf-ww-switch			pic 999
+		lf-ole-status			pic s9(10)
+		lf-class				type string
+		lf-open-cmd				pic x(256) type string
+		lf-i					type numeric
+		lf-ssl					pic x
+	//
+	//
+	open system-user-cap-token no-trigger
+	//
+	get cap-server
+		first
+	on error
+		message-box param-text('Use the Server Setup (SYS M169) function to define the URL <<BR>>that points to the Pronto Xi Business Intelligence server')
+			title 'Registry Content Error'
+			icon MSG_BOX_STOP
+			message-button MSG_BOX_OK
+	else
+		set lf-user = login-id()
+		set lf-comp-code = sys-consolidation-division
+		set lf-url = lp-url
+		if lf-url > spaces
+			if pattern(lf-url,'b_action')
+				//
+				//user has inclued full path, need to strip this for our pronto_connect.html
+				//
+				set lf-url = substring(lf-url,pattern(lf-url,'b_action'),strlen(lf-url))
+				//
+			endif
+		endif
+		//
+		open cap-server-exceptions
+		on error ENOENT
+		else
+			get cap-server-exceptions
+				on index cse-company-code
+				key lf-comp-code
+			on error ENOREC
+			endon
+		endon
+		//		
+		get system-user-control
+			on index user-id
+			key is login-id()
+		on error
+			if lp-window in {'3' '4'}
+				do log-off-silent
+			else
+				do log-off	
+			endif
+		else
+			if suc-url-launch-comp-code != lf-comp-code
+				if lp-window in {'3' '4'}
+					do log-off-silent
+				else
+					do log-off	
+				endif
+			endif
+		endon
+		//
+		do get-public-key parameter str(systime())
+						returning lf-public-key
+		//		
+		do get-user-token parameter lf-public-key lf-user lf-comp-code
+						  returning lf-token
+		//
+		transaction begin
+		//
+		get system-user-control
+			on index user-id
+			key is login-id()
+			lock	
+		on error
+		else
+			set suc-url-launch-comp-code = lf-comp-code
+			update system-user-control
+		endon
+		get system-user-cap-token
+			on index suct-user-id suct-comp-code
+			key is lf-user lf-comp-code
+			lock
+		on error
+			set suct-token = lf-token
+			insert system-user-cap-token
+		else
+			set suct-token = lf-token
+			update system-user-cap-token
+		endon
+		transaction commit
+		//		
+		if cse-server-url != SPACES	
+			if pattern(cse-server-url,'https') //SSL		 		
+			then
+				set lf-ssl = 'Y'				
+				if pattern(cse-server-url,'ibmcognos') then //Windows OS
+					set lf-html-home = cse-server-url	
+					set lf-app-server = cse-server-url
+				else //Linux OS
+					set lf-html-home = substring(cse-server-url,1,pattern(cse-server-url,'/bi/') - 1)
+					set lf-app-server = substring(cse-server-url,1,pattern(cse-server-url,'/bi/') - 1)
+				endif				
+			else // Non SSL
+				set lf-html-home = substring(cse-server-url,1,pattern(cse-server-url,'/bi/') - 1)
+				set lf-app-server = substring(cse-server-url,1,pattern(cse-server-url,'/v1/') - 1)
+				set lf-ssl = 'N'
+			endif
+		else	
+			if pattern(cs-server-url,'https') //SSL			
+			then
+				set lf-ssl = 'Y'				
+				if pattern(cs-server-url,'ibmcognos') then //Windows OS
+					set lf-html-home = cs-server-url	
+					set lf-app-server = cs-server-url
+				else //Linux OS
+					set lf-html-home = substring(cs-server-url,1,pattern(cs-server-url,'/bi/') - 2)
+					set lf-app-server = substring(cs-server-url,1,pattern(cs-server-url,'/bi/') - 2)
+				endif
+			else // Non SSL
+				set lf-html-home = substring(cs-server-url,1,pattern(cs-server-url,'/bi/') - 1)
+				set lf-app-server = substring(cs-server-url,1,pattern(cs-server-url,'/v1/') - 1)
+				set lf-ssl = 'N'
+			endif
+		endif
+		//		
+		set lf-cognos-url = strconcat(lf-html-home,'/pronto_connect.html?',
+													lf-public-key,'@',
+													lf-user,'~',
+													lf-comp-code,'%'
+													lf-app-server,'!'
+													,lf-ssl,'^'
+													,lf-url)
+		//
+#ifdef DEBUG
+		DEBUG(substring(lf-cognos-url,1,50))
+		DEBUG(substring(lf-cognos-url,51,100))
+		DEBUG(substring(lf-cognos-url,101,150))
+		DEBUG(substring(lf-cognos-url,151,200))
+		DEBUG(substring(lf-cognos-url,201,250))
+		DEBUG(substring(lf-cognos-url,251,300))
+		DEBUG(substring(lf-cognos-url,301,350))
+		DEBUG(substring(lf-cognos-url,351,400))
+		DEBUG(substring(lf-cognos-url,401,450))
+		DEBUG(substring(lf-cognos-url,451,500))
+		DEBUG(substring(lf-cognos-url,501,550))
+		DEBUG(substring(lf-cognos-url,551,600))
+		DEBUG(substring(lf-cognos-url,601,650))
+#endif
+		//
+		//  RJB 7502.  There seems to be a problem with window type 1 when using the
+		//  web interface
+		//
+		if get-system-metrics(7) in (1,2) and lp-window = "1"
+			set lp-window = "2"
+		endif
+		//
+		if lp-window = '0'
+#if PRONTO_RELEASE >= 70
+			if set-background-url(lf-cognos-url,7) endif
+#else
+			if set-background-image(lf-cognos-url) endif
+#endif
+		elseif lp-window = '2'
+#if PRONTO_RELEASE >= 68
+			set lf-ww-switch = num(get-param(5))
+			if num(get-param(6))
+				set lf-ww-switch += 16
+			endif
+			if set-web-window(get-param(3),get-param(4),lf-cognos-url,lf-ww-switch) endif
+#else
+			message 'Dockable Window requires 4GL Runtime of 6.8 or later'
+#endif
+		elseif lp-window = '3'
+			if not tmp-ole-ids-open
+				set tmp-ole-ids-open = TRUE
+				open tmp-ole-id temporary
+			endif
+			get tmp-ole-id
+				on index toi-tag
+				key is lp-tag
+			on error
+				set toi-ole-id = ole-create-control("Shell.Explorer",lp-row,lp-col,lp-depth,lp-width)
+				set toi-tag = lp-tag
+				insert tmp-ole-id
+			endon
+			if not ole-put-property(toi-ole-id,"ProntoEmbedInIframe","true")			
+			endif
+			if not ole-call-method(toi-ole-id,"Navigate2",lf-ole-status,lf-cognos-url)
+				//
+				// Something has killed the existing ole-id (probably a clear and redrawn over the top
+				// this commonly occurs with 'tabbed' screens that re-use the same screen real-estate
+				//
+				if ole-release(toi-ole-id)
+				endif
+				get tmp-ole-id
+					on index toi-tag
+					key is lp-tag
+					lock
+				on error
+				else
+					set toi-ole-id = ole-create-control("Shell.Explorer",lp-row,lp-col,lp-depth,lp-width)
+					update tmp-ole-id
+				endon
+				if not ole-put-property(toi-ole-id,"ProntoEmbedInIframe","true")			
+				endif				
+				if not ole-call-method(toi-ole-id,"Navigate2",lf-ole-status,lf-cognos-url)
+				endif
+			endif
+		elseif lp-window = '4'
+			do standalone-window once parameters lf-cognos-url lp-row lp-col lp-depth lp-width lp-title lp-position
+		else
+//
+// You get here if you have lp-window = 1
+//
+			if strlen(lf-cognos-url) > 250
+				set lf-class = get-registry-value("HKEY_CURRENT_USER\Software\Microsoft\Windows\Shell\Associations\UrlAssociations\http\UserChoice\ProgId")
+				set lf-open-cmd = get-registry-value(concat("HKEY_CLASSES_ROOT\",lf-class,"\shell\open\command"))
+				if lf-open-cmd > spaces
+					set lf-i = pattern(lf-open-cmd,'.exe"')
+					//strip any trailing arguments - including "
+					string lf-open-cmd deleting lf-i + 4 to strlen(lf-open-cmd)
+					//strip leading "
+					string lf-open-cmd deleting 1
+					//
+					command lf-open-cmd parameters lf-cognos-url external no-wait
+				else
+					command 'c:\progra~1\internet explorer\iexplore.exe' parameters lf-cognos-url external no-wait
+					on error endon 
+				endif
+			else
+#ifdef DEBUG
+				DEBUG("We know we get to this point")
+#endif
+				command lf-cognos-url external no-wait
+				on error 
+#ifdef DEBUG
+					DEBUG( error-description(exit-status()))
+#endif
+				endon 
+			endif
+		endif
+		//
+		//
+		//now destroy the token
+		//transaction begin
+		//get system-user-cap-token
+		//	on index suct-user-id suct-comp-code
+		//	key is lf-user lf-comp-code
+		//	lock
+		//on error
+		//else
+		//	set suct-token = SPACES
+		//	update system-user-cap-token
+		//endon
+		//transaction commit
+	endon
+endprocedure //m8rpt_launch-launch-rpt ---------------------------------------
+
+procedure m8rpt_launch-release-ole-controls export no-override
+	open tmp-ole-id
+	on error
+	else
+		extract tmp-ole-id
+			all
+		detail
+			if ole-release(toi-ole-id)
+			endif
+		endextract
+	endon
+	//
+	do log-off-silent
+endprocedure //m8rpt_launch-release-ole-controls -----------------------------
+
+screen standalone-window
+	parameters
+		lp-url					pic x(1024) type string
+		lp-row					pic 999.99
+		lp-col					pic 999.99
+		lp-depth				pic 999.99
+		lp-width				pic 999.99
+		lp-title				pic x(256) type string
+		lp-position				pic 99
+	//
+	local field
+		lf-ole-id				type ole-interface
+		lf-ole-status			pic s9(10)
+		lf-dummy				pic x
+	//
+	window @lp-row,lp-col to @(lp-row + lp-depth - 1), (lp-col + lp-width - 1)
+		window-position lp-position
+	title lp-title
+	form-entry
+	no-ok-cancel
+	//
+	allow entry
+before
+	set lf-ole-id = ole-create-control ("Shell.Explorer", lp-row, lp-col, lp-depth, lp-width)
+	if not ole-put-property(lf-ole-id,"ProntoEmbedInIframe","true")			
+	endif	
+	if ole-call-method(lf-ole-id, "Navigate2", lf-ole-status, lp-url)
+	endif
+detail
+	//
+	accept lf-dummy @lp-row + lp-depth, lp-col + lp-width
+	confirm auto
+	confirmed
+	endconfirm
+after
+	if ole-release(lf-ole-id)
+	endif
+endscreen //standalone-window ------------------------------------------------
+
+procedure log-off
+	//
+	window @1,1 to @3,65
+		window-position 5
+		color white
+		no-hide
+	//
+	display bitmap concat(getenv('BMS')'/images/rpt_launch.jpg') @1,1 to @3,65 no-aspect-ratio background no-wait
+	//
+	//1. Log off
+	//
+	//switch to using an embedded browser to log off - as tgis doesnt leave a 'log-off' page in the backpane when
+	//the user is forced to log off and the new compnay and report are launched in a web-window
+	//
+	do log-off-silent
+	//	if set-background-image(strconcat(cs-server-url,
+	//		'?b_action=xts.run&m=portal/logoff.xts&h_CAM_action=logoff')) endif
+	//
+	//
+	display param-text('Preparing reporting for <<P1>>...',company-name) @2,1 prompt color blue bold pic x(65) centre
+	//
+	if sleep(1) endif
+endprocedure //log-off -------------------------------------------------------
+
+procedure log-off-silent
+	local field
+		lf-ole-id				type ole-interface
+		lf-ole-status			pic s9(10)
+	//
+	set lf-ole-id = ole-create-control ("Shell.Explorer", 1, 1, 0, 0)
+	if not ole-put-property(lf-ole-id,"ProntoEmbedInIframe","true")			
+	endif	
+	if cse-server-url != SPACES
+		if not ole-call-method(lf-ole-id, "Navigate2", lf-ole-status,
+			strconcat(cse-server-url,'?b_action=xts.run&m=portal/logoff.xts&h_CAM_action=logoff'))
+		endif
+    else
+		if not ole-call-method(lf-ole-id, "Navigate2", lf-ole-status,
+			strconcat(cs-server-url,'?b_action=xts.run&m=portal/logoff.xts&h_CAM_action=logoff'))
+		endif
+    endif
+	if ole-release(lf-ole-id)
+	endif
+endprocedure //log-off-silent ------------------------------------------------
+
+procedure get-public-key
+	parameter
+		lp-systime			pic x(20)
+	returning
+		lr-public-key		like tmp-public-key
+	local	
+		lf-i				pic 9
+		lf-random-no		pic 9999999
+		lf-public-part-key	pic x(9)
+	//
+	open tmp-public-key truncate temporary
+	//
+	if operating-system = 'WINDOWS'
+		command concat(getenv("PRONTO"),'\util\RunCmd.exe')
+				parameters '/c'
+							concat(getenv("PRONTO"),'\bin\proencrypt.exe')
+							file-name(tmp-public-key)
+							strconcat(lp-systime)
+							'-s' concat(CHR(49),CHR(57),CHR(54),CHR(49),CHR(106),CHR(112),CHR(119),
+										CHR(49),CHR(57),CHR(55),CHR(50),CHR(71),CHR(74),CHR(83)
+										CHR(49),CHR(57),CHR(55),CHR(54),CHR(104),CHR(103),CHR(112) )
+	else
+		command 'proencrypt' parameters
+								file-name(tmp-public-key)
+								strconcat(lp-systime)
+								'-s' concat(CHR(49),CHR(57),CHR(54),CHR(49),CHR(106),CHR(112),CHR(119),
+										CHR(49),CHR(57),CHR(55),CHR(50),CHR(71),CHR(74),CHR(83)
+										CHR(49),CHR(57),CHR(55),CHR(54),CHR(104),CHR(103),CHR(112) )
+	endif
+	get tmp-public-key first
+	//
+	//This generates a random 9 part key from the tmp-public-key returned
+	for lf-i = 1 to 9
+		set lf-random-no = num(substring(str(random(0)),1,1))		
+		set lf-public-part-key = strconcat(lf-public-part-key, substring(tmp-public-key,lf-random-no,lf-random-no))
+	endfor		
+	//Assembling the public key
+	set lr-public-key = strconcat(lf-public-part-key,str(random(0)),tmp-public-key,str(random(1000)))
+	//	
+	close tmp-public-key
+endprocedure //get-public-key ------------------------------------------------
+
+procedure get-user-token
+	parameter
+		lp-public-key			pic x(256)
+		lp-user					like user-id
+		lp-comp-code			like sys-comp-code
+	returning
+		lr-token				like suct-token
+	//
+	local field
+		lf-hash-num				pic 9(18)
+		lf-hash-num1			pic 9(18)
+		lf-i					type numeric
+	//
+	for lf-i to 1 to strlen(strconcat(lp-public-key,lp-user,lp-comp-code))
+		set lf-hash-num += ascii-num(substring(strconcat(lp-public-key,lp-user,lp-comp-code),lf-i,lf-i))
+	endfor
+	for lf-i to 1 to strlen(concat(CHR(49),CHR(57),CHR(54),CHR(49),CHR(106),CHR(112),CHR(119),
+										CHR(49),CHR(57),CHR(55),CHR(50),CHR(71),CHR(74),CHR(83)
+										CHR(49),CHR(57),CHR(55),CHR(54),CHR(104),CHR(103),CHR(112) ))
+		set lf-hash-num1 += ascii-num(substring(concat(CHR(49),CHR(57),CHR(54),CHR(49),CHR(106),CHR(112),CHR(119),
+										CHR(49),CHR(57),CHR(55),CHR(50),CHR(71),CHR(74),CHR(83)
+										CHR(49),CHR(57),CHR(55),CHR(54),CHR(104),CHR(103),CHR(112) )
+								,lf-i,lf-i))
+	endfor
+	set lr-token = str(lf-hash-num * lf-hash-num1)
+	//
+endprocedure //get-user-token ------------------------------------------------
+

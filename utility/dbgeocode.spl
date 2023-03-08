@@ -1,0 +1,481 @@
+////////////////////////////////////////////////////////////////////////////////
+//dbgeocode -Database GeoCoding
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2010
+//
+// PRONTO is a registered trademark of Prometheus Software Developments P/L.
+//
+// All Rights Reserved. Unauthorised copying is prohibited.
+//=========================================================================//
+//
+// Modification History
+// Date		Who	SDR		What
+////////////////////////////////////////////////////////////////////////////////
+
+#define NO_OF_SELECTION_PARAMETERS '3'
+#define REPORT_NAME 'Database GeoCoding'
+
+#define ADDR_ARRAY_SIZE 7
+
+link 'clib/clibvgeocode'
+//link 'clib/clibmisc'
+
+#include '../include/bmsdef.spl'
+#include '../include/i8proglog.spl'
+#include '../include/rbtchproc.spl'
+#include '../include/i8secabt.spl'
+
+
+field
+	ws-function-title					pic x(80) type string
+	ws-accountcode-like					pic x(30) type string
+	ws-sales-order-delivery				type boolean
+	ws-name-and-address					type boolean
+	//
+	// Global geocode clib parameters
+	ws-geo-last-reset					type datetime
+	ws-geo-licence-limit				type number
+	ws-geo-licence-key					like suot-description
+	ws-geo-current-count				type number
+	ws-geo-last-overlimit				type datetime
+	ws-geo-reset-time					type time
+	ws-geo-restrict-time				type time
+	ws-geo-country						like suot-alpha-4-1
+	ws-geo-restrict-limit				type number
+	ws-geo-current-limit				type number
+
+
+
+procedure main
+returning 
+	lr-results							pic x(1024) type string
+	get system-control first
+	get system-user-control	
+		on index user-id											
+		key is login-id()
+	on error														
+	endon															
+//	do i8secabt-check-abort parameters
+//		sys-consolidation-division login-id() "ZUSR" "R001"
+//			returning ws-function-title
+	set ws-function-title = "GeoCoding"
+	set ws-report-started = FALSE
+	do i8proglog-write-log
+	do clibvgeocode-return-parameters returning
+		ws-geo-last-reset
+		ws-geo-licence-limit
+		ws-geo-licence-key
+		ws-geo-current-count
+		ws-geo-last-overlimit
+		ws-geo-reset-time
+		ws-geo-restrict-time
+		ws-geo-country
+		ws-geo-restrict-limit
+		ws-geo-current-limit
+	I8GPARAM_FLAG("-nad",false,ws-name-and-address)
+	I8GPARAM_FLAG("-sod",false,ws-sales-order-delivery)
+	if ws-name-and-address or ws-sales-order-delivery
+		do rbtchproc-report-detail
+			returning lr-results
+	else
+		RBTCHPROC_RUN_PROGRAM(REPORT_NAME)
+	endif
+endprocedure //main ------------------------------------------------------------
+
+screen rbtchproc-report-parameters
+	allow entry
+	window @1,1 to @24,80
+	title ws-function-title
+	form-entry
+before
+	clear
+	box @2,1 to @17,80
+		title "Parameters"
+//	box @18,1 to @22,80
+//		title "Output"
+	set ws-accountcode-like = spaces
+	display  "This program makes calls across the internet to the Google geocoding api." @7,2  italic
+	display "The terms of the licence include a limit to the number of calls in any 24 hour period." @8,2 italic
+	display concat("Your licence resets at " format-picture(ws-geo-reset-time,"HH:MM:SS")) @9,2 italic
+	display concat("Your licence is limited to " str(ws-geo-licence-limit)) @10,2 italic
+	display concat("At this time, this program will be limited to "
+			str(ws-geo-current-limit) " calls") @11,2 italic
+detail
+	check-box ws-sales-order-delivery		@3,36
+		values true false
+		title "Sales order delivery"
+		right-coordinate
+		default is false
+	end-check-box
+	check-box ws-name-and-address		@4,36
+		values true false
+		title "name and address master"
+		right-coordinate
+		default is false
+	end-check-box 
+	accept ws-accountcode-like @5,36
+		// add remove following lines as necessary
+		title 'Select Customer that match :'
+		optional
+		help "Select Customer that match"
+		uppercase
+		default ws-accountcode-like
+	before-accept
+	end-before-accept
+	confirm auto
+			RBTCHPROC_EXECUTION
+	end-confirm
+endscreen //rbtchproc-report-parameters --------------------------------------
+
+procedure rbtchproc-set-parameters
+	RBTCHPROC_LOAD_SET_ALPHA(ws-accountcode-like)
+	RBTCHPROC_LOAD_SET_NUM(ws-sales-order-delivery)
+	RBTCHPROC_LOAD_SET_NUM(ws-name-and-address)
+endprocedure //rbtchproc-set-parameters --------------------------------------
+
+procedure start-report
+	set rbtchproc-report-name = REPORT_NAME
+	report rbtchproc-report-name		
+		header is skeleton-report-header
+		no-message
+		width 132
+	set ws-report-started = TRUE
+	if rbtchproc-in-background
+		RBTCHPROC_MESSAGE_REPORT_STARTED
+	else
+		display 'Report :' @20,59 background right bold
+		display spool-file-name() @20,68 pic x(12) foreground prompts
+	endif
+endprocedure //start-report ----------------------------------------------------
+
+procedure skeleton-report-header
+	if report-is-xml()
+		report section "headings_section"
+	endif
+	print company-name col 1
+		rbtchproc-report-name col 51 bold
+		"Date:" col 85
+		tod() col 110
+		today() col 91
+		"Time:" col 104
+		'Page:' col 120
+		left-justify(str(page-no)) col 126 pic x(4)
+	skip
+	print
+		"Account" in col    1
+		"Type" in col   13
+	if report-is-xml()
+		report section finished
+	endif
+endprocedure //skeleton-report-header ------------------------------------------
+
+// Your main processing routine must be named as follows
+procedure rbtchproc-report-detail
+returning 
+	lr-results							pic x(1024) type string
+	window @19,44 to @24,80
+	    title is "Report Progress"
+	    color white
+	    no-hide
+	if not rbtchproc-in-background
+		display bitmap concat(getenv('BMS')'/images/repedge.gif') @19,44
+		display spool-file-name() @20,68 pic x(12) foreground prompts
+		display "Now at :" @23,45 background prompts left
+	endif
+	do start-report
+	page
+	print "Date :" today() tod()
+	print "GMT :" gmt()
+	print "match:" ws-accountcode-like
+	print "Last reset at " ws-geo-last-reset
+	print "Over Limit at " ws-geo-last-overlimit
+	print "limit call count " ws-geo-current-limit
+	// 
+	// Look at the last time the counter was reset and work backwards
+	//
+	if ws-name-and-address 
+		do parse-nad
+			returning lr-results
+	endif
+	if ws-sales-order-delivery
+		do parse-sod
+			returning lr-results
+	endif
+	do finish-report
+endprocedure //rbtchproc-report-detail ---------------------------------------
+
+procedure parse-sod
+returning 
+	lr-results							pic x(1024) type string
+local
+//	lf-big-address						pic x(4096) type varchar
+	lf-address							pic x(30) type string occurs ADDR_ARRAY_SIZE
+	lf-start-address					pic x(30) type string occurs ADDR_ARRAY_SIZE
+	lf-counter							type number
+	lf-lat								pic -9(3).9(6)
+	lf-long								pic -9(3).9(6)
+	lf-ok								type boolean
+	lf-message							pic x(256) type string
+	lf-formatted-address				pic x(1024) type string
+	lf-postal-code						type string
+	lf-geotype							type string
+	lf-addresstype						type string
+	lf-result-count						type number
+	lf-error-count						type number
+	i									type number
+	select *
+		from sales-order-delivery
+		where so-text-type   in {  'DA' }
+		and so-dl-user-only-alpha30-2 = spaces
+		for-update
+	detail
+		set lr-results = "Read/Error:"
+		string lr-results appending concat(" " str(lf-counter) "/" str(lf-error-count))
+		set lf-counter += 1
+		if lf-counter > ws-geo-current-limit
+			string lr-results appending " - Geocode limit reached"
+			break
+		endif
+		if not batched
+			if not lf-counter % 5
+				display concat(str(lf-counter) " of " str(ws-geo-current-limit) " completed") @5,20
+				display accountcode @23,60 foreground prompts
+			endif
+		endif
+		set lf-start-address[*] = spaces
+		for i = 1 to occurrence(lf-start-address)
+			set lf-start-address[i] = so-dl-text[i]
+		end-for
+////		do clibmisc-format-address parameters are lf-start-address
+//			returning lf-address lf-big-address
+//				lf-ok lf-message
+//		if not lf-ok
+//			print  "** ERROR **" accountcode na-type lf-message
+//			continue
+//		endif
+		do clibvgeocode-get-lat-long
+			parameters are lf-address
+			returning lf-lat lf-long lf-geotype
+				lf-postal-code lf-formatted-address lf-addresstype
+				lf-result-count
+		if exit-status != 0
+			set lf-geotype = "FAILED"
+		endif
+		do print-geocode-results
+			parameters are lf-ok lf-message
+			lf-start-address lf-address lf-lat lf-long lf-formatted-address
+			lf-postal-code lf-geotype lf-addresstype
+		if pattern(lf-message ,  "OVER_QUERY_LIMIT")
+			// No point in doing anything else
+			print "Over Query limit - exiting"
+			break
+		endif
+		set so-dl-user-only-alpha30-1 = str-concat(str(lf-lat) "/" str(lf-long))
+		set so-dl-user-only-alpha30-2 = str-concat(lf-geotype "/" lf-addresstype)
+		set so-dl-user-only-date1 = gmt
+		update sales-order-delivery
+		on error
+			set lf-error-count += 1
+		endon
+	end-select
+end-procedure
+
+procedure parse-nad
+returning 
+	lr-results							pic x(1024) type string
+local
+//	lf-big-address						pic x(4096) type varchar
+	lf-address							pic x(30) type string occurs ADDR_ARRAY_SIZE
+	lf-start-address					pic x(30) type string occurs ADDR_ARRAY_SIZE
+	lf-counter							type number
+	lf-lat								pic -9(3).9(6)
+	lf-long								pic -9(3).9(6)
+	lf-ok								type boolean
+	lf-message							pic x(256) type string
+	lf-formatted-address				pic x(1024) type string
+	lf-postal-code						type string
+	lf-geotype							type string
+	lf-addresstype						type string
+	lf-result-count						type number
+	lf-invalid-address-count			type number
+	lf-blank-geocode					type number
+	lf-error-count						type number
+	lf-all-blank						type boolean
+	i									type number
+	set lf-counter = 1
+	select *
+		from name-and-address-master
+		where (na-type in { 'C' 'DA' 'WH' 'JC' 'SL'}
+			or na-type between '00' and '99')
+		and na-user-only-alpha30-2 = spaces
+		and ( :ws-accountcode-like = spaces
+		OR accountcode like :ws-accountcode-like)
+		for-update
+	detail
+		set lr-results = "Read/Error:"
+		string lr-results appending concat(" " str(lf-counter) "/" str(lf-error-count))
+		if lf-counter > ws-geo-current-limit
+			string lr-results appending " - Geocode limit reached"
+			break
+		endif
+		if not batched
+			if not lf-counter % 5
+				display concat(str(lf-counter) " of " str(ws-geo-current-limit) " completed") @22,60
+				display accountcode @23,60 foreground prompts
+			endif
+		endif
+		set lf-start-address[*] = spaces
+		set lf-start-address[1] = spaces
+		set lf-start-address[2] = na-company
+		set lf-start-address[3] = na-street
+		set lf-start-address[4] = na-suburb
+		set lf-start-address[5] = na-country
+		set lf-start-address[6] = na-address-6
+		set lf-start-address[7] = na-address-7
+		set lf-all-blank = TRUE
+		for i = 1 to 7
+			set lf-address[i] = lf-start-address[i]
+			if  lf-address[i] != spaces
+				set lf-all-blank = FALSE
+			endif
+		endfor
+		if lf-all-blank
+			continue
+		endif
+//		do clibmisc-format-address parameters are lf-start-address
+//			returning lf-address lf-big-address
+//				lf-ok lf-message
+//		if not lf-ok
+//			print "** ERROR **" accountcode na-type lf-message
+//			for i = 1 to occurence(lf-address)
+//				if lf-address[i] <> spaces
+//				or lf-start-address[i] <> spaces
+//					print lf-start-address[i] in col 4
+//						lf-address[i] in col 40
+//				endif
+//			end-for
+//			set lf-invalid-address-count += 1
+//			continue
+//		endif
+		do clibvgeocode-get-lat-long
+			parameters are lf-address
+			returning lf-lat lf-long lf-geotype
+				lf-postal-code lf-formatted-address lf-addresstype
+				lf-result-count
+		if exit-status() != 0
+			do clibvgeocode-get-last-error returning lf-message
+			set lf-ok = FALSE
+		else
+			set lf-ok = TRUE
+			set lf-message = spaces
+		endif
+		do print-geocode-results
+			parameters are lf-ok lf-message
+			lf-start-address lf-address lf-lat lf-long lf-formatted-address
+			lf-postal-code lf-geotype lf-addresstype
+		if pattern(lf-message ,  "OVER_QUERY_LIMIT")
+		or pattern(lf-message ,  "Local Limit Exceeded")
+			// No point in doing anything else
+			print "Over Query limit - exiting"
+			break
+		endif
+#if BMS_DICT_VER > 7200
+		set na-map-id = str(lf-lat) 
+		string na-map-id inserting str(lf-long) at 11
+#else
+		set na-user-only-alpha30-1 = str-concat(str(lf-lat) "/" str(lf-long))
+#endif
+		set na-user-only-alpha30-2 = str-concat(lf-geotype "/" lf-addresstype)
+		set na-user-only-alpha4-1 = lf-postal-code
+		set na-user-only-date1 = gmt()
+		update name-and-address-master
+		on error
+			set lf-error-count += 1
+		endon
+		set lf-counter += 1
+	end-select
+	skip
+	print  str(lf-counter ) " records read. "
+	print " there are " str(lf-invalid-address-count ) " Invalid addresses "
+	select lf-blank-geocode = count(*)
+		from name-and-address-master
+		where na-type in ( 'C' 'DA' 'WH' )
+		and na-user-only-alpha30-2 = spaces
+	end-select
+	print " There are " str(lf-blank-geocode) " records that have no geocode "
+	print " Therefore there are " str( lf-blank-geocode - lf-invalid-address-count) " records still to process"
+end-procedure
+
+procedure print-geocode-results
+parameters
+	lp-ok								type boolean
+	lp-message							pic x(100) type string
+	lp-start-address					pic x(100) type string occurs ADDR_ARRAY_SIZE
+	lp-address							pic x(100) type string occurs ADDR_ARRAY_SIZE
+	lp-lat								pic -9(3).9(6)
+	lp-long								pic -9(3).9(6)
+	lp-formatted-address				pic x(1024) type string
+	lp-postal-code						type string
+	lp-geotype							type string
+	lp-addresstype						type string
+local
+	i									type number
+	//
+	if not lp-ok
+		set lp-geotype = "FAILED"
+		print "Failed" lp-message
+		exit
+	endif
+	print 80"-"
+	print "Message:" lp-message
+	print accountcode na-type
+	for i = 1 to occurence(lp-address)
+		if lp-address[i] <> spaces
+		or lp-start-address[i] <> spaces
+			print lp-start-address[i] in col 4
+				lp-address[i] in col 40
+		endif
+	end-for
+	print 
+		lp-lat
+		lp-long
+		lp-geotype pic x(20)
+		lp-postal-code pic x(10)
+		lp-addresstype pic x(20)
+	print
+		lp-formatted-address
+end-procedure
+
+
+
+
+
+
+procedure finish-report
+	if report-is-xml()
+		page
+		report section "options_page"
+	endif
+	if ws-report-started
+		skip 2
+		print 'Options selected : ' col 2 no-newline
+			tag  'options_print'
+		if ws-sales-order-delivery
+			print "Sales Order Delivery Selected" in col 22
+		endif
+		if ws-name-and-address
+			print "Name and Address Selected" in col 22
+		endif
+		print 'Select Customer that match    =  : ' in col 22
+			 tag is 'prompt_ws_accountcode_like'
+			ws-accountcode-like            tag is 'ws_accountcode_like'
+		skip
+	endif
+	skip
+	if report-is-xml()
+		report section finished
+	endif
+	RBTCHPROC_SCREEN_FINISH_MESSAGE(ws-report-started,23,45)
+endprocedure //finish-report ---------------------------------------------------
+
+

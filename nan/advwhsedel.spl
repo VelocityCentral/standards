@@ -1,0 +1,35 @@
+
+object nad-copy like name-and-address-master
+
+procedure main
+	confirm 
+		prompt "OK to create Delivery Address Records?"
+	confirmed
+		do crt-del-addr
+	end-confirm
+end-procedure
+
+procedure crt-del-addr
+local 
+	l-counter				type number
+	select * from deb-master
+		where accountcode < 'CASH'
+	detail
+		get name-and-address-master
+			on index accountcode na-type
+			key is accountcode "DA"
+		on error
+			set l-counter += 1
+			get name-and-address-master
+				on index accountcode na-type
+				key is accountcode "C"
+			//
+			set na-type = "DA"
+			set na-route-code = str(l-counter % 4)
+			insert nad-copy
+			on error
+			endon
+		else
+		endon
+	end-select
+end-procedure

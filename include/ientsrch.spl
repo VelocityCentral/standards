@@ -1,0 +1,36 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : 
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2018
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: nan/ientsrch.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 16Mar18  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+
+#ifndef ientsrch.spl
+
+// Contexts
+#define IENTSRCH_C_SO 9000
+#define IENTSRCH_C_PO 9001
+#define IENTSRCH_C_CR 9002
+
+
+// Subcontexts
+#define IENTSRCH_SC_LINE 900000
+#define IENTSRCH_SC_SO 900001
+#define IENTSRCH_SC_CUST_PO 900002
+#define IENTSRCH_SC_INV 900003
+#define IENTSRCH_SC_CN 900004
+#define IENTSRCH_SC_PARTNER 900005
+#define IENTSRCH_SC_PO 900006
+#define IENTSRCH_SC_SHP 900007
+
+#endif

@@ -1,0 +1,582 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : Create forecast for MRP from Budgets
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2019
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: nan/budg2fcast.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 25May19  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+
+#define DEBUG(A) print A ":" get-field-value(A)
+
+#define LASTDAY(D)\
+	 julian(days-in-month(month(D),year(D)), \
+			month(D), \
+			year(D))
+ 
+field
+	ws-function-title						type string
+	ws-budget-number						like bd-id
+	ws-warehouse							like whse-code
+	ws-split-to								pic x // C)alendar Months 1) 1weeks 2)2Weeks
+
+object note-text
+	type memory
+	record
+		nt-seq 								type number
+		nt-text								pic x(128) type string
+	end-record
+	key is nt-seq 
+
+object forecast-paste
+	type memory
+	record 
+		fp-item								like stock-code
+		fp-warehouse						like whse-code
+		fp-territory						like territory
+		fp-start							type date
+		fp-end								type date
+		fp-qty								type number
+		fp-note								pic x(256) type string
+	end-record
+	key fp-item fp-start
+
+mode md-select
+	prompt "Select"
+	help "Select this item"
+
+mode md-fcast
+	prompt "Forecast"
+	help "Jump to bulk add ready to paste"
+
+mode md-pub
+	prompt "Publish"
+	help "Jump to forecast publish"
+
+procedure main
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+//	do i8secabt-check-abort
+//		parameters are sys-consolidation-division login-id() "ZUSR" "R004"
+//		returning ws-function-title 
+	do i8proglog-write-log
+	do load-notes
+	do budgmenu
+end-procedure
+
+menu budgmenu
+	window	
+	no-hide
+	Title "Budget to Forecast"
+before
+	display "Generally only use option 1 and then use Adv Forecasting for the rest of the process" @1,1
+detail
+	option "1. Create Adv Forecast Entries" @3,1
+		do create-fcast-entries entry once
+	option "2. Create Manual Forecast Entries via Excel" @4,1
+		do parameter-entry entry once
+	option "3. Setup for Google Charts" @5,1
+		help "Change fcast enq to use google charts instead of cognos"
+		do google-chart-setup
+end-menu
+
+screen create-fcast-entries
+local
+	lf-start-stock-code						like stock-code
+	lf-end-stock-code 						like stock-code
+	lf-start-whse							like whse-code
+	lf-end-whse								like whse-code
+	window
+	responsive
+	title "Create Forecast Entries"
+before
+	set lf-start-stock-code = "EQ"
+	set lf-start-whse = "W02"
+detail
+	screen-group // ---- Parameters ----------------------------
+		title "Parameters"  // The title is optional
+		field-group // ---- Stock Code Range ----------------------------
+			title "Stock Code Range"  // Title is optional
+		accept lf-start-stock-code
+			title "Start"
+			default lf-start-stock-code
+			on change
+				set lf-end-stock-code = max-presentation-value(lf-end-stock-code)
+				string lf-end-stock-code replacing rtrim(lf-start-stock-code) at 1
+				refresh lf-end-stock-code
+			endon
+		accept lf-end-stock-code
+			title "End"
+			default lf-end-stock-code
+		end-field-group // ---- Stock Code Range --------------------------------------
+		field-group // ---- Whse Range ----------------------------
+			title "Whse Range"  // Title is optional
+			accept lf-start-whse
+				title "Start"
+				default lf-start-whse
+			on change
+				set lf-end-whse = max-value(lf-end-whse)
+				string lf-end-whse  replacing rtrim(lf-start-whse) at 1
+				refresh lf-end-whse
+			endon
+			accept lf-end-whse
+				title "End"
+				default lf-end-whse
+		end-field-group // ---- Whse Range --------------------------------------
+	end-screen-group // ---- Parameters --------------------------------------
+	confirm 
+		auto
+	confirmed
+		do process-create-fcast-entries 
+			parameters
+				lf-start-stock-code						
+				lf-end-stock-code 					
+				lf-start-whse					
+				lf-end-whse					
+	end-confirm 
+end-screen
+
+
+procedure process-create-fcast-entries
+parameters
+	lp-start-stock-code						like stock-code
+	lp-end-stock-code 						like stock-code
+	lp-start-whse							like whse-code
+	lp-end-whse								like whse-code
+	/*
+	There is a truly horrible bug in forecast generation.
+	If you include records in forecast-details that have no corresponding records
+	in stock-warehouse-detail, then ALL warehouse records for that item are skipped
+	from the missing warehouse to the next stock code
+	*/
+	sql-delete ALL forecast-details
+	select *
+		from stock-master
+		where stk-stock-status in ( "M" "S" )
+		and stock-code between lp-start-stock-code and lp-end-stock-code
+	detail
+		select *
+			from system-table
+			where sys-tbl-type = "WH"
+			and sys-tbl-alpha-3 = 'FCT'
+			and sys-tbl-type between lp-start-whse and lp-end-whse
+		detail
+			get stock-warehouse-detail
+				on index stock-code whse-code
+				key is stock-code sys-tbl-code
+			on error
+				continue
+			endon
+			initialise forecast-details
+				leaving stock-code
+			set whse-code = sys-tbl-code
+			set stk-fd-forecast-run = today()
+			if stk-reorder-review = "M"
+				set fd-periods-to-simulate = 12
+				set fd-periods-to-forecast = 24
+				set fd-time-bucket = "M"
+			else
+				set fd-periods-to-simulate = 13
+				set fd-periods-to-forecast = 52
+				set fd-time-bucket = "W"
+			endif
+			set fd-week-start-date = julian(2,1,12)
+			insert forecast-details
+			on error
+			endon
+		end-select
+	end-select
+	message "Completed"
+end-procedure
+	
+
+screen parameter-entry
+	window
+	title "Create Forecasts from custom budgets"
+	form-entry
+	no-ok-cancel
+detail
+	accept  ws-budget-number @6,30
+		title "Budget Number"
+		default ws-budget-number
+	on help-key
+		do select-budget
+			returning ws-budget-number
+		re-enter optional
+	endon
+	validations
+		get budget-design
+			on index bd-id
+			key is ws-budget-number
+		on error
+			message "Invalid budget"
+			re-enter
+		endon
+		if bd-frequency != 1
+			message "You can only select budgets that have a monthly frequency"
+			re-enter
+		endif
+	end-validations
+	box @7.5,5 to @9,80
+		title "warehouse"
+	accept ws-warehouse @8,30
+		title "Warehouse"
+		uppercase
+		optional
+	validations
+		get system-table 
+			on index sys-tbl-type sys-tbl-code
+			key is "WH" ws-warehouse
+		on error
+			message "Invalid warehouse"
+			re-enter
+		endon
+	end-validations
+	box @9.5,5 to @11,80
+		title "Split To"
+	radio-button ws-split-to
+		@10,20 "1" title  "1 Week"
+		@10,30 "2" title  "2 Week"
+		@10,40 "3" title  "3 Week"
+		@10,50 "4" title  "4 Week"
+		@10,60 "C" title  "Calendar Months"
+		default "1"
+	end-radio-button 
+	option "Read these <br> notes first" @2,20 to @4,50
+		text-position 15
+	detail
+		do display-notes
+	end-option
+	option "Do it <br> now " @12,20 to @14,30
+		text-position 15
+	detail
+		do build-forecast
+		do forecast-dg
+		exit
+	end-option
+end-screen
+
+procedure build-forecast
+local
+	lf-qty								type number
+	lf-date-select-sql					type date
+	lf-daily-qty						type number
+	lf-forecast-qty						type number
+	lf-current-start					type date
+	lf-current-end						type date
+	lf-max-budget						type date
+	lf-date-of-current-month-end		type date
+	lf-note								like fp-note
+	close forecast-paste and remove
+	open forecast-paste temporary
+	set lf-date-select-sql = today
+#ifdef DEBUG
+	report "debug"
+#endif
+	get budget-design 
+		on index bd-id
+		key is ws-budget-number
+	on error
+		message "Invalid budget"
+		exit
+	endon
+	//
+	// these are the items to process:
+	select 
+		distinct
+		bv-stock-code
+		from budget-values
+		where bd-id = :ws-budget-number
+		and bv-budget-type = 0
+	detail
+#ifdef DEBUG
+		print "============================================================"
+		DEBUG('bv-stock-code')
+		print "============================================================"
+#endif
+		// start of loop for each stock-code
+		set lf-current-start = today 
+		//  if weekly then set to following monday
+		if ws-split-to in ("1" "2" "3" "4")
+			while dow(lf-current-start) != 2
+				set lf-current-start += 1
+			endwhile
+		endif
+		// How far does it go?
+		select lf-max-budget =	max(bv-date)
+			from budget-values
+			where bd-id = :ws-budget-number
+			and bv-budget-type = 0
+			and bv-stock-code = :bv-stock-code
+		end-select
+		set lf-date-of-current-month-end = LASTDAY(lf-current-start)
+#ifdef DEBUG
+		DEBUG('lf-max-budget')
+		DEBUG('lf-current-start')
+		DEBUG('lf-date-of-current-month-end')
+#endif
+		do get-daily parameters are bv-stock-code lf-date-of-current-month-end
+			returning lf-daily-qty
+		repeat
+			switch ws-split-to
+			case "1"
+				set lf-current-end = lf-current-start + 7 - 1
+			case "2"
+				set lf-current-end = lf-current-start + 14 - 1
+			case "3"
+				set lf-current-end = lf-current-start + 21 - 1
+			case "4"
+				set lf-current-end = lf-current-start + 28 - 1
+			case "C"
+				set lf-current-end = LASTDAY(lf-current-start)
+			end-switch
+#ifdef DEBUG
+		DEBUG('lf-current-start')
+		DEBUG('lf-current-end')
+#endif
+			// We now have a period with a start and end date.
+			// if the month is the same for the start and end dates just use
+			// the current daily
+			if month(lf-current-start) = month(lf-current-end)
+				set lf-note = "IntraMonth"
+				set lf-forecast-qty = lf-daily-qty * ((lf-current-end - lf-current-start) + 1)
+#ifdef DEBUG
+		print "one month"
+		DEBUG('lf-forecast-qty')
+#endif
+			else
+			// if the month is different, prorata the amounts and set the new
+			// current month end date
+				set lf-note = "InterMonth"
+				// to end of this month:
+				set lf-forecast-qty = lf-daily-qty * (days-in-month(month(lf-current-start),year(lf-current-start))
+													- day(lf-current-start)
+													+ 1)
+#ifdef DEBUG
+				string lf-note appending ",1:"
+				string lf-note appending str(lf-forecast-qty)
+#endif
+				// get the next monthend:
+				set lf-date-of-current-month-end = LASTDAY(lf-current-end)
+				do get-daily parameters are bv-stock-code lf-date-of-current-month-end
+					returning lf-daily-qty
+				// add this to the period qty
+				set lf-forecast-qty += lf-daily-qty * day(lf-current-end)
+#ifdef DEBUG
+		print "multi month"
+		DEBUG('lf-forecast-qty')
+#endif
+			endif
+			// Insert the record
+			if integer(lf-forecast-qty) != 0
+				initialise forecast-paste
+				set fp-item = bv-stock-code
+				set fp-warehouse = ws-warehouse
+				set fp-start = lf-current-start
+				set fp-end = lf-current-end
+				set fp-qty = integer(lf-forecast-qty)
+				set fp-note = lf-note
+				insert forecast-paste
+			endif
+			set lf-note = spaces
+		until lf-current-end  > lf-max-budget
+			set lf-current-start = lf-current-end + 1
+		end-repeat
+	end-select
+end-procedure
+
+procedure get-daily
+parameters are 
+	lp-stock-code							like bv-stock-code
+	lp-date									type date
+returning
+	lr-qty									type number
+	select 
+		lr-qty = sum(bv-quantity) 
+		from budget-values
+		where bd-id = :ws-budget-number
+		and bv-date = :lp-date
+		and bv-budget-type = 0
+		and bv-stock-code = :lp-stock-code
+	end-select
+	set lr-qty = lr-qty / days-in-month(month(lp-date),year(lp-date))
+#ifdef DEBUG
+	print "qty"
+	DEBUG('lp-stock-code')
+	DEBUG('lp-date')
+	DEBUG('lr-qty')
+#endif
+end-procedure
+
+screen forecast-dg
+	window
+	title "Save and paste"
+	select * from forecast-paste
+		allowed search md-fcast md-pub
+	datagrid occurs 22
+detail
+	if screenmode = md-fcast
+		spl 'fcs/fmaint' parameters are "-bulk"
+	endif
+	if screenmode = md-pub
+		spl 'fcs/fmpsupd'
+	endif
+	accept fp-item @1,1
+		title "Item"
+	display fp-warehouse @1,2
+		title "Warehouse"
+	display fp-territory @1,3
+		title "Territory"
+	accept fp-start @1,4
+		title "Start"
+	display fp-end @1,5
+		title "End"
+	display fp-qty @1,6 pic s(5)
+		title "Qty"
+#ifdef DEBUG
+	display fp-note @1,7
+		title "Note"
+#endif
+end-screen
+
+screen select-budget
+returning
+	lr-id 						like bd-id
+	window
+	title "Select Buget"
+	select * from budget-design
+		where bd-frequency = 1
+	allowed md-select search
+	datagrid occurs 10
+before
+	display "It is very important that you select a budget by stock code alone" @1,5
+	display "The program does no checking - so get it right!" @2,5
+detail
+	if screenmode = md-select
+		set lr-id = bd-id
+		exit
+	endif
+	accept bd-id @4,1
+		title "Id"
+		when screenmode = search
+		show-value
+	display bd-description @4,2
+		title "Desc"
+end-screen
+
+screen display-notes
+	window
+	select * from note-text
+	datagrid occurs 20
+	allowed search
+detail
+	accept nt-seq @1,1 pic z(4)
+		title "seq"
+	accept nt-text @1,2
+		title "Text"
+end-screen
+
+
+procedure add-one-note
+parameters 
+	lp-text						like nt-text
+	initialise note-text leaving nt-seq
+	set nt-seq += 1
+	set nt-text = lp-text
+	insert note-text
+end-procedure
+
+procedure load-notes
+	open note-text temporary
+	set nt-seq = 0
+	do add-one-note parameters
+		"This program will take the budgets and split them by time period for use in MRP"
+	do add-one-note parameters
+		"MRP requires the use of the forecast files rather than the budget files and "
+	do add-one-note parameters
+		"the forecast time periods must match the MRP time frame flags.  The old forecast splitting"
+	do add-one-note parameters
+		"function no longer works.  So this program will take a selected budget and create a datagrid"
+	do add-one-note parameters
+		"That can be used to cut and paste into the manual forecast program"
+	do add-one-note parameters
+		"Note that the forecast needs to be published after pasting and MOST IMPORTANTLY note that"
+	do add-one-note parameters
+		"you will need a an override routine in clibfcs: "
+	do add-one-note parameters
+		"Otherwise the publish will not work"
+	do add-one-note parameters
+		"procedure clibfcs-public-get-manual-forecasting-method export"
+	do add-one-note parameters
+		"    parameter"
+	do add-one-note parameters
+		"        lp-stock-master.*                    like stock-master"
+	do add-one-note parameters
+		"    returning"
+	do add-one-note parameters
+		"        lr-manual-forecasting-method        like fd-manual-forecasting-method"
+	do add-one-note parameters
+		"    set lr-manual-forecasting-method = 'MF'"
+	do add-one-note parameters
+		"endprocedure"
+	do add-one-note parameters
+		" "
+	do add-one-note parameters
+		" You will also need to override the following routine in fcs/fmaint: "
+	do add-one-note parameters
+		" Otherwise the graph will not work"
+	do add-one-note parameters
+		" "
+	do add-one-note parameters
+		"procedure public-setup-bulk-manual-forecast-details export"
+	do add-one-note parameters
+		"parameter"
+	do add-one-note parameters
+		"      lp-fr.*                  like forecast-results.*"
+	do add-one-note parameters
+		"      lp-fd.*                  like forecast-details.*"
+	do add-one-note parameters
+		"returning"
+	do add-one-note parameters
+		"      lp-fd.*"
+	do add-one-note parameters
+		"      if lp-fd.fd-time-bucket = spaces"
+	do add-one-note parameters
+		"         set lp-fd.fd-time-bucket = 'P'"
+	do add-one-note parameters
+		"      endif"
+	do add-one-note parameters
+		"endprocedure"
+end-procedure
+
+
+procedure google-chart-setup
+	get embedded-object 
+		on index eo-tag
+		key is "FCSGOOGLE"
+	on error ENOREC
+		initialise embedded-object
+			leaving eo-tag
+		set eo-url = "."
+		set eo-tag-desc = "Google"
+		insert embedded-object
+		on error
+			message "Failed to add record to embedded object"
+		endon
+	endon
+	message "Complete - press enter to verify"
+	spl "sys/m8urlmaint" parameters are "-urlmaint"  // sys.m232
+end-procedure

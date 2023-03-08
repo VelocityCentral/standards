@@ -1,0 +1,216 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program :  Quickilnks Overrides
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2017
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: vgl/quicklinks.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 22Jun17  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+//
+#define PATHSTRING pic x(256) type string
+
+field
+	ws-webclient-prefix					PATHSTRING 
+	ws-thinclient-prefix				PATHSTRING
+	ws-root-node						PATHSTRING
+ 
+procedure main export
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	set ws-webclient-prefix = get-env("QLPATH_WEBCLIENT_PREFIX")
+	set ws-thinclient-prefix = get-env("QLPATH_THINCLIENT_PREFIX")
+	set ws-root-node = get-env("QLPATH_ROOT_NODE")
+	if ws-webclient-prefix = spaces
+	or ws-thinclient-prefix = spaces
+	or ws-root-node = spaces
+		acknowledge	"You must set the following environment variables:"
+		acknowledge "QLPATH_WEBCLIENT_PREFIX (e.g. http://pronto/ext/quicklinks)"
+		acknowledge "QLPATH_THINCLIENT_PREFIX (e.g. \\pronto\quicklinks)"
+		acknowledge "QLPATH_ROOT_NODE (e.g. quicklinks)"
+		acknowledge	"Note that if these are being set in a bash script you need to"
+		acknowledge "enclose the string in single quotes in order to escape the slashes"
+		exit
+	endif
+	do next main
+end-procedure
+
+/*
+Major Assumptions:
+1.	You have DNS so that the IP address is mapped to mydemo or mydemo.velocityglobal.co.nz
+	(This will allow for copying the machine - you just need to change your local hosts file)
+	IRRESPECTIVE of the actual machine name.
+	(This is in a #define in case you need to change it)
+
+2.	if you access the machine via the WEB CLIENT then you use http://mydemo
+	(not FQDN nor ip address)
+
+2.	Samba shares a path on this machine from the root called "quicklinks"
+
+3.	/pro/prontoweb/config/application_override.conf contains:
+	prowebserver.ext.dir = "/pro/prontoweb/ext"
+
+4.	/pro/prontoweb/ext contains a folder called quicklinks
+	that folder is a symbolic link to the folder shared by samba.
+
+5.	Quicklinks are defined using any of the following:
+	\\mydemo\quicklinks\x
+	\\mydemo.velocityglobal.co.nz\quicklinks\x
+	http://mydemo/ext/quicklinks/x
+	http://mydemo.velocityglobal.co.nz/quicklinks/x
+	http://<ipaddress>/ext/quicklinks/x
+
+6.  The following environment variables are defined:
+	(assuming ipaddress is 192.168.111.99, machine name "CENTOS68.VELOCITYGLOBAL.CO.NZ", url for web client "mydemo")
+	QLPATH_WEBCLIENT_PREFIX=mydemo
+	QLPATH_THINCLIENT_PREFIX=mydemo
+	QLPATH_ROOT_NODE=quicklinks
+
+*/
+
+procedure public-determine-open-path export
+////////////////////////////////////////////////////////////////////////
+//<CLIB_DOC>
+//This procedure can be used to manipulate the path being used to open a quick-link record
+//
+//<P1> Entire current quick-link record
+//<P2> Path as derived by core program
+//<P3> URL flag as derived by core procedure
+//
+//<R1> Path as derived by this procedure - default is <P2>
+//<R2> URL flag as determined by this procedure - default is <P3>
+////////////////////////////////////////////////////////////////////////
+parameter
+		lp-ql.*								like quick-links.*
+		lp-path								PATHSTRING
+		lp-url								type boolean
+returning
+		lr-path								PATHSTRING
+		lr-url								type boolean
+	//
+	// Links on this site look like this:
+	// \\VGAKUX01\quicklinks\RJB_STAT_2010_9.pdf
+	//
+	// If running in thin client just return the input
+	//
+	set lr-path = lp-path
+	set lr-url = lp-url
+	if pattern(lr-path,ws-root-node) != 0 
+		if  get-system-metrics(7) != 1
+			do get-thin-client-path parameters are lr-path returning lr-path
+		else
+			do get-web-path parameters are lr-path returning lr-path
+			set lr-url = TRUE
+		endif
+		set lr-path = str-concat("'" lr-path "'")
+	elseif pattern(lr-path,"edi") != 0 
+		set ws-root-node = "edi"
+		set ws-webclient-prefix = "http://mydemo/ext/edi"
+		if  get-system-metrics(7) = 0 
+			do get-thin-client-path parameters are lr-path returning lr-path
+		else
+			do get-web-path parameters are lr-path returning lr-path
+		endif
+		set lr-path = str-concat("'" lr-path "'")
+	endif
+//	message lr-path
+	/*
+	if  get-system-metrics(7) = 1 and substring(lr-path,2,17) = "\\192.168.111.99"
+		// then we are running on the web client
+		//
+		// replace the prefix
+		//
+		string lr-path deleting 2 to 17
+		string lr-path inserting "http://192.168.111.99/ext" at 2
+	endif
+	*/
+endprocedure// public-determine-open-path ------------------------------------
+
+procedure get-web-path
+parameters
+	lp-input							PATHSTRING
+returning
+	lr-output							PATHSTRING
+	// the prefix must end up as $QLPATH_WEB_PATH
+	do get-suffix parameters are lp-input returning lr-output
+	do remove-quotes parameters are lr-output returning lr-output
+	do set-slash parameters are lr-output "/" returning lr-output
+	if substring(lr-output,1,1) != "/"
+		string lr-output inserting "/" at 1
+	endif
+	string lr-output inserting ws-webclient-prefix at 1
+	if substring(lr-output,1,4) != "http"
+		string lr-output inserting "http://" at 1
+	endif
+end-procedure
+
+procedure get-thin-client-path
+parameters
+	lp-input							PATHSTRING
+returning
+	lr-output							PATHSTRING
+	do get-suffix parameters are lp-input returning lr-output
+	do remove-quotes parameters are lr-output returning lr-output
+	do set-slash parameters are lr-output "\" returning lr-output
+	if substring(lr-output,1,1) != "\"
+		string lr-output inserting "\" at 1
+	endif
+	string lr-output inserting str-concat(ws-thinclient-prefix) at 1
+	if substring(lr-output,1,2) != "\\"
+		string lr-output inserting "\\" at 1
+	endif
+end-procedure
+
+procedure remove-quotes
+parameters
+	lp-input							PATHSTRING
+returning
+	lr-output							PATHSTRING
+	set lr-output = lp-input
+	if substring(lr-output,1,1) in ( "'" '"' )
+		string lr-output deleting 1 to 1
+	endif
+	if substring(lr-output,str-len(lr-output),str-len(lr-output)) in ( "'" '"' )
+		string lr-output deleting str-len(lr-output)
+	endif
+end-procedure
+
+procedure get-suffix
+parameters
+	lp-input							PATHSTRING
+returning
+	lr-output							PATHSTRING
+	set lr-output = substring(lp-input,pattern(lp-input,ws-root-node) + str-len(ws-root-node),str-len(lp-input))
+end-procedure
+
+procedure set-slash
+parameters
+	lp-input							PATHSTRING
+	lp-new-slash						pic x
+returning
+	lr-output							PATHSTRING
+local
+	i									type number
+	lf-old-slash						pic x
+	//
+	if lp-new-slash = "/"
+		set lf-old-slash = "\"
+	else
+		set lf-old-slash = "/"
+	endif
+	set lr-output = lp-input
+	while pattern(lr-output,lf-old-slash) > 0
+		and i < str-len(lr-output) // double check to stop infinite loop possibility
+		string lr-output replacing lp-new-slash at pattern(lr-output,lf-old-slash)
+		set i += 1
+	endwhile
+end-procedure

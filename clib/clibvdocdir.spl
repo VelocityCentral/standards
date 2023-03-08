@@ -1,0 +1,888 @@
+////////////////////////////////////////////////////////////////////////////////
+//Program : Generalised routine to open a window and allow 
+//	        documents to be stored on server
+//=========================================================================//
+// Copyright (C) PRONTO Software Pty Ltd 1987 thru 2001
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorised copying is prohibited.
+//=========================================================================//
+//
+// File : clibvdocdir.spl
+//
+// Modification History
+// Date		Who	SDR		What
+////////////////////////////////////////////////////////////////////////////////
+/*
+	This documentation is in RST format.  To view this as a nice pdf goto
+	https://overbits.herokuapp.com/rsteditor/ or rst.ninjs.org and paste this content.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|           |           |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+
+	Alternatively
+
+	 =========== =========== ======================================================== 
+	  Direction   Data Type   Description                                             
+	 =========== =========== ======================================================== 
+	 =========== =========== ======================================================== 
+
+===========
+clibvdocdir
+===========
+
+	This routine provides a way to provide a drag-and-drop interface for adding files to quicklinks.
+	
+	The system is parameter driven and those parameters are stored in an xml file in the current 
+	data directory.  This file is called qlmaps.xml
+
+	Errors are reported via the exit status.  Use get-last-error to check for errors.
+
+..
+	Just be aware that a backslash in rst is the escape character.  If you are reading this documentation 
+	in the source code rather than a pdf then you need to remove the escape characters in the table below.
+
+clibvdocdir-maintain-quicklink-maps 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	Use this to maintain the parameters that drive the process. 
+
+    +---------------------+------------------------------------------------------------------------+
+    |Server Location      |It is important to note that the program will do a 4gl pattern match on |
+    |                     |the contents of this field matched with the actual folder you want to   |
+    |                     |use.  The program must get a successful match to the folder             |
+    |                     |                                                                        |
+    |                     |                                                                        |
+    +---------------------+------------------------------------------------------------------------+
+    |Client Location      |For Samba implementations this folder is what the PC sees.  Whatever    |
+    |                     |is in this field must be accessible from the local machine              |
+    +---------------------+------------------------------------------------------------------------+
+	|Remove Path          |This will look like the start of the server location.  The LENGTH of    |
+    |                     |this field will be REMOVED from the start of the server location.       |
+    |                     |The remaining part from the passed folder will then be appended to the  |
+    |                     |client location in order to determine the final location.               |
+    |                     |                                                                        |
+    +---------------------+------------------------------------------------------------------------+
+    |Table                |The table that will be updated with the quicklink.                      |
+    +---------------------+------------------------------------------------------------------------+
+    |Key Code             |There are two special codes %pn (where is n is a number) and %s.        |
+    |                     |%pn refers to the PARENT of the file.  $p1 is the most immediate parent |
+    |                     |$p2 is the next parent and so on.                                       |
+    |                     |                                                                        |
+    |                     |%s is the final file name.                                              |
+    +---------------------+------------------------------------------------------------------------+
+
+	This is a critical setup phase.  Here are two examples of setup:
+
+Example one
+-----------
+
+	A simple structure where each customer has their own folder and we want to link the records
+	to the customer id (which is the folder name):
+
+	+-------------+----------------------------------------------------------------------+
+	|Field name   |Field value                                                           |
+	+=============+======================================================================+
+	|Server Loc   |/pro/data/winfiles/quicklinks/customers                               |
+	+-------------+----------------------------------------------------------------------+
+	|Client loc   |\\\\mydemo\\quicklinks                                                |
+	+-------------+----------------------------------------------------------------------+
+	|Remove Path  |/pro/data/winfiles/quicklinks                                         |
+	+-------------+----------------------------------------------------------------------+
+	|Table        |deb-master                                                            |
+	+-------------+----------------------------------------------------------------------+
+	|Key Code     |%p1                                                                   |
+	+-------------+----------------------------------------------------------------------+
+	
+	The magic is in the key code field.  This determines how the clib will determine the key from the file name.  
+	Using the above example, imagine we have the file:
+
+	/pro/data/winfiles/quicklinks/customers/C0002/accnt_appl.docm
+
+	The key to the deb-master table is the accountcode and this can be found as the first parent of 
+	the file name.
+
+Example Two
+-----------
+
+
+	A Complex Structure where each customer has their own folder and there is a subfolder
+	for each job and below that a folder for each log.
+
+	+-------------+----------------------------------------------------------------------+
+	|Field name   |Field value                                                           |
+	+=============+======================================================================+
+	|Server Loc   |/pro/data/vgl/quicklinks/customers/[A-Z0-9]*\/jobs/[A-Z0-9]*\/logs    |
+	+-------------+----------------------------------------------------------------------+
+	|Client loc   |\\\\vgakux01\\quicklinks                                              |
+	+-------------+----------------------------------------------------------------------+
+	|Remove Path  |/pro/data/vgl/quicklinks                                              |
+	+-------------+----------------------------------------------------------------------+
+	|Table        |tc-job-log                                                            |
+	+-------------+----------------------------------------------------------------------+
+	|Key Code     |%p2%s_                                                                |
+	+-------------+----------------------------------------------------------------------+
+	
+	Using the above example, imagine we have the file:
+
+	/pro/data/vgl/quicklinks/customers/2CHEAP/jobs/2CHEAPIMP/logs/9_Variation2.docm
+
+	The key to tc-job-log is job code followed by log number.
+
+	Therefore the key extracted from this file name is the job code (%p2 is the second parameter from the end) and the
+	second key (the log number) is the first part of the file name up to the first underscore.
+
+	Parameters
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |Boolean    |Allow the user to view the files in the folders.        |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvdocdir-view-dir 
+~~~~~~~~~~~~~~~~~~~~
+
+	Use this routine to open a file explorer window (embedded with the thin client, separate window
+	with the web client) to allow users to drag and drop files into the folder.
+
+	At the end of the routine the folder contents are examined and the quicklinks 
+	entries are updated as per the rules in the setup.
+
+	It is important that users DO NOT Navigate away from the selected folder.  Unfortunately
+	you cannot stop the users from doing that so put up a warning or train them.
+	Quicklinks will only be updated for the folder that is opened!.  If the user navigates away
+	the quicklink updates will be missed.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|  In       |String 1k  |Path to the selected folder                             |
+	|           |           |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|  In       |Boolean    |True if the clib is allowed to create the folder if it  |
+	|           |           |does not exist                                          |
+	+-----------+-----------+--------------------------------------------------------+
+
+*/
+
+#include "../include/bmsdef.spl"		
+#include "../include/i8proglogparam.spl"
+
+#define WEB_CLIENT_WITH_LOCAL_AGENT	(get-system-metrics(7) = 2)
+#define FILEPIC  pic x(256) type string
+#define FOLDERPIC pic x(1024) type string
+#define NAME_OF_MAPS_FILE "qlmaps.xml"
+
+object text-file 
+	type is text
+	record is 
+		tf-line							FOLDERPIC
+	end-record
+
+object folder-contents
+	type is memory
+	record is
+		fc-file							FILEPIC
+		fc-before-flag					type boolean
+		fc-after-flag					type boolean
+	end-record
+	key is fc-file unique
+
+object quicklink-maps
+	type is memory
+	record is
+		qm-seq							type number
+		qm-server-folder				FOLDERPIC
+		qm-client-folder				FOLDERPIC
+		qm-server-remove				FOLDERPIC
+		// this bit is removed from the server folder and then remaining bit
+		// is added to the client path
+		qm-table						like ql-table
+		qm-key-code						pic x(100)
+		//  %sx - up to first separator where x is the separtor
+		//  %pn - n'th parent folder from the end eg p1 is this parent,
+		//  p2 is the previous parent and so on.
+		//  These can then be mixed and matched 
+	end-record
+	key is qm-seq unique
+
+field 
+	ws-last-error						pic x(1024) type string
+	ws-allow-view-files					type boolean
+
+mode md-view-files
+	prompt "Files"
+	help "View the linked files in this folder"
+	when ws-allow-view-files
+mode md-reseq
+	prompt "Resequence"
+	help "Resequence all the records starting at 1"
+
+procedure library-init
+	get system-control first
+	on error
+		abort "No System Control"
+	endon
+	do i8proglogparam-write-log parameters are "clibvdocdir"
+	do load-xml parameters are NAME_OF_MAPS_FILE
+end-procedure
+
+procedure main
+	get system-control first
+	on error
+		abort "No System Control"
+	endon
+	do load-xml parameters are NAME_OF_MAPS_FILE
+	do testcases	
+end-procedure
+
+procedure clibvdocdir-get-last-error export
+returning
+	lr-message							like ws-last-error
+	set lr-message = ws-last-error
+end-procedure
+
+procedure load-xml
+parameters are 
+	lp-filename							FILEPIC
+local
+ 	lf-doc								type XML-HANDLE
+	lf-root								type XML-HANDLE
+	lf-record							type XML-HANDLE
+	lf-field							type xml-handle
+	//
+	close quicklink-maps and remove
+	on error
+	endon
+	open quicklink-maps temporary
+	set lf-doc = xml-parse-file(lp-filename)
+	set lf-root = xml-get-root-node(lf-doc)
+	set lf-record = xml-get-first-child-node(lf-root)
+	while lf-record <> 0
+		initialise quicklink-maps
+		set lf-field = xml-get-first-child-node(lf-record)
+		while lf-field <> 0
+			switch xml-node-name(lf-field)
+			case "qm-seq"
+				set qm-seq = num(xml-node-string(lf-field))
+			case "qm-server-folder" 
+				set qm-server-folder = xml-node-string(lf-field)
+			case "qm-client-folder" 
+				set qm-client-folder = xml-node-string(lf-field)
+			case "qm-server-remove" 
+				set qm-server-remove = xml-node-string(lf-field)
+			case "qm-table" 
+				set qm-table = xml-node-string(lf-field)
+			case "qm-key-code" 
+				set qm-key-code = xml-node-string(lf-field)
+			end-switch
+			set lf-field = xml-get-next-node(lf-field)
+		end-while
+		insert quicklink-maps
+		set lf-record = xml-get-next-node(lf-record)
+	end-while
+end-procedure
+
+procedure save-xml
+parameters are 
+	lp-filename							FILEPIC
+local
+ 	lf-doc								type XML-HANDLE
+	lf-root								type XML-HANDLE
+	lf-record							type XML-HANDLE
+	//
+	set lf-doc = xml-new-document(spaces,"qlpointers")
+	set lf-root = xml-get-root-node(lf-doc)
+	select *
+		from quicklink-maps
+	detail
+		set lf-record = xml-add-child-node(lf-root,"record",spaces)
+		if xml-add-child-node-text(lf-record,"qm-seq",spaces,str(qm-seq)) endif
+		if xml-add-child-node-text(lf-record,"qm-server-folder",spaces,qm-server-folder) endif
+		if xml-add-child-node-text(lf-record,"qm-client-folder",spaces,qm-client-folder) endif
+		if xml-add-child-node-text(lf-record,"qm-server-remove",spaces,qm-server-remove) endif
+		if xml-add-child-node-text(lf-record,"qm-table",spaces,qm-table) endif
+		if xml-add-child-node-text(lf-record,"qm-key-code",spaces,qm-key-code) endif
+		if xml-free-node-handle(lf-record) endif
+	end-select
+	if xml-save-as-file(lf-doc,lp-filename,spaces,2) endif
+	if xml-free-node-handle(lf-root) endif
+	if xml-free-node-handle(lf-doc) endif
+end-procedure
+
+/*
+procedure clibvdocdir-parse-samba export
+returning
+	lr-server-path						FILEPIC occurs 100
+	lr-client-path						FILEPIC occurs 100
+	//
+	open text-file
+		file is "/etc/samba/smb.conf"
+	on error
+		exit 1
+	endon
+	// TODO : read the file and build the array
+end-procedure
+*/
+
+screen clibvdocdir-maintain-quicklink-maps export
+parameters
+	lp-allow-view						type boolean
+	window
+	select * from quicklink-maps
+	allowed search entry correct remove duplicate md-view-files md-reseq
+	datagrid occurs 22
+before	
+	do load-xml parameters are NAME_OF_MAPS_FILE
+	set ws-allow-view-files = lp-allow-view
+detail
+	if screenmode = md-view-files
+		do clibvdocdir-view-dir parameters are qm-server-folder TRUE
+		if exit-status != 0
+			message-box param-text("<<P1>><<BR>><<p2>>"
+				,"An Error Occurred"
+				,ws-last-error)
+				title is "Document Mapping"
+				message-buttons MSG_BOX_OK
+				icon MSG_BOX_WARNING
+				optional
+			exit 1
+		endif
+	endif
+	if screenmode = md-reseq
+		do reseq-maps parameters are 100000
+		do reseq-maps parameters are 1
+		reselect
+		refresh review
+	endif
+	accept qm-seq @1,1 pic z(4).99
+		title "Sequence"
+		when screenmode in { entry search correct duplicate }
+		show-value
+	validations
+		if qm-seq > 99999
+			Message "You cannuse numbers above 99999"
+			reenter
+		endif
+	end-validations
+	accept qm-server-folder @1,2 pic x(20)
+		title "Server Loc"
+		help "Pattern Matching Allowed  eg: blah\?\blah or blah\[A-Za-z0-9]*\"
+	accept qm-client-folder @1,3 pic x(20)
+		title "Client loc"
+	accept qm-server-remove @1,4 pic x(20)
+		title "Remove Path"
+		help "this string is removed from the front of the server path and the remainder added to the client path"
+	accept qm-table @1,5 pic x(20)
+		title "Table"
+	accept qm-key-code @1,6 pic x(20)
+		title "Key Code"
+		help "Very important - see clib documentation"
+after
+	do save-xml parameters are NAME_OF_MAPS_FILE
+end-screen
+
+procedure reseq-maps
+parameters
+	lp-start						like qm-seq
+local
+	lf-loop-brake					type number
+	lf-loop-counter					type number
+	select lf-loop-brake = count(*)
+		from quicklink-maps
+	end-select
+	select *
+		from quicklink-maps
+		order by qm-seq
+	detail
+		set lf-loop-counter += 1
+		if lf-loop-counter > lf-loop-brake
+			exit
+		endif
+		set qm-seq = lp-start
+		update quicklink-maps
+		set lp-start += 1
+	end-select
+endprocedure
+
+procedure build-folder-contents
+parameters
+	lp-folder							FOLDERPIC
+	lp-before-after						pic x
+returning
+	lr-ok								type boolean
+	lr-message							type string
+	set lr-ok = TRUE
+	if lp-before-after not in { 'A' 'B' }
+		set lr-ok = FALSE
+		set lr-message = "Parameter 2 must be 'A' or 'B' "
+		exit 1
+	endif
+	if not start-dir-search(lp-folder,"?*")
+		set lr-ok = FALSE
+		set lr-message = "Unable to search folder"
+		exit 1
+	endif
+	repeat
+		set fc-file = next-dir-entry()
+	until fc-file = spaces
+		if fc-file not in ( "." ".." )
+			if file-exists(str-concat(lp-folder,"/",fc-file),FALSE) <> 2 // do not process directories
+				get folder-contents
+					on index fc-file
+					key is fc-file
+				on error ENOREC
+					if lp-before-after = "A"
+						set fc-after-flag = TRUE
+					else
+						set fc-before-flag = TRUE
+					endif
+					insert folder-contents
+					on error
+						message "Unable to insert record"
+					endon
+				else
+					if lp-before-after = "A"
+						set fc-after-flag = TRUE
+					else
+						set fc-before-flag = TRUE
+					endif
+					update folder-contents
+					on error
+						message "Unable to update record"
+					endon
+				endon
+			endif
+		endif
+	end-repeat
+	if finish-dir-search() endif
+end-procedure
+
+procedure get-client-from-server
+parameters
+	lp-server-folder					FOLDERPIC
+returning
+	lr-client-folder					FOLDERPIC
+	lr-seq								like qm-seq
+local
+	i									type number
+	//
+	select *
+		from quicklink-maps
+		order by qm-seq
+	detail
+		if pattern(lp-server-folder, qm-server-folder) <> 0
+			// then we have found it
+			set lr-seq = qm-seq
+			set lr-client-folder = qm-client-folder
+			string lp-server-folder deleting 1 to strlen(qm-server-remove) - 1
+			if lp-server-folder <> spaces
+				if substring(lp-server-folder,strlen(lp-server-folder),strlen(lp-server-folder)) not in ( "/" "\")
+					string lr-client-folder appending "\"
+				endif
+				string lr-client-folder appending lp-server-folder
+			endif
+			// reverse slashes
+			for i = 1 to strlen(lr-client-folder) 
+				if substring(lr-client-folder,i,i) =  "/"
+					string lr-client-folder replacing "\" at i
+				endif
+			endfor
+			exit
+		endif
+	end-select
+end-procedure
+
+procedure clibvdocdir-view-dir export
+parameter 
+	lp-server-folder					FOLDERPIC // server path
+	lp-create-flag						type boolean
+local
+	lf-cmd								pic x(1024) type string
+	lf-client-folder					FOLDERPIC
+	lf-ok								type boolean
+	lf-message							like ws-last-error
+	//
+	switch file-exists(lp-server-folder,false)  
+	case 1
+		set ws-last-error = "Folder is a file!"
+		exit 1
+	case 0
+		if lp-create-flag = FALSE
+			set ws-last-error = "Folder does not exist"
+			exit 1
+		else
+			set lf-cmd = concat("sudo -u psd mkdir -p " lp-server-folder  )
+			command "sh" parameters are "-c" lf-cmd
+			set lf-cmd = concat("sudo chmod g+w " lp-server-folder  )
+			command "sh" parameters are "-c" lf-cmd
+			if file-exists(lp-server-folder,FALSE) <> 2
+				set ws-last-error = concat("Unable to create folder " lp-server-folder )
+				exit 1
+			endif
+		endif
+	end-switch
+	open folder-contents temporary
+	on error
+		set ws-last-error = "Unable to create monitoring file"
+		exit 1
+	endon
+	do build-folder-contents
+		parameters are lp-server-folder "B"
+	do get-client-from-server 
+		parameters are lp-server-folder 
+		returning lf-client-folder
+	if WEB_CLIENT_WITH_LOCAL_AGENT
+		do open-dir-web show
+			parameters are lf-client-folder
+			returning lf-ok lf-message
+		if not lf-ok
+			set ws-last-error = lf-message
+			exit 1
+		endif
+	else
+		do view-dir entry once 
+			parameters are lf-client-folder
+			returning lf-ok lf-message
+		if not lf-ok
+			set ws-last-error = lf-message
+			exit 1
+		endif
+	endif
+	// check the folder exists and create if possible
+	do build-folder-contents
+		parameters are lp-server-folder "A"
+	do update-quicklinks parameters are lp-server-folder
+end-procedure
+
+/*
+screen open-dir-web
+parameter 
+	lp-client-folder					FOLDERPIC // server path
+returning
+	lr-ok								type boolean
+	lr-message							type string pic x(512)
+	lf-dummy							pic x
+	window
+		window-position 5
+	responsive
+detail
+	screen-group
+		width 12
+		display "Click below to open the folder to drop attachments"
+			foregound prompts
+		display "When complete exit this screen to update quicklinks"
+			foregound prompts
+	option lf-dummy 
+		bitmap concat(getenv('BMS')'/images/cabinet.gif')
+	detail
+		command lp-client-folder external
+	end-option
+	end-screen-group
+end-screen
+*/
+
+procedure open-dir-web
+parameter 
+	lp-client-folder					FOLDERPIC // server path
+returning
+	lr-ok								type boolean
+	lr-message							type string pic x(512)
+//
+	command lp-client-folder external
+	message-box param-text("<<P1>><<BR>><<p2>><<BR>><<p3>><<BR>><<p4>><<BR>><<p5>>"
+		,"A Windows Explorer Session has been started."
+		,"Drag/Drop files into the opened window."
+		,"Do NOT navigate from the opened folder"
+		,"(This is most important)"
+		,"Click ok when complete to update quicklinks"
+		)
+		title is "Attachment Manager"
+		message-buttons  MSG_BOX_OK
+		icon MSG_BOX_INFORMATION
+	set lr-ok = TRUE
+	set lr-message = spaces
+end-procedure
+
+
+screen  view-dir
+parameter 
+	lp-client-folder					FOLDERPIC // server path
+returning
+	lr-ok								type boolean
+	lr-message							type string pic x(512)
+local 
+	id									type ole-interface
+	ret									pic s9(10)
+	//
+	window @1,1 to @26,90
+		title concat('Contents of : ',lp-client-folder)
+	//
+    allowed entry
+    form-entry
+before
+	//
+	set lr-ok = TRUE
+	set lr-message = spaces
+	// check its in the quicklink maps file
+	set id = ole-create-control ("Shell.Explorer", 3, 2, 23, 88)
+	if id = 0
+		message "Can't create control - "
+				ole-error-description (ole-status())
+		exit
+	endif
+	if not ole-call-method (id, "Navigate2", ret, lp-client-folder)
+		message "Navigate2 failed - "
+			ole-error-description (ole-status())
+	endif
+detail
+    accept lp-client-folder @1,30 pic x(50) 
+		title "Directory:"
+		read-only
+        default is lp-client-folder
+		showvalue
+    confirm auto
+    confirmed
+		pause
+    endconfirm
+after
+    if ole-release (id)
+    endif
+endscreen
+
+/*
+procedure check-create-folder
+parameters
+	lp-server-folder					FOLDERPIC // server path
+returning
+	lr-ok								type boolean
+end-procedure
+*/
+
+procedure update-quicklinks
+parameters
+	lp-server-folder					FOLDERPIC // server path
+returning 
+	lr-ok								type boolean
+	lr-message							pic x(512) type string
+local
+	lf-path-array						FOLDERPIC occurs 50
+	lf-client-folder					FOLDERPIC // client path
+	lf-seq 								like qm-seq
+	lf-array-max						type number
+	lf-key								like qm-key-code
+	lf-area								like ql-data-area
+	//
+	do get-client-from-server
+		parameters are lp-server-folder
+		returning lf-client-folder lf-seq
+	//
+	get quicklink-maps
+		on index qm-seq 
+		key is qm-seq
+	on error
+		set lr-ok = FALSE
+		set lr-message = "unable to locate map record"
+		exit 1
+	endon
+	//
+	do get-array-from-path parameters are lp-server-folder
+		returning lf-path-array lf-array-max
+	do get-data-area returning lf-area
+	// Now build the key from the code in qm-code-key
+	select * 
+		from folder-contents
+	detail
+		do get-key parameters are lf-path-array lf-array-max fc-file
+				qm-key-code
+			returning lf-key
+		if fc-after-flag
+			do add-update-quicklinks parameters are 
+				lf-client-folder					
+				fc-file
+				lf-area	
+				qm-table
+				lf-key
+		else
+			do remove-quicklinks parameters are 
+				lf-client-folder					
+				fc-file
+				lf-area	
+				qm-table
+				lf-key
+		endif
+	end-select
+end-procedure
+
+procedure get-data-area
+returning
+	lr-area								like ql-data-area
+local
+	lf-folder-array						FOLDERPIC occurs 50
+	lf-max								type number
+	//
+	do get-array-from-path parameters are dir() 
+		returning lf-folder-array lf-max
+	set lr-area = lf-folder-array[lf-max]
+end-procedure
+
+procedure add-update-quicklinks
+parameters
+	lp-client-folder					FOLDERPIC
+	lp-file								FILEPIC
+	lp-area								like ql-data-area
+	lp-table							like ql-table
+	lp-key								like ql-key
+local
+	lf-count							type number
+	lf-seq								type number
+	lf-sql-cf-path						like ql-path
+	//
+	set lf-sql-cf-path = str-concat(lp-client-folder , "\" , lp-file)
+	select lf-count = count(*) 
+		from quick-links
+		where ql-data-area = :lp-area
+		and ql-path = lf-sql-cf-path
+		and ql-table = :lp-table
+		and ql-key = :lp-key
+	end-select
+	if lf-count = 0
+		select lf-seq = max(ql-sequence)
+			from quick-links
+			where ql-data-area = :lp-area
+			and ql-table = :lp-table
+			and ql-key = :lp-key
+		end-select
+		set lf-seq += 1
+		initialise quick-links
+		set ql-data-area = lp-area
+		set ql-table = lp-table
+		set ql-key = lp-key
+		set ql-sequence = lf-seq
+		set ql-path = str-concat(lp-client-folder "\" lp-file)
+		set ql-description = lp-file
+		set ql-code = "QM"
+		set ql-created-by-user = login-id
+		set ql-date-time = sys-time()
+		set ql-user-only-alpha4-1 = "QM"
+		insert quick-links
+		on error
+			message error-description(file-status())
+		endon
+	endif
+end-procedure
+	
+procedure remove-quicklinks
+parameters
+	lp-client-folder					FOLDERPIC
+	lp-file								FILEPIC
+	lp-area								like ql-data-area
+	lp-table							like ql-table
+	lp-key								like ql-key
+local
+	lf-sql-cf-path						like ql-path
+	//
+	set lf-sql-cf-path = str-concat(lp-client-folder , "\" , lp-file)
+	select *
+		from quick-links
+		where ql-data-area = :lp-area
+		and ql-table = :lp-table
+		and ql-key = :lp-key
+		and ql-path = :lf-sql-cf-path
+		and ql-code = "QM"
+		and ql-user-only-alpha4-1 = "QM"
+		for update
+	detail
+		delete quick-links
+		on error
+		endon
+	end-select
+end-procedure
+
+procedure get-key
+parameters are
+	lp-folders							FOLDERPIC occurs 50
+	lp-array-max						type number
+	lp-file								FILEPIC
+	lp-key-code							like qm-key-code
+returning
+	lr-key								like ql-key
+local
+	lf-offset							type string
+	lf-separator						pic x
+//
+	while lp-key-code <> spaces
+		if substring(lp-key-code,1,1) = "%"
+			// then we  have a code we have to determine
+			string lp-key-code deleting 1
+			if uppercase(substring(lp-key-code,1,1)) = "P"
+				string lp-key-code deleting 1
+				// then it is the nth parent folder - starting at the end
+				set lf-offset = spaces
+				while valid-number(substring(lp-key-code,1,1))
+				and lp-key-code <> spaces
+					string lf-offset appending substring(lp-key-code,1,1)
+					string lp-key-code deleting 1
+				end-while
+				string lr-key appending lp-folders[lp-array-max - num(lf-offset) + 1]
+			elseif uppercase(substring(lp-key-code,1,1)) = "S"
+				// then the following bit is the leading part of the file name
+				// to the separator
+				string lp-key-code deleting 1
+				set lf-separator = substring(lp-key-code,1,1)
+				string lp-key-code deleting 1
+				// now add the bit from the file
+				if not pattern(lp-file,lf-separator)
+					string lr-key appending lp-file
+				else
+					string lr-key appending substring(lp-file,1,pattern(lp-file,lf-separator) - 1)
+				endif
+			endif
+		else
+			string lr-key appending substring(lp-key-code,1,1)
+			string lp-key-code deleting 1
+		endif
+	end-while
+end-procedure
+
+procedure get-array-from-path
+parameters
+	lp-path								FOLDERPIC
+returning
+	lr-folders							FOLDERPIC occurs 50
+	lr-max-array						type number
+local
+	i									type number
+	//
+	set i = 1
+	set lr-folders[*] = spaces
+	if substring(lp-path,1,1) = "/"
+		string lp-path deleting 1 
+	endif
+	while lp-path <> spaces
+		if substring(lp-path,1,1) not in ( "\" "/")
+			string lr-folders[i] appending substring(lp-path,1,1)
+		else
+			set i += 1
+		endif
+		string lp-path deleting 1
+	endwhile
+	set lr-max-array = i
+end-procedure
+
+menu testcases
+	no-hide
+	window
+	title "clibvdocdir Maintenance Mode"
+detail
+	option "Maintain Parameters" @1,1
+		do clibvdocdir-maintain-quicklink-maps parameters TRUE
+	option "Test Customers" @2,1
+		help "must be setup for /pro/data/winfiles/quicklinks/customers"
+		do clibvdocdir-view-dir parameter are "/pro/data/winfiles/quicklinks/customers/C0002" FALSE
+end-menu

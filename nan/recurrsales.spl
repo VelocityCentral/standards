@@ -1,0 +1,67 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program :  update dates on recurring sales orders
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2019
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: nan/sales.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 01Jun19  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+ 
+field
+	ws-function-title						type string
+
+procedure main
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+//	do i8secabt-check-abort
+//		parameters are sys-consolidation-division login-id() "ZUSR" "R004"
+//		returning ws-function-title 
+	do i8proglog-write-log
+	do doit
+	message "complete"
+end-procedure
+
+procedure doit
+local
+	i							type number
+	select *
+		from sales-order
+		where so-order-type-code = "P"
+		for update
+	detail
+		set so-order-date = today() - day(today()) + 1
+		set so-delivery-date = so-order-date
+		update sales-order
+	end-select
+//
+	select *
+		from recurring-schedule-master
+		for update
+	detail
+		set rsm-recurr-start-date = today() - day(today()) + 1
+		set rsm-recurr-end-date = add-months(rsm-recurr-start-date,12,true) - 1
+		set i = pattern(rsm-recurrence-text ,  "effective")
+		if i != 0
+			string rsm-recurrence-text deleting i + 10
+			string rsm-recurrence-text appending concat(
+				format-picture(rsm-recurr-start-date, "dd-mmm-yyyy")
+				" until "
+				format-picture(rsm-recurr-end-date, "dd-mmm-yyyy")
+				".")
+		endif
+		update recurring-schedule-master
+	end-select
+end-procedure

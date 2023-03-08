@@ -1,0 +1,28 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : include file for Velocity quicklink additions
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2018
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: quicklinks/ivqlauto.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 19Mar18  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+
+
+#ifndef IVQLAUTO
+#define IVQLAUTO
+
+#define IVQLAUTO_FILE_FOUND 10
+#define IVQLAUTO_NO_PATH_DEFN 15
+#define IVQLAUTO_NO_OBJ_KEYS 20
+#define IVQLAUTO_LINK_ESTABLISHED 90
+#define IVQLAUTO_LINK_EXISTS 91
+
+#endif

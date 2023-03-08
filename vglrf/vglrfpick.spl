@@ -1,0 +1,1867 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : rf picking for a type one warehouse
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2011
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: vglrfpick.spl
+//
+// The basic process is as follows:
+// Scan an order number that is printed on a picking slip  (rf-pick)
+// Build a file of lines that need to be scanned (reqd-lines)
+// There is one record for each line on the file.
+// Call scanset to loop thorugh each required line and prompt the user for the
+// products that need to be scanned
+// 		Call process-scans for each requried line.  This routine writes
+// 		records into a single file called scanset.  There is one record for
+// 		each time the user scans a barcode.
+//
+// 		At the end of process-scans call process-scanset which summarises
+// 		these entries and updates the reqdlines file ready for updating the
+// 		order.
+//
+// 	After all lines have been scanned, display any shortages and prompt the
+// 	user to rescan or to accept the variance.
+//
+// 	After shortage have been processed call process-the-order to update all
+// 16Jul15	wxb Log 9	Fix issue in code not updating serial numbers
+// 25Mar15	rjb Log SER	Serial Tracking
+// 24Mar15	rjb Log SER	Added Serial No processing
+// 	the qtys and set the status of the order
+//
+// 	After the complete-order-menu add any memo lines and print the invoice.
+//
+// Modification History
+// Date		Who	SDR		What
+// 07jul14	wxb	tax		Fix issue with Tax Calc
+// 13Jan11	rayb		written
+// 21Mar15	rayb SER	added serial no scanning.  Note that we ignore the 
+// 						selected serial numbers that the order entry operator 
+// 						may have selected - this funciton is not supported.
+// 						We only check that the correct number of serials have
+// 						been scanned.
+////////////////////////////////////////////////////////////////////////////////
+
+// TODO:  Add handling locking of orders
+
+//#define DEBUG(A) \
+//	if login-id() = "rayb" \
+//		message A \
+//	endif
+
+#define SCREENSIZE @ws-max-rows,ws-max-cols
+
+#include "../include/i8secabt.spl" 
+#include "../include/i8secok.spl" 
+#include "../include/i8proglog.spl" 
+#include "../so/i50headso.spl"
+#include "../include/i5linecalc.spl"
+#include "../include/i8ologdesc.spl"
+#include "../include/i85codes.spl"
+#include "../include/i5sostatii.spl"
+#include "../include/i8rsstdf.spl"
+#include "ixmlparas.spl"
+
+link "clib/clib500"
+link "clib/clibtaxso"								//wxb log tax
+link "vglrf/vglrfclib"
+
+field 
+	ws-function-title					type string
+	ws-max-cols							type number
+	ws-max-rows							type number
+	ws-order-short-shipped				type boolean
+	ws-start-datetime					type datetime
+	ws-end-datetime						type datetime
+	ws-despatch-program					like sys-description
+	ws-invoice-program					like sys-description
+	// FLAGS that control how the program operates
+	ws-scan-courier-detail				pic x // YES NO
+	ws-can-always-override-qty			pic x // YES NO
+	ws-add-trace-as-memo				pic x // YES - add a memo line with the barcode tracing data at completion
+	ws-shipped-or-ordered-qty			pic x // S) prompt user to scan shipped qty  O) prompt user to scan ordered qty
+	ws-use-alphas-for-control			pic x // YES NO
+	ws-completion-status				pic xx // status order should be set to at completion
+	ws-print-despatch					pic x // YES - print despatch docket at end of process
+	ws-print-invoice					pic x // YES - print invoice at end of process
+	ws-print-label						pic x // YES - print label at end of process
+	ws-allow-restart					pic x // YES - allow user to process lines that have not previously been scanned
+	// Note that this option uses sol-user-only-num1 to record the number of
+	// scans.  The restart option then only processes lines where this is set
+	// to 0.
+	ws-hold-reason-code					pic xx
+	// When the user chooses to exit the order and hold, what reason code is
+	// used
+	//
+	ws-ZVRF-M003						type boolean
+
+//
+// reqdlines is built at the beginning of processing the order.  It contains
+// all the lines we think need to be scanned.
+//
+object reqdlines
+	type is memory
+	record is
+		rl-sol-line-seq					like sol-line-seq
+		rl-stock-code					like stock-code
+		rl-qty							type number
+		rl-location						like whse-bin-location
+		// rl-scan-qty is determined at the end of the process to hold the qty
+		// scanned.
+		rl-scan-qty						like rl-qty 
+		// rl-scanset-records is the number of scanset records that were
+		// processed.  this is used at the end to check all the lines were
+		// scanned.
+		rl-scanset-records				type number
+	end-record
+	key is rl-location rl-sol-line-seq
+	key is rl-stock-code
+	key is rl-sol-line-seq
+
+object reqdlines-copy like reqdlines
+
+// wxb log 9-start-------------------------------------------------------------
+object req-serials
+	type memory
+	record is
+		rl-sol-line-seq
+		rl-stock-code
+		rl-serial-no					like serial-no
+	endrecord
+	key is rl-sol-line-seq rl-stock-code rl-serial-no
+// wxb log 9-end---------------------------------------------------------------
+
+// 
+// The scanset file has a separate record on it each time the user processes a
+// scan.  This could either be a single run trigger pull or it could be a pull
+// followed by the entering of a qty
+//
+object scanset
+	type is memory
+	record is
+		ss-scan-number					type number
+		ss-sol-line-seq					like rl-sol-line-seq
+		ss-stock-code					like stock-code
+		ss-qty							type number
+// rjb log SER-start-------------------------------------------------------------
+		ss-serial-no					like serial-no
+// rjb log SER-end---------------------------------------------------------------
+	end-record
+	key is ss-scan-number unique
+
+#ifdef DEBUG
+object debug-log
+	type is text
+	record
+		dl-text							pic x(1024)
+	end-record
+#endif
+
+mode md-rescan
+	prompt "1)Rescan"
+	help "Rescan this line"
+mode md-exit
+	prompt "2)Exit"
+	help "Exit the screen"
+mode md-hold
+	prompt "2)Hold"
+	help "Hold the Order"
+mode md-process-short
+	prompt "3)Proc"
+	help "Allow processing of short lines"
+
+//--------------General use routines----------------------------------------------
+
+procedure main 
+#ifdef DEBUG
+	open debug-log
+		file is "/tmp/vglrfpick.log"
+		truncate permanent
+#endif
+	get system-control first 
+	on error
+		abort "No Control Record"
+	endon
+	do i8secabt-check-abort
+		parameters are sys-consolidation-division login-id() "ZVRF" "T001"
+		returning ws-function-title 
+	do i8proglog-write-log
+	do vglrfclib-screen-size 
+		returning ws-max-cols ws-max-rows
+	do load-paras-from-xml
+//
+// Check if we are maintaining parameters
+// You must be running a full version of proclient on a normal screen
+//
+
+	if (uppercase(get-env("PROCLIENT")) = "PROCLIENT" 
+		or uppercase(get-env("PROTERM")) = "PROCLIENT" 
+		or operating-system() = 'WINDOWS')
+	and ws-max-cols >= 80 
+	and ws-max-rows >= 24
+	and pattern(get-param(1),"-configure" ) > 0
+		do i8secok-check-ok parameters
+			sys-consolidation-division login-id() "ZVRF" "M003"
+			returning ws-ZVRF-M003
+		if ws-ZVRF-M003
+			do get-save-paras entry once
+		else
+			message "You do not have access to configure picking"
+		endif
+		if (get-param(1) <> "-configureandrun")  // use this for testing
+			exit
+		endif
+	endif
+//
+// Run the program
+//
+	get system-table
+		key is 'PR' 'DESPATCH'
+	on error
+		set ws-despatch-program = "so/m54custom"
+	else
+		set ws-despatch-program = sys-description
+	endon
+	get system-table
+		key is 'PR' 'INVOICE'
+	on error
+		set ws-invoice-program = "so/m54custom"
+	else
+		set ws-invoice-program = sys-description
+	endon
+	do rf-pick entry 
+end-procedure
+
+procedure load-paras-from-xml
+local
+	lf-ok								type boolean
+	lf-fld-name							type string
+	lf-fld-value						type string
+	do ixmlparas-restore-open returning lf-ok
+	// If it wasn't ok then there weren't any so set the defaults
+	if not lf-ok
+		set ws-scan-courier-detail = YES
+		set ws-can-always-override-qty = NO
+		set ws-shipped-or-ordered-qty = "S"
+		set ws-use-alphas-for-control = YES
+		set ws-add-trace-as-memo = YES
+		set ws-completion-status = "70"
+		set ws-print-despatch = NO
+		set ws-print-invoice = NO
+		set ws-print-label = NO
+		set ws-allow-restart = NO
+		set ws-hold-reason-code = spaces
+		exit
+	endif
+	repeat 
+		do ixmlparas-restore-getnext
+			returning lf-ok lf-fld-name lf-fld-value
+	until not lf-ok
+		switch lf-fld-name
+		case "ws-scan-courier-detail"
+			set ws-scan-courier-detail = lf-fld-value
+		case "ws-can-always-override-qty"
+			set ws-can-always-override-qty = lf-fld-value
+		case "ws-shipped-or-ordered-qty"
+			set ws-shipped-or-ordered-qty = lf-fld-value
+		case "ws-use-alphas-for-control"
+			set ws-use-alphas-for-control = lf-fld-value
+		case "ws-add-trace-as-memo"
+			set ws-add-trace-as-memo = lf-fld-value
+		case "ws-completion-status"
+			set ws-completion-status = lf-fld-value
+		case "ws-print-despatch"
+			set ws-print-despatch = lf-fld-value
+		case "ws-print-invoice"
+			set ws-print-invoice = lf-fld-value
+		case "ws-print-label"
+			set ws-print-label = lf-fld-value
+		case "ws-allow-restart"
+			set ws-allow-restart = lf-fld-value
+		case "ws-hold-reason-code"
+			set ws-hold-reason-code = lf-fld-value
+		end-switch
+	end-repeat
+	do ixmlparas-restore-close
+end-procedure
+
+procedure save-paras
+	do ixmlparas-save-open
+	do ixmlparas-save-write parameters are "ws-scan-courier-detail"
+	do ixmlparas-save-write parameters are "ws-can-always-override-qty"
+	do ixmlparas-save-write parameters are "ws-shipped-or-ordered-qty"
+	do ixmlparas-save-write parameters are "ws-use-alphas-for-control"
+	do ixmlparas-save-write parameters are "ws-add-trace-as-memo"
+	do ixmlparas-save-write parameters are "ws-completion-status"
+	do ixmlparas-save-write parameters are "ws-print-invoice"
+	do ixmlparas-save-write parameters are "ws-print-despatch"
+	do ixmlparas-save-write parameters are "ws-print-label"
+	do ixmlparas-save-write parameters are "ws-allow-restart"
+	do ixmlparas-save-write parameters are "ws-hold-reason-code"
+	do ixmlparas-save-close
+end-procedure
+
+screen get-save-paras
+local
+	lf-qty-radio						type number
+	lf-completion-radio					type number
+// this is not an rf window
+	window
+	title "RF Picking Configuration Parameters"
+	form-entry
+before
+	// I use variables for the radio button positions because
+	// I want them to appear after the check-boxes and every time 
+	// I add a new check box I have to shift everything around.  This makes it
+	// a lot easier
+	set lf-qty-radio = 10
+	set lf-completion-radio = 13
+detail
+	check-box ws-add-trace-as-memo @1,50
+		values YES NO
+		right-coordinate
+		default ws-add-trace-as-memo
+		title "Add scan details as a memo to the order"
+		help "Add a memo line to each order with the date, time and user details of the order picking process"
+	end-check-box 
+	check-box ws-scan-courier-detail @2,50
+		values YES NO
+		right-coordinate
+		default ws-scan-courier-detail
+		title "Prompt to scan courier details at conclusion"
+		help "After picking add a menu option to allow the user to scan courier details"
+	end-check-box 
+	check-box ws-use-alphas-for-control @3,50
+		values YES NO
+		right-coordinate
+		default ws-use-alphas-for-control
+		title "Use Alpha characters for control codes"
+		help "When Selected Control fields are alpha characters, otherwise numeric characters (when entering lines)"
+	end-check-box 
+	check-box ws-can-always-override-qty @4,50
+		values YES NO
+		right-coordinate
+		default ws-can-always-override-qty
+		title "Can always override the qty"
+		help "The user can always override the qty - not dependant on item master flag"
+	end-check-box 
+	check-box ws-print-label @5,50
+		values YES NO
+		right-coordinate
+		default ws-print-label
+		when FALSE // not yet implemented
+		title "Print Label at Completion"
+		help "Print desptach labels at completion"
+	end-check-box 
+	check-box ws-print-despatch @6,50
+		values YES NO
+		right-coordinate
+		default ws-print-despatch
+		title "Print Despatch Docket at Completion"
+		help "Print Desptach Docket at completion"
+	end-check-box 
+	check-box ws-print-invoice @7,50
+		values YES NO
+		right-coordinate
+		default ws-print-invoice
+		title "Print Invoice at Completion"
+		help "Print Invoice at completion"
+	end-check-box 
+	check-box ws-allow-restart @8,50
+		values YES NO
+		right-coordinate
+		default ws-allow-restart
+		title "Allow restart with only unscanned lines"
+		help "Note that this uses sol-user-only-num1 to hold the number of scans"
+	end-check-box 
+	accept ws-hold-reason-code @9,50
+		default ws-hold-reason-code
+		title "Hold Reason Code:"
+		help "The reason code used when the user puts on order on hold"
+	on help-key														
+		set sys-tbl-type = 'HR'										
+		do i85codes-table-help											
+		if sys-tbl-code > SPACES
+			set ws-hold-reason-code = sys-tbl-code
+		endif
+		reenter optional
+	endon
+	validations
+		get system-table 
+			on index sys-tbl-type sys-tbl-code
+			key is "HR" ws-hold-reason-code
+		on error
+			message "Invalid Hold reason code"
+			re-enter ws-hold-reason-code
+		end-on 
+	end-validations
+//
+	box @lf-qty-radio,5 to @lf-qty-radio + 2,60
+		title "Which qty to Prompt user to pick"
+	radio-button ws-shipped-or-ordered-qty
+		@lf-qty-radio + 1,6 "S" title  "Shipped (what we think we have)"
+		@lf-qty-radio + 1,32 "O" title  "Ordered (what the customer wanted)"
+		default ws-shipped-or-ordered-qty
+	end-radio-button 
+	box @lf-completion-radio,5 to @lf-completion-radio + 2,60
+		title "Status to set order to at scan completion"
+	radio-button ws-completion-status
+		@lf-completion-radio + 1,6 "70" title "Ready to print Invoice"
+		@lf-completion-radio + 1,32 "40" title "Picking Slip Printed"
+		default ws-completion-status
+		when ws-print-invoice = NO
+	end-radio-button
+	confirm auto
+	confirmed
+		do save-paras
+	end-confirm
+end-screen
+
+//--------------Order selection routines------------------------------------------
+
+screen rf-pick
+//
+//  This routine allows the user to scan the bar code of an order number.
+//  The scanned number is a string that includes any suffix 
+//  The program extracts the order number and suffix from the string.
+//
+local
+	lf-order							pic x(10) type string
+	lf-order-no							like so-order-no
+	lf-line-no							like sol-line-seq
+	lf-bo-suffix						like so-bo-suffix
+	lf-ok								type boolean
+	lf-next-action						pic x // P)rocess Order  A)bandon Order
+	lf-restart							pic x // YES - reprocess only unscanned records
+	lf-count							type number
+//
+	window @1,1 to SCREENSIZE
+	no-ok-cancel
+//
+before
+	clear
+	if ws-allow-restart = YES
+		display "Resume:" @5,15 right-coord
+	else
+		display "Start Line:" @5,15 right-coord
+	endif
+detail
+	accept lf-order @1,10
+		title "Order:"
+		help "9)Exit"
+	validations
+		if lf-order = "9"
+			exit
+		endif
+		do vglrfclib-validate-order-no
+			parameters are lf-order "-no-archive"
+			returning lf-ok lf-order-no lf-bo-suffix
+		if not lf-ok
+			do vglrfclib-display-message parameters 
+				concat("Invalid Order Number\n",lf-order,"\n",str(lf-order-no),"-",lf-bo-suffix) 3
+			re-enter lf-order
+		endif
+		get sales-order
+			on index so-order-no so-bo-suffix
+			key is lf-order-no lf-bo-suffix
+		on error
+			do vglrfclib-display-message parameters "Invalid Order Number" 3
+			re-enter lf-order
+		endon
+		get deb-master
+			on index accountcode
+			key is so-cust-code
+		on error
+		endon
+		if so-order-status <> "40"
+			do vglrfclib-display-message parameters "Order not ready to pick" 5
+			re-enter lf-order
+		endif
+	end-validations
+	display so-cust-code @2,10
+		title "Cust:"
+	display shortname @3,1
+	accept lf-line-no @5,16
+		optional
+		default min-value(lf-line-no)
+		help "start line"
+		when ws-allow-restart <> YES
+	accept lf-restart @5,16
+		optional
+		default NO
+		Allow YES NO
+		uppercase
+		help "Y) process unscanned only"
+		when ws-allow-restart = YES
+	confirm  @8,5
+		prompt "Pick?"
+		no-window
+		default YES
+	confirmed
+		if screenmode  = entry
+			set ws-start-datetime = gmt
+			set ws-order-short-shipped = FALSE
+			do build-lines
+				parameters are so-order-no so-bo-suffix
+					lf-line-no max-value(sol-line-seq) lf-restart
+			//
+			select * from reqdlines
+			detail
+				set lf-count += 1
+			end-select
+			if lf-count = 0
+				do vglrfclib-display-message parameters 
+					concat(
+					"No Lines to Scan\nOn this order\n"
+					,lf-restart,str(lf-line-no)
+					) 3
+				re-enter lf-order
+			endif
+			do scanlines 
+				parameters are so-order-no so-bo-suffix
+				returning lf-next-action
+			if lf-next-action = "P"
+				set ws-end-datetime = gmt
+				do complete-order-menu
+					parameters are so-order-no so-bo-suffix
+			elseif lf-next-action = "H"
+				set ws-end-datetime = gmt
+				do place-order-on-hold
+					parameters are so-order-no so-bo-suffix 
+			endif
+			clear
+			refresh
+		endif
+	end-confirm
+end-screen
+
+procedure build-lines
+//
+//  This routine reads the sales order lines and builds a file of lines
+//  that must be scanned.
+//
+parameters
+	lp-order-no							like so-order-no
+	lp-bo-suffix						like so-bo-suffix
+	lp-start-line						like sol-line-seq
+	lp-end-line							like sol-line-seq
+	// lf restart can be Y or N.  When Y then only records with
+	// sol-user-only-num1 set to 0 can be processed
+	lp-restart							pic x
+returning
+	lr-ok								type boolean
+local
+	lf-can-scan							type boolean
+//
+	set lr-ok = TRUE
+	open req-serials temporary truncate					//wxb log 9
+	open reqdlines temporary
+	open reqdlines-copy file is filename(reqdlines)
+	select * from sales-order-line
+		where so-order-no = :lp-order-no
+		and so-bo-suffix = :lp-bo-suffix
+		and sol-line-seq >= :lp-start-line
+		and sol-line-seq <= :lp-end-line
+		and sol-line-type = 'SN'
+		and (lp-restart = NO or sol-user-only-num1 = 0)
+		order by so-order-no so-bo-suffix sol-line-seq
+	detail
+//#ifdef DEBUG
+//		DEBUG(str-concat(str(sol-line-seq) "/" stock-code))
+//endif
+		do can-line-be-scanned returning lf-can-scan
+		if not lf-can-scan 
+			continue
+		endif
+/* 
+  I tried this but then removed it.  The problem comes in the update cyclye
+  how will I know which qty to allocate to which lines.
+  Maybe a future release
+		if ws-combine-same-stock = YES
+			get reqdlines 
+				on index rl-stock-code
+				key is stock-code
+			on error
+				do insert-one-reqdline
+			else
+				if ws-shipped-or-ordered-qty = "S"
+					set rl-qty += sol-shipped-qty 
+				else
+					set rl-qty += sol-ordered-qty
+				endif
+				update reqdlines
+				on error
+				endon
+			endon
+		else
+*/
+			do insert-one-reqdline
+//		endif
+	endselect
+end-procedure
+
+procedure can-line-be-scanned 
+//
+//  Assumes currency on sales-order and sales-order-line
+//
+returning 
+	lr-can-scan									type boolean
+	lr-should-count								type boolean
+	set lr-can-scan = TRUE
+	set lr-should-count = TRUE
+	if sol-line-type <> "SN"
+		set lr-can-scan = FALSE
+		set lr-should-count = FALSE
+		exit
+	endif
+	if sol-chg-type in ( 'T' )
+		// indent or taken
+		set lr-can-scan = FALSE
+		exit
+	endif
+	// Kit children are sol-line-type = "SN" chg-type = D AND print-line = "N"
+	// these should be ok because we have only skipped the kit parents
+	get stock-master 
+		on index stock-code
+		key is stock-code
+	on error
+#ifdef DEBUG
+		DEBUG("No Stock Code")
+#endif
+		set lr-can-scan = FALSE
+		set lr-should-count = FALSE
+		exit
+	endon
+	//
+	// can't scan labour special
+	//
+	if stk-stock-status not in ( "S" "M" "R" "I" )
+#ifdef DEBUG
+		DEBUG("invalid stock status")
+#endif
+		set lr-can-scan = FALSE
+		set lr-should-count = FALSE
+		exit
+	endif
+	// 
+	// can't scan lots
+	// (yet - version 3 probably)
+	//
+	if stk-serialized-flag in ( "L" "P" )
+#ifdef DEBUG
+		DEBUG("Lot Controlled")
+#endif
+		set lr-can-scan = FALSE
+		set lr-should-count = TRUE
+		exit
+	endif
+	get stock-warehouse-detail
+		on index stock-code whse-code
+		key is stock-code so-whse-code
+	on error
+#ifdef DEBUG
+		DEBUG("no stock whse detail")
+#endif
+		set lr-can-scan = FALSE
+		set lr-should-count = TRUE
+		exit
+	endon
+end-procedure
+
+procedure insert-one-reqdline
+//
+// Assumes current on sales-order-line and stock-master and
+// stock-warehouse-detai
+//
+	initialise reqdlines
+	set rl-sol-line-seq = sol-line-seq
+	set rl-stock-code = stock-code
+	if ws-shipped-or-ordered-qty = "S"
+		set rl-qty = sol-shipped-qty 
+	else
+		set rl-qty = sol-ordered-qty
+	endif
+	set rl-location = whse-bin-location
+#ifdef DEBUG
+	DEBUG(str-concat(stock-code "/" str(rl-qty)))
+#endif
+	if rl-qty > 0
+		insert reqdlines
+		on error
+		endon
+	endif
+end-procedure
+
+
+//-------------Line Scanning Routines---------------------------------------------
+
+procedure scanlines
+//
+//  This routine steps through the lines that need to be picked and prompts
+//  the user to scan those lines.
+//
+parameters
+	lp-order-no							like so-order-no
+	lp-bo-suffix						like so-bo-suffix
+returning 
+	lr-next-action						pic x // P)rocess order A)bandon order H)Hold
+local
+	lf-return-action					pic x
+	lf-ok								type boolean
+	lf-any-errors						type boolean
+	lf-short							type boolean
+	lf-hold-flag						pic x
+	set lf-any-errors = FALSE
+	set lf-hold-flag = NO
+	//
+	// Initially step the user through the order getting them to pick
+	// things in location order
+	//
+#ifdef DEBUG
+			do debug-display-reqd-lines
+#endif
+	select * from reqdlines
+	detail
+		open scanset truncate temporary
+		do process-scans-for-line entry returning lf-return-action
+//		0)Process &HOLD  1)Start Again 2)line complete 3)Order complete 4)Abandon Order QTY Barcode
+		while lf-return-action = "1" // forget everything and restart
+			// start this line again at the beginning
+			open scanset truncate temporary
+			do process-scans-for-line entry returning lf-return-action
+		endwhile
+		switch lf-return-action
+		case "0"  // process this line but then hold the rest of the order
+			do process-scanset returning lf-ok
+			if not lf-ok
+				set lf-any-errors = TRUE
+			endif
+			set lf-hold-flag = YES
+			break
+		case "2"  // Process the line and move to the next one
+			do process-scanset returning lf-ok
+			if not lf-ok
+				set lf-any-errors = TRUE
+			endif
+		case "3" // process the line and do not process any others
+			do process-scanset returning lf-ok
+			if not lf-ok
+				set lf-any-errors = TRUE
+			endif
+			break
+		case "4" // Forget everything - updates
+			close reqdlines and remove
+			on error 2
+				// don't worry about it
+			endon
+			set lr-next-action = "A"
+			exit  
+		case "5" // skip this line but move to the next
+			// actually nothing to do here
+		end-switch
+	end-select
+	// 
+	// Once complete check for any shortages and allow the user to re-pick
+	// individual lines if they wish.
+	//
+	set lf-return-action = spaces
+	if lf-hold-flag = NO
+		repeat
+			do check-for-short-ship-lines returning lf-short
+		until not lf-short or lf-return-action = "P" or lf-return-action = "H"
+			do display-short-ship returning lf-return-action
+			if lf-return-action = "A" // abandon order
+				close reqdlines and remove
+				on error 2
+					// don't worry about it
+				endon
+				set lr-next-action = "A"
+				exit  
+			endif
+			if lf-return-action = "H"
+				set lf-hold-flag = YES
+			endif
+		end-repeat
+	endif
+	// process
+	if not lf-any-errors
+		transaction begin
+		// lf-hold-flag is set by the user entering 0 at the scan screen
+		// or by selecting hold from the completion screen.  Note that the
+		// latter option is required in case the user fully scans the last
+		// line on the order.
+		do process-order
+			parameters lp-order-no lp-bo-suffix 
+			returning lf-ok
+		if not lf-ok
+			transaction rollback
+			do vglrfclib-display-message parameters "An error occurred - nothing updated(RB)" 8
+			set lr-next-action = "A"
+		else
+			transaction commit
+			set lr-next-action = "P"
+		endif
+	else
+		set lr-next-action = "A"
+		do vglrfclib-display-message parameters "An error occurred - nothing updated" 8
+	endif
+	if lf-hold-flag = YES and lr-next-action <> "A"
+		set lr-next-action = "H"
+	endif
+end-procedure
+
+screen display-short-ship
+returning
+	lr-return-action					pic x
+local
+	lf-pic								type string
+//
+	window @1,1 to SCREENSIZE
+	select * from reqdlines
+		where rl-qty > 0 and rl-qty > rl-scan-qty
+	review occurs 5
+	allowed md-rescan search md-hold md-process-short 
+	no-prompt-for-search
+before
+	set lr-return-action = spaces
+	clear
+detail
+	if screenmode = md-rescan
+		do rescan-one-line parameters are rl-sol-line-seq
+			returning lr-return-action
+		// note that if the order is to be abandoned then the return action
+		// will be A
+		if lr-return-action = "A" or lr-return-action = "H"
+			exit
+		endif
+		refresh review
+	endif
+	if screenmode = md-process-short
+		set lr-return-action = "P"
+		exit 
+	endif
+	if screenmode = md-hold
+		set lr-return-action = "H"
+		exit 
+	endif
+	do vglrfclib-get-pic-clause parameters are rl-stock-code
+		returning lf-pic
+	accept rl-stock-code @2,2 pic x(10)
+		title "Stock Code"
+	display str-concat(left-justify(format-picture(rl-qty,lf-pic))
+			,"/"
+			,left-justify(format-picture(rl-qty - rl-scan-qty, lf-pic))) @2,15 
+		title "Reqd/Short"
+after
+	back-to-detail
+end-screen
+
+procedure rescan-one-line
+//
+//  This routine steps through the lines that need to be picked and prompts
+//  the user to scan those lines.
+//
+parameters
+	lp-sol-line-seq						like rl-sol-line-seq
+returning 
+	lr-next-action						pic x // P)rocess order A)bandon order
+local
+	lf-return-action					pic x
+	lf-ok								type boolean
+	lf-any-errors						type boolean
+	set lf-any-errors = FALSE
+	get reqdlines
+		on index rl-sol-line-seq
+		key is lp-sol-line-seq
+		lock
+	on error
+		do vglrfclib-display-message parameters
+			"Cannot find line - See System Admin" 4
+		exit
+	else
+		set rl-scan-qty = 0
+		set rl-scanset-records = 0
+		update reqdlines
+		on error
+			do vglrfclib-display-message parameters
+				"Cannot reset lines - See System Admin" 4
+			exit
+		endon
+	endon
+	repeat
+		open scanset truncate temporary
+		do process-scans-for-line entry returning lf-return-action
+//		0)Exit Order 1)Start Line Again 2)line complete 3)Order complete 4)Abandon 
+	until lf-return-action <> "1"
+	endrepeat
+	switch lf-return-action
+	case "0" 
+		do process-scanset returning lf-ok
+		if not lf-ok
+			set lf-any-errors = TRUE
+		endif
+		set lr-next-action = "H"
+		exit
+	case "2" "3"
+		do process-scanset returning lf-ok
+		if not lf-ok
+			set lf-any-errors = TRUE
+		endif
+	case "4"
+		close reqdlines and remove
+		on error 2
+			// don't worry about it
+		endon
+		set lr-next-action = "A"
+		exit  
+	end-switch
+end-procedure
+
+procedure check-for-short-ship-lines
+returning
+	lr-short-shipped					type boolean
+	set lr-short-shipped = FALSE
+	select * from reqdlines
+		where rl-qty > 0
+		and rl-qty > rl-scan-qty
+	detail
+		set lr-short-shipped = TRUE
+		break
+	end-select
+end-procedure
+
+
+procedure display-scan-static
+//
+//  Assumes currency on reqdlines
+//
+	get stock-master
+		on index stock-code
+		key is rl-stock-code
+	on error
+		initialise stock-master
+			leaving stock-code
+	endon
+	display "Loc:" @1,1
+	display rl-location @1,10
+	display rl-stock-code @2,1
+	display stk-description @3,1
+end-procedure
+
+screen process-scans-for-line
+//
+//  This routine handles the actual scanning of a barcode.  It checks that the
+//  stock code is the right one and determines the qty scanned and ensures
+//  that this is correct also.
+//
+returning
+	lr-next-action						pic x
+	// spaces - continue
+local
+	lf-ok								type boolean
+	lf-total							type number
+	lf-scan-number						type number
+	lf-help-prompt						type string pic x(100)
+	lf-can-override-qty					type boolean
+// rjb log SER-start-------------------------------------------------------------
+	lf-must-enter-serial				type boolean
+// rjb log SER-end---------------------------------------------------------------
+	lf-qty-scanned						type number
+	lf-pic-clause						type string
+	lf-qty-line							type string // to hold a line of qtys to display
+	lf-count							type number
+	window @1,1 to SCREENSIZE
+	no-hide
+	no-ok-cancel
+	primary scanset
+	allowed entry
+//
+before
+	clear
+	do display-scan-static
+	set lf-total = 0
+	set ss-stock-code = rl-stock-code
+	set lf-scan-number = 1
+	if ws-use-alphas-for-control = YES
+		set lf-help-prompt = 
+			"A)Exit Order B)Start Again C)line complete D)Order Complete E)Abandon Order - Barcode"
+	else
+		set lf-help-prompt = 
+			"0)Exit Order 1)Start Again 2)line complete 3)Order complete 4)Abandon Order 5)skip line - Barcode"
+		// for small screen
+		set lf-help-prompt = "0 1 2 3 4 5 8)Help"
+	endif
+	display "QTY:" @7,1
+	do vglrfclib-get-pic-clause
+		parameters are stk-unit-desc
+		returning lf-pic-clause
+detail
+	do calculate-total-scanned returning lf-qty-scanned
+	set lf-qty-line = "RQ/PK:"  // required / picked
+	string lf-qty-line appending str(rl-qty)
+	string lf-qty-line appending "/"
+	string lf-qty-line appending str(lf-qty-scanned)
+	display lf-qty-line @5,1  background
+// rjb log SER-start-------------------------------------------------------------
+	set lf-must-enter-serial = FALSE
+// rjb log SER-end---------------------------------------------------------------
+	accept ss-stock-code @6,1 pic x(20)
+//		default ss-stock-code  // testing only remove on go lve
+		help lf-help-prompt
+	validations
+		if ws-use-alphas-for-control = YES 
+			if ss-stock-code = "H"
+				do display-help 
+				re-enter ss-stock-code
+			endif
+		else
+			if ss-stock-code = "8"
+				do display-help
+				re-enter ss-stock-code
+			endif
+		endif
+		if ws-use-alphas-for-control = YES 
+			if ss-stock-code in { "A" "B" "C" "D" "E" "F" "a" "b" "c" "d" "e" "f" }
+				set ss-stock-code = uppercase(ss-stock-code)
+				set ss-stock-code = str(ascii(ss-stock-code) - 65 ) // convert into 0 1 2 3 ....
+				set lr-next-action = ss-stock-code
+				exit
+			endif
+		else
+			if ss-stock-code in { "0", "1", "2", "3",  "4" ,"5"}
+				set lr-next-action = ss-stock-code
+				exit
+			endif
+		endif
+// Modes required: nextline, re-scan entire line
+		do vglrfclib-validate-product parameters are ss-stock-code rl-stock-code
+			returning lf-ok ss-stock-code ss-qty ss-serial-no
+		if not lf-ok
+			do vglrfclib-display-message parameters "Invalid" 6
+			reenter ss-stock-code
+		endif
+		do vglrfclib-check-can-override-qty 
+			parameters are ss-stock-code 
+			returning lf-can-override-qty
+// rjb log SER-start-------------------------------------------------------------
+// Dont allow qty override if the item is serialised
+		get stk-serialized-flag from stock-master
+			on index stock-code
+			key is ss-stock-code
+		on error
+			// highly unlikely
+			set stk-serialized-flag = spaces
+		endon
+		if stk-serialized-flag = "Y"
+			set lf-can-override-qty = FALSE
+			set lf-must-enter-serial = FALSE
+			// double check if we really do have a serial yet.  The user may have
+			// scanned a stock code and not a serial
+			get stock-serial-number
+				on index stock-code serial-no
+				key is ss-stock-code ss-serial-no
+			on error ENOREC
+				set lf-must-enter-serial = TRUE
+			endon
+			if ss-serial-no <> spaces
+				select lf-count = count(*)
+					from scanset
+					where ss-serial-no	= :ss-serial-no
+					and ss-stock-code = :ss-stock-code
+				end-select
+				if lf-count <> 0
+					do vglrfclib-display-message parameters 
+					concat("This serial already scanned\n" 
+					"/" ,str(lf-count),"/", ss-serial-no)
+					6
+					reenter ss-stock-code
+				endif
+				if serial-status <> I8RS_SERIAL_IN_STOCK
+					do vglrfclib-display-message parameters "This serial not available for picking" 6
+					reenter ss-stock-code
+				endif
+			endif
+		endif
+#ifdef DEBUG
+		DEBUG(str-concat("S/N:",ss-serial-no))
+		DEBUG(if-then-else(lf-must-enter-serial,"enter s/nm", "don't enter s/n"))
+#endif
+// rjb log SER-end---------------------------------------------------------------
+	end-validations
+	accept ss-qty @7,6 pic lf-pic-clause
+		when ((lf-can-override-qty or ws-can-always-override-qty = YES) 
+			// must not enter a qty if serialised
+			AND stk-serialized-flag <> "Y")
+		default ss-qty
+		show-value
+// rjb log SER-start-------------------------------------------------------------
+	if lf-must-enter-serial 
+		display "S/N:" @8,1 foreground prompt
+	endif
+// enter serial if required
+	accept ss-serial-no @8,6 pic x(20)
+		default ss-serial-no
+		when lf-must-enter-serial
+		show-value
+	validations
+		// allow for the possiblity that the user cannot scan a serial no 
+		// for some reason
+		if ws-use-alphas-for-control = YES 
+			if ss-stock-code in { "A" "B" "E" "F" "a" "b" "e" "f" }
+				set ss-stock-code = uppercase(ss-stock-code)
+				set ss-stock-code = str(ascii(ss-stock-code) - 65 ) // convert into 0 1 2 3 ....
+				set lr-next-action = ss-stock-code
+				exit
+			endif
+		else
+			if ss-stock-code in { "0", "1", "4" ,"5"}
+				set lr-next-action = ss-stock-code
+				exit
+			endif
+		endif
+		get stock-serial-number
+			on index stock-code serial-no
+			key is ss-stock-code ss-serial-no
+		on error ENOREC
+			do vglrfclib-display-message parameters "Invalid Serial" 6
+			reenter ss-serial-no
+		endon
+		if ss-serial-no <> spaces
+			select lf-count = count(*)
+				from scanset
+				where ss-serial-no	= :ss-serial-no
+				and ss-stock-code = :ss-stock-code
+			end-select
+			if lf-count <> 0
+				do vglrfclib-display-message parameters "This serial already scanned" 6
+				reenter ss-serial-no
+			endif
+			if serial-status <> I8RS_SERIAL_IN_STOCK
+				do vglrfclib-display-message parameters "This serial not available for picking" 6
+				reenter ss-serial-no
+			endif
+		endif
+	end-validations
+// rjb log SER-end---------------------------------------------------------------
+	confirm auto
+	before 
+		if screenmode = entry
+			// The record has to be valid - will this qty put us over the
+			// limit?
+			do calculate-total-scanned returning lf-total
+			if lf-total + ss-qty > rl-qty
+				do vglrfclib-display-message parameters "Over Qty Cannot Scan" 3
+				re-enter ss-stock-code
+			endif
+			set lf-total += ss-qty
+			set ss-scan-number = lf-scan-number
+			set lf-scan-number += 1
+		endif
+		set ss-sol-line-seq = rl-sol-line-seq
+	confirmed
+		if lf-total >= rl-qty
+			set lr-next-action = "2" // line complete
+			exit
+		endif
+	end-confirm
+after 
+	// you cannot press escape
+	back-to-detail
+end-screen
+
+procedure display-help
+	window @1,1 to SCREENSIZE
+	if ws-use-alphas-for-control = YES
+		display "A Exit the Order and Hold" @3,1
+		display "B Restart this line" @4,1
+		display "C Line Complete " @5,1
+		display "D Order Complete " @6,1
+		display "E Abandon Order " @7,1
+		display "F Skip Line " @8,1
+	else
+		display "0 Exit the Order and Hold" @3,1
+		display "1 Restart this line" @4,1
+		display "2 Line Complete " @5,1
+		display "3 Order Complete " @6,1
+		display "4 Abandon Order " @7,1
+		display "5 Skip Line and Continue " @8,1
+	endif
+	pause
+end-procedure
+
+procedure calculate-total-scanned
+returning 
+	lr-total								type number
+	save scanset
+	set lr-total = 0
+	select * from scanset
+	detail
+		set lr-total += ss-qty
+	end-select
+	restore scanset
+end-procedure
+
+//---------------Processing of scanned line routines------------------------------
+
+procedure process-scanset
+// Read through the scanset and build a file of lines to be updated
+// For each scan, the program has added a line to the file "scanset"
+// This routine summarises that file and updates reqdlines (which
+// was created when the order number was selected at the beginning).
+returning
+	lr-ok								type boolean
+	set lr-ok = TRUE
+	select * from scanset
+	detail
+		get reqdlines-copy
+			on index rl-sol-line-seq
+			key is ss-sol-line-seq
+			lock
+		on error
+			do add-event-log parameters are 
+				concat("reqdlines missing at update pass " str(file-status) "/" str(ss-sol-line-seq) )
+			set lr-ok = FALSE
+		else
+			set rl-scan-qty += ss-qty
+			set rl-scanset-records += 1
+			update reqdlines-copy
+			on error
+				do add-event-log parameters are 
+					concat("Unable to update reqdlines" str(file-status) "/" str(ss-sol-line-seq) )
+				set lr-ok = FALSE
+			endon
+// wxb log 9-start-------------------------------------------------------------
+			if ss-serial-no != SPACES
+				set rl-serial-no = ss-serial-no
+				insert req-serials
+				on error
+					do add-event-log parameters are 
+						concat("Unable to insert req-serials " str(file-status) "/" str(ss-sol-line-seq) )
+					set lr-ok = FALSE
+		endon
+			endif
+// wxb log 9-end---------------------------------------------------------------
+		endon
+	end-select
+// rjb log SER-start-------------------------------------------------------------
+// Don;t truncate here because we need them in process-order
+//	open scanset truncate
+// rjb log SER-end---------------------------------------------------------------
+end-procedure
+
+procedure process-order
+//
+// process order is called after the user has scanned all the lines and
+// believes the order to be complete.  BUT before the completion menu is
+// displayed.  The order qty's are updated and the header totals updated.
+//
+parameters
+	lp-order-no							like so-order-no
+	lp-bo-suffix						like so-bo-suffix
+returning
+	lr-ok								type boolean
+local
+	lf-ok								type boolean
+	set lr-ok = TRUE
+//
+	get sales-order
+		on index so-order-no so-bo-suffix
+		key is lp-order-no lp-bo-suffix
+	on error
+		set lr-ok = FALSE
+	endon
+	get deb-master 
+		on index accountcode
+		key is so-cust-code
+	on error
+		set lr-ok = FALSE
+	endon
+	if not lr-ok
+		do vglrfclib-display-message parameters are
+			"Lost order or customer" 5
+		exit
+	endif
+	select * from reqdlines
+	detail
+		get sales-order-line
+			on index so-order-no so-bo-suffix sol-line-seq
+			key is lp-order-no lp-bo-suffix rl-sol-line-seq
+			lock
+		on error
+			do add-event-log parameters are 
+				concat("Unable to locate sales-order-line" str(file-status) "/" 
+						str(lp-order-no) lp-bo-suffix str(ss-sol-line-seq) )
+			set lr-ok = FALSE
+			exit
+		else
+			if ws-allow-restart = YES
+				set sol-user-only-num1 = rl-scanset-records
+			endif
+			set sol-shipped-qty = rl-scan-qty
+			set sol-backorder-qty = sol-ordered-qty - sol-shipped-qty
+			if dr-part-shipment-allowed = NO
+				set sol-backorder-qty = 0
+			endif
+			do calc-line-amounts
+			update sales-order-line
+			on error
+				do add-event-log parameters are 
+					concat("Unable to update sales-order-line" str(file-status) "/" 
+						str(lp-order-no) lp-bo-suffix str(ss-sol-line-seq) )
+				set lr-ok = FALSE
+			endon
+		endon
+// rjb log SER-start-------------------------------------------------------------
+// If item is serialized then we need to update stock-serial-number
+		get stock-master
+			on index stock-code 
+			key is rl-stock-code
+		on error
+			// highly unlikely
+			do add-event-log parameters are 
+				concat("Unable to locate stock-master " str(file-status) "/" 
+					str(lp-order-no) lp-bo-suffix str(ss-sol-line-seq) )
+			set lr-ok = FALSE
+		else
+			if stk-serialized-flag = YES
+				// update the serials
+// wxb log 9-start-------------------------------------------------------------
+				select *
+//					from scanset 
+					from req-serials
+					where rl-stock-code = :rl-stock-code
+					and rl-sol-line-seq = :rl-sol-line-seq
+				detail
+					do update-serial-no
+// wxb log 9-start-------------------------------------------------------------
+//						parameters are ss-serial-no rl-stock-code 
+						parameters are rl-serial-no rl-stock-code 
+// wxb log 9-end---------------------------------------------------------------
+						returning lf-ok
+					if not lf-ok
+						do add-event-log parameters are 
+							concat("Unable to update serial " str(file-status) "/" 
+								str(lp-order-no) lp-bo-suffix str(ss-sol-line-seq) rl-serial-no)
+						set lr-ok = FALSE
+					endif
+				end-select
+			endif
+		endon
+// rjb log SER-end---------------------------------------------------------------
+	end-select
+// wxb log tax-start-------------------------------------------------------------
+	do clibtaxso-recalculate-sales-order-tax
+		parameters
+			so-order-no
+			so-bo-suffix
+	get sales-order lock
+	on error
+	endon
+// wxb log tax-end---------------------------------------------------------------
+	do i50headso-calc-total-amounts-update
+end-procedure
+
+// rjb log SER-start-------------------------------------------------------------
+procedure update-serial-no
+parameters
+	lp-serial-no					like serial-no
+	lp-stock-code					like stock-code
+returning
+	lr-ok							type boolean
+	//
+	set	lr-ok = TRUE
+	get stock-serial-number lock
+		on index serial-no stock-code
+		key lp-serial-no lp-stock-code
+	on error
+		do add-event-log parameters are 
+			"Failed to find serial no"
+		set lr-ok = FALSE
+		exit
+	endon
+	//
+	// Update the stock-serial-number record with the new sales order line
+	// details.
+	set contract-no = I8RSSTDF_SO_BO_SERIAL_FORMAT
+	set serial-sequence-no = sol-line-seq
+	set serial-current-contract-income = sol-line-seq
+	set accountcode = so-cust-code
+	update stock-serial-number
+	on error
+		do add-event-log parameters are 
+			"Failed to update serial no"
+		set lr-ok = FALSE
+		exit
+	endon
+	// Insert or update stock-serial-link record with the new sales order
+	// line details.
+	I8RSSTDF_SET_UP_SERIAL_LINK_SO(so-order-no,so-bo-suffix,sol-line-seq)
+	get stock-serial-link
+		on index serial-no stock-code serial-link-type
+		key is serial-no stock-code serial-link-type
+	on error
+		// If the serial number is not linked to any sales order line, then
+		// insert new stock-serial-link record linked to the sales order line.
+		initialise stock-serial-link
+			leaving serial-no stock-code
+		I8RSSTDF_SET_UP_SERIAL_LINK_SO(so-order-no,so-bo-suffix,sol-line-seq)
+		insert stock-serial-link
+		on error
+			do add-event-log parameters are 
+				"Failed to insert link"
+			set lr-ok = FALSE
+		endon
+	else
+		// If the serial number is linked to another sales order line, then
+		// update the link with the new sales order line details.
+		// For example, returned serial numbers is reallocated to a new sales
+		// order line.
+		get stock-serial-link lock
+			on index serial-no stock-code serial-link-type
+			key is serial-no stock-code serial-link-type
+		on error
+		else
+			// Update the existing stock-serial-link record with the new sales
+			// order line detail.
+			I8RSSTDF_SET_UP_SERIAL_LINK_SO(so-order-no,so-bo-suffix,
+				sol-line-seq)
+			update stock-serial-link
+			on error
+				do add-event-log parameters are 
+					"Failed to update existing link"
+				set lr-ok = FALSE
+			endon
+		endon
+	endon
+endprocedure 
+// rjb log SER-end---------------------------------------------------------------
+
+
+procedure place-order-on-hold
+parameters
+	lp-order-no							like so-order-no
+	lp-bo-suffix						like so-bo-suffix
+returning
+	lr-ok								type boolean
+	set lr-ok = TRUE
+	get sales-order 
+		on index so-order-no so-bo-suffix
+		key is lp-order-no lp-bo-suffix
+		lock
+	on error
+		set lr-ok = FALSE
+		do add-event-log parameters are 
+			concat("Unable to get sales-order (hold update)" str(file-status) "/" 
+				str(lp-order-no) lp-bo-suffix str(ss-sol-line-seq) )
+	else
+		set so-order-status = I5SO_ENTERED_ON_HOLD
+		set so-order-reason-code = ws-hold-reason-code
+		update sales-order
+		on error
+			set lr-ok = FALSE
+			do add-event-log parameters are 
+				concat("Unable to update sales-order (hold update)" str(file-status) "/" 
+					str(lp-order-no) lp-bo-suffix str(ss-sol-line-seq) )
+		endon
+		do add-note-line parameters lp-order-no lp-bo-suffix
+			concat("Placed on Hold during Scan by " login-id " at " 
+				format-picture(gmt,"ddmmmyy hh:mm:ss"))
+			"M"
+	endon 
+end-procedure
+
+procedure calc-line-amounts
+#if BMS_DICT_VER < 7000
+	I5LINECALC_SO_LINE_CALC(so-price-code,
+		so-sales-tax-exemption-no,
+		sol-item-price,
+		sol-ordered-qty,
+		sol-stk-unit-desc,
+		sol-price-uom,
+		sol-disc-rate,
+		sol-tax-rate-code,
+		sol-item-wholesale-price,
+		sol-line-amount,
+		sol-ordered-discount-amt,
+		sol-oordered-sales-tax-amt )
+	I5LINECALC_SO_LINE_CALC(so-price-code,
+		so-sales-tax-exemption-no,
+		sol-item-price,
+		sol-shipped-qty,
+		sol-stk-unit-desc,
+		sol-price-uom,
+		sol-disc-rate,
+		sol-tax-rate-code,
+		sol-item-wholesale-price,
+		sol-shipped-amount,
+		sol-shipped-discount-amt,
+		sol-shipped-sales-tax-amt )
+#else
+	I5LINECALC_SO_LINE_CALC(so-price-code,
+		spaces,
+		sol-item-price,
+		sol-ordered-qty,
+		sol-stk-unit-desc,
+		sol-price-uom,
+		sol-disc-rate,
+		spaces,
+		sol-item-wholesale-price,
+		sol-line-amount,
+		sol-ordered-disc-amt,
+		sol-ordered-sales-tax-amt )
+	// Now the shipped qty
+	I5LINECALC_SO_LINE_CALC(so-price-code,
+		spaces,
+		sol-item-price,
+		sol-shipped-qty,
+		sol-stk-unit-desc,
+		sol-price-uom,
+		sol-disc-rate,
+		spaces,
+		sol-item-wholesale-price,
+		sol-shipped-amount,   				// returned
+		sol-shipped-discount-amt,   		// returned
+		sol-shipped-sales-tax-amt )   		// returned
+#endif
+	set sol-shipped-amount = sol-shipped-qty * sol-item-price
+	set sol-line-cost = sol-shipped-qty * sol-item-cost
+endprocedure 
+
+//-----------Order Completion Routines--------------------------------------------
+
+menu complete-order-menu
+//
+//  This routine is called after the order has been scanned and updated witht
+//  the correct shipped quatities
+parameters
+	lp-order-no							like so-order-no
+	lp-bo-suffix						like so-bo-suffix
+local
+	lf-short							type boolean
+	window @1,1 to SCREENSIZE
+	no-hide
+	//
+before
+	clear
+	do check-for-short-ship-lines returning lf-short
+	if lf-short
+		display "ORDER SHORT SHIPPED" @1,1 background
+	endif
+detail
+	option "1. Scan Courier Details" @2,2
+		when ws-scan-courier-detail = YES
+		do scan-notes entry parameters are lp-order-no lp-bo-suffix
+	option "2. Complete" @3,2
+		do complete-order  parameters are lp-order-no lp-bo-suffix 
+		exit
+after
+	back-to-detail
+end-menu 
+
+screen scan-notes
+parameters are
+	lp-order-no							like so-order-no
+	lp-bo-suffix						like so-bo-suffix
+local 
+	lf-scan								type string
+	lf-last-scan						type string
+	lf-display-text						type string
+	window @1,1 to SCREENSIZE
+	no-ok-cancel
+before
+	clear
+	display "Scan Note Code or Barcode" @1,1
+detail
+	accept lf-scan pic x(24) @2,1
+		help "0)Exit Code / Courier"
+	validations
+		if lf-scan = lf-last-scan
+			do vglrfclib-display-message parameters "This is the same as the previous" 2
+			re-enter
+		endif
+		if lf-scan = "0"
+			exit
+		endif
+		do add-note-line parameters are 
+			lp-order-no lp-bo-suffix lf-scan "N"
+		returning lf-display-text
+		set lf-last-scan = lf-scan
+	end-validation
+	display str-concat(lf-display-text) @4,1 background // show the last one
+end-screen
+
+
+
+procedure add-note-line
+parameters are
+	lp-order-no							like so-order-no
+	lp-bo-suffix						like so-bo-suffix
+	lp-note								like sol-line-description
+	lp-type								pic x // M-memo N-note
+returning 
+	lr-display-text						type string
+local
+	lf-next-line						like sol-line-seq
+	lf-added							type boolean
+	//
+	set lf-added = FALSE
+	//
+	select * from sales-order-line
+		where so-order-no = :lp-order-no
+		and so-bo-suffix = :lp-bo-suffix
+		order by so-order-no so-bo-suffix sol-line-seq
+	detail
+		set lf-next-line = sol-line-seq
+	endselect
+	set lf-next-line += 1
+	// 
+	// Check if standard note
+	//
+	get system-table
+		on index sys-tbl-type sys-tbl-code
+		key is "QX" lp-note
+	on error
+		//
+		// It's just a normal note
+		//
+		initialise sales-order-line
+		set so-order-no  = lp-order-no
+		set so-bo-suffix = lp-bo-suffix
+		set sol-line-seq = lf-next-line
+		set sol-line-type = "DN"
+		if lp-type  = 'M'
+			set sol-print-line = NO
+			set stock-code = 'Memo'
+		else
+			set sol-print-line = YES
+			set stock-code = 'Note'
+		endif	
+		set sol-line-description = lp-note
+		set sol-date-stamp = today()
+		set sol-time-stamp = tod()
+		insert sales-order-line
+		on error
+		endon
+		set lr-display-text = lp-note
+	else
+		//
+		// Its a short code
+		//
+		set lr-display-text = sys-description
+		select * from system-messages
+			where sys-message-type =  "QX"
+			and sys-message-code = lp-note
+			order by sys-message-type sys-message-code sys-message-line
+		detail
+			initialise sales-order-line
+			set so-order-no  = lp-order-no
+			set so-bo-suffix = lp-bo-suffix
+			set sol-line-seq = lf-next-line
+			set sol-line-type = "DN"
+			if lp-type  = 'M'
+				set sol-print-line = NO
+				set stock-code = 'Memo'
+			else
+				set sol-print-line = YES
+				set stock-code = 'Text'
+			endif	
+			set sol-line-description = sys-message-text
+			set sol-date-stamp = today()
+			set sol-time-stamp = tod()
+			insert sales-order-line
+			on error
+			endon
+			set lf-next-line += 1
+		end-select
+	endon
+endprocedure //load-from-text-codes ------------------------------------------
+
+procedure complete-order
+parameters
+	lp-order-no							like so-order-no
+	lp-bo-suffix						like so-bo-suffix
+local
+	lf-can-scan							type boolean
+	lf-should-count						type boolean
+	lf-ok-to-update						type boolean
+// rjb log SER-start-------------------------------------------------------------
+	lf-serial-count						type number
+// rjb log SER-end---------------------------------------------------------------
+//
+	do write-picked-log parameters are lp-order-no lp-bo-suffix
+	if ws-add-trace-as-memo	= YES
+		do add-note-line parameters lp-order-no lp-bo-suffix
+			concat("Picked via Scan by " login-id " at " 
+				format-picture(gmt,"ddmmmyy hh:mm:ss"))
+			"M"
+	endif
+	//
+	// Check that all lines that should be counted, have
+	// If not, display message and exit
+	//
+	set lf-ok-to-update = TRUE
+	select * from sales-order-line
+		where so-order-no = :lp-order-no
+		and so-bo-suffix = :lp-bo-suffix
+	detail
+		do can-line-be-scanned returning lf-can-scan lf-should-count
+		if not lf-can-scan and lf-should-count
+			set lf-ok-to-update = FALSE
+		endif
+	end-select
+	if not lf-ok-to-update
+		do vglrfclib-display-message parameters are 
+			"There are lines on the order that need to be counted that cannot be scanned\n No further processing"
+			3
+		exit
+	endif
+	// complete the order
+	if ws-completion-status = '70'
+// rjb log SER-start-------------------------------------------------------------
+//		spl "so/m5delfifo" parameters "-despatch" lp-order-no lp-bo-suffix "-noscreen"
+// 	m5delfifo in turn calls m5serial with parameters:
+// 		-maint,order,suffix,line#,spaces,-alldespatch.
+// 	This cannot open on the small screen of the handheld, so if there are
+// 	serials on the order you need to reset the columns and lines and use the
+// 	"external" clause of the spl statement to despatch the order
+		select lf-serial-count = count(*)
+			from req-serials
+			where rl-serial-no <> spaces
+		end-select
+		if lf-serial-count = 0
+			spl "so/m5delfifo" parameters "-despatch" lp-order-no lp-bo-suffix "-noscreen"
+		else
+			if setenv("COLUMNS","80") endif
+			if setenv("LINES","24") endif
+			spl "so/m5delfifo" parameters "-despatch" lp-order-no lp-bo-suffix "-noscreen"
+				external
+			if setenv("COLUMNS",str(ws-max-cols)) endif
+			if setenv("LINES",str(ws-max-rows)) endif
+		endif
+// rjb log SER-end---------------------------------------------------------------
+	endif
+	if ws-print-label = YES
+		// need some code here - will need to prompt for number of labels
+		message "Labels not implemented"
+	endif
+	if ws-print-despatch = YES
+		spl ws-despatch-program parameters are 
+			lp-order-no lp-bo-suffix '-d' '-rf'
+	endif
+	if ws-print-invoice = YES
+		spl ws-invoice-program parameters are 
+			lp-order-no lp-bo-suffix '-prtmode' 'N' '-rf'
+	endif
+end-procedure
+
+//-----------Auditing Routines----------------------------------------------------
+
+procedure add-event-log
+// General procedure to add records to the event log
+parameters
+	lp-text							like sel-text
+local
+	lf-last-seq						like sel-seq
+//
+	set lf-last-seq = 0
+	select * from system-event-log
+		where sel-type = "BARC" and
+			sel-date-time = gmt() and
+			sel-login-id = login-id()
+	detail
+		set lf-last-seq = sel-seq
+	end-select
+	initialise system-event-log
+	set sel-type = "BARC"
+	set sel-date-time = gmt()
+	set sel-login-id = login-id()
+	set sel-seq = lf-last-seq + 1
+	//
+	set sel-code = "vglrfpick"
+	set sel-text = lp-text
+	insert system-event-log
+#ifdef DEBUG
+	initialise debug-log
+	set dl-text = lp-text
+	insert debug-log
+#endif
+end-procedure
+
+procedure write-picked-log
+parameters
+	lp-order-no							like so-order-no
+	lp-bo-suffix						like so-bo-suffix
+//
+	do clib500-write-audit-file parameters are
+		lp-order-no 
+		lp-bo-suffix 
+		0
+		str(tty())
+		login-id()
+		I8OLOG_PICKING_COMPLETED
+		format-picture(time-from-date-time(ws-start-datetime,1),"HH:MM:SS")
+		format-picture(time-from-date-time(ws-end-datetime,1),"HH:MM:SS")
+		0
+		0
+		ws-end-datetime - ws-start-datetime
+		spaces
+		0
+		0
+		0
+		0
+		spaces
+		0
+		'ZVRF'
+		'T001'
+end-procedure
+
+//-----------Debugging Routines----------------------------------------------------
+
+#ifdef DEBUG
+screen debug-display-scan-set
+//
+//  this code is for testing purposes only
+//
+	window @1,1 to @24,80
+	datagrid occurs 20
+	select * from scanset
+before
+	clear
+detail
+	accept ss-scan-number @1,1
+		title "ss-scan-number"
+	accept ss-sol-line-seq @1,2
+		title "ss-sol-line-seq"
+	accept ss-stock-code @1,3
+		title "ss-stock-code"
+	accept ss-qty @1,4
+		title "ss-qty"
+end-screen
+
+screen debug-display-reqd-lines
+//
+//  this code is for testing purposes only
+//
+	window @1,1 to @24,80
+	datagrid occurs 20
+	select * from reqdlines
+detail
+	accept rl-sol-line-seq @1,1
+		title "rl-sol-line-seq"
+	accept rl-stock-code @1,2
+		title "rl-stock-code"
+	accept rl-qty @1,3
+		title "rl-qty"
+	accept rl-location @1,4
+		title "rl-location"
+	accept rl-scan-qty @1,5
+		title "rl-scan-qty"
+	accept rl-scanset-records @1,6
+		title "rl-scanset-records"
+end-screen
+
+#endif

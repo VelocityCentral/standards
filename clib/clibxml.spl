@@ -1,0 +1,480 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : Include file for writing xml files
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2008
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: /usr/pronto/cus/vgl/include/clibxml.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 01Dec08  rjb         written 
+//
+//   Usage:
+//	
+//				Note that this include implements a stack that manages the 
+//				list of nodes.  When you end a node it will end all nodes above it
+//				
+//				Design Limitations:
+//				1. You cannot use the same node name at different levels.  withing the same node
+//				i.e. You cannot have
+//					<customer>
+//						<address>
+//							<line1>
+//							<delivery>
+//								<address>
+//								</address>
+//						</address>
+//
+//				2. The max node name length is 256
+//				3. the max field length is 1024
+//				4. The max tree depth is 100 nodes.
+//	
+//				Create an xml file for writing:
+//				do clibxml-create parameters are <filename> <type>
+//				if <type> is set to "P" then a spool file is created with the name <filename>
+//				otherwise a file is created called <filename>
+//	
+//				Creat a std xml heading:
+//				do clibxml-std-header
+//	
+//				Write a comment
+//				do clibxml-comment parameters are <comment string>
+//	
+//				Start a node
+//				do clibxml-begin-node parameters are <node name>
+//	
+//				End a node
+//				do clibxml-end-node parameters are <node name>
+//	
+//				write a node with a value
+//				do clibxml-write-node-value parameters are <name>,<value>
+//		
+//				write a node with a value and an attribute string
+//				do clibxml-write-node-attribute parameters are <name>,<value>,<full attribute string>
+//		
+//				write plain text to the file 
+//				do clibxml-general-write parameters are <text string>
+//		
+//				Complete a file
+//				do clibxml-close
+////////////////////////////////////////////////////////////////////////////////
+/*
+
+	This documentation is in RST format.  To view this as a nice pdf goto
+	https://overbits.herokuapp.com/rsteditor/ and paste this content.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|           |           |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+
+	Alternatively
+
+	 =========== =========== ======================================================== 
+	  Direction   Data Type   Description                                             
+	 =========== =========== ======================================================== 
+	 =========== =========== ======================================================== 
+
+=======
+clibxml
+=======
+
+Originally written before xml support in 4GL.
+
+.. Note::
+
+	Retired.  Do not use.
+
+*/
+
+#define clibxmlSTACKSIZE 100
+//#define clibxmlDEBUG 
+
+field
+	clibxml-stack						pic x(256) occurs clibxmlSTACKSIZE
+	clibxml-stack-top					type number
+	clibxml-output						type string pic x(1024)
+	clibxml-attribute-string			type string pic x(1024)
+
+
+object clibxml-file
+	type is external
+	record is
+		clibxml-text					pic x(500)
+	end-record
+
+procedure clibxml-pop
+returning
+	lf-popvalue							pic x(256)
+	lf-ok								type boolean
+//
+	set lf-ok = TRUE
+	if clibxml-stack-top = 0
+		set lf-popvalue = spaces
+		set lf-ok = FALSE
+	else
+		set lf-popvalue = clibxml-stack[clibxml-stack-top]
+		set clibxml-stack-top -= 1
+	endif
+end-procedure
+
+procedure clibxml-push
+parameters are
+	lp-pushvalue						pic x(256) type string
+returning
+	lr-ok								type boolean
+//
+	set lr-ok = TRUE
+	if clibxml-stack-top = clibxmlSTACKSIZE
+		// shit - stack exceeded
+		set lr-ok = FALSE
+		exit
+	endif
+//
+	set clibxml-stack-top += 1
+	set clibxml-stack[clibxml-stack-top] = lp-pushvalue
+end-procedure
+
+procedure clibxml-check-string
+parameters 
+	l-in-text							pic x(1024) type string
+returning
+	l-out-text							pic x(1024) type string  
+local
+	i								type number
+	j								type number
+	set j = 1
+	for i = 1 to str-len(l-in-text)
+		if substring(l-in-text,i,i) = "&"
+			string l-out-text replacing "&amp;" at j
+			set j += 5
+		elseif substring(l-in-text,i,i) = "<"
+			string l-out-text replacing "&lt;" at j
+			set j += 4
+		elseif substring(l-in-text,i,i) = ">"
+			string l-out-text replacing "&gt;" at j
+			set j += 4
+		elseif substring(l-in-text,i,i) = chr(9) // tab
+			string l-out-text replacing "    " at j
+			set j += 4
+		elseif substring(l-in-text,i,i) in { "'" '"' }
+			string l-out-text replacing "&quot;" at j
+			set j += 6
+		elseif substring(l-in-text,i,i) = ">"
+		else
+			string l-out-text replacing substring(l-in-text,i,i) at j
+			set j += 1
+		endif
+	end-for
+end-procedure
+
+procedure clibxml-general-write export
+parameters
+	lp-string						pic x(1024) type string
+returning
+	lr-ok							type boolean
+	set lr-ok = TRUE
+	if clibxml-output = "P"
+		print lp-string
+			on clibxml
+	else
+		set clibxml-text = lp-string
+		insert clibxml-file
+		on error
+			set lr-ok = FALSE
+		endon
+	endif
+end-procedure
+
+procedure clibxml-create export
+parameters are 
+	lp-file							pic x(256) type string
+	lp-type							pic x
+returning
+	lr-ok							type boolean
+//	
+	if lp-type = "P"
+		report lp-file
+			no-message
+			no-xml	
+			width is 300
+			name clibxml
+	else
+		set lr-ok = TRUE
+		open clibxml-file
+			file is lp-file
+			create truncate permanent
+		on error
+			set lr-ok = FALSE
+		endon
+	endif
+	set clibxml-output = lp-type
+end-procedure
+
+
+procedure clibxml-std-header export
+returning
+	lr-ok							type boolean
+//
+	set lr-ok = TRUE
+	do clibxml-general-write parameter '<?xml version="1.0" encoding="ISO8859-1" ?>'
+		returning lr-ok	
+end-procedure
+
+procedure clibxml-write-node-value export
+parameter are
+	lp-node-name					pic x(256) type string
+	lp-node-value					pic x(1024) type string
+returning
+	lr-ok 							type boolean
+//
+	set lr-ok = TRUE
+	do clibxml-check-string 
+		parameter are lp-node-value 
+		returning lp-node-value
+	//
+	do clibxml-general-write parameter
+		str-concat(
+			"<",lp-node-name,">"
+			,lp-node-value
+			,"</",lp-node-name,">"
+			)
+		returning lr-ok	
+end-procedure
+
+procedure clibxml-add-attribute-string export
+parameters are
+	lp-input							pic x(1024) type string
+	lp-attr-name						pic x(256) type string
+	lp-attr-value						pic x(1024) type string
+returning
+	lr-output							pic x(1024) type string
+	lr-ok								type boolean
+//
+	set lr-ok = TRUE
+	//
+	do clibxml-check-string
+		parameters are lp-attr-value returning lp-attr-value
+	if ( str-len(lp-attr-name) + str-len(lp-attr-value) + 3 ) > (1024 - str-len(lp-input) )
+		// insufficient capacity
+		set lr-ok = FALSE
+		set lr-output = lp-input
+		exit
+	endif
+	set lr-output = lp-input
+	string lr-output appending concat(" ",str-concat(lp-attr-name,'="',lp-attr-value,'"'))
+end-procedure
+
+
+procedure clibxml-write-node-attribute export
+parameter are
+	lp-node-name						pic x(256) type string
+	lp-node-value						pic x(1024) type string
+	lp-node-attribute-str				pic x(1024) type string
+returning
+	lr-ok								type boolean
+//
+	set lr-ok = TRUE
+	do clibxml-check-string 
+		parameter are lp-node-value 
+		returning lp-node-value
+	//
+	do clibxml-general-write parameter
+		concat(
+			"<",lp-node-name
+			," ",lp-node-attribute-str," "
+			,">"
+			,lp-node-value
+			,"</",lp-node-name,">"
+			)
+		returning lr-ok	
+end-procedure
+
+procedure clibxml-begin-node  export
+parameters are 
+	lp-node-name					pic x(256) type string
+returning 
+	lr-ok							type boolean
+local
+	lf-ok							type boolean
+	i								type number
+//
+	set lr-ok = TRUE
+	//
+	// firstly check that this node is not already on the
+	// stack and if it is, then pop until it isn't
+	//
+	for i = 1 to clibxml-stack-top
+#ifdef clibxmlDEBUG
+		do clibxml-general-write parameter
+			str-concat("<!-- DEBUG  begin node stack :",clibxml-stack[i],"-->")
+#endif
+		if clibxml-stack[i] = lp-node-name
+			do clibxml-end-node parameter are lp-node-name
+			break
+		endif
+	end-for
+	//
+	do clibxml-push parameters are lp-node-name 
+		returning lf-ok
+	if lf-ok
+		do clibxml-general-write parameter concat("<",lp-node-name,">") 
+			returning lr-ok
+	else
+		set lr-ok = FALSE
+	endif
+#ifdef clibxmlDEBUG
+		set clibxml-text = str-concat("<!-- DEBUG  end of being :",clibxml-stack[i],"-->")
+#endif
+end-procedure
+
+procedure clibxml-begin-node-with-attribute  export
+parameters are 
+	lp-node-name					pic x(256) type string
+	lp-attribute-string				pic x(1024) type string
+returning 
+	lr-ok							type boolean
+local
+	lf-ok							type boolean
+	i								type number
+//
+	set lr-ok = TRUE
+	//
+	// firstly check that this node is not already on the
+	// stack and if it is, then pop until it isn't
+	//
+	for i = 1 to clibxml-stack-top
+#ifdef clibxmlDEBUG
+		do clibxml-general-write parameter
+			str-concat("<!-- DEBUG  begin node stack :",clibxml-stack[i],"-->")
+#endif
+		if clibxml-stack[i] = lp-node-name
+			do clibxml-end-node parameter are lp-node-name
+			break
+		endif
+	end-for
+	//
+	do clibxml-push parameters are lp-node-name 
+		returning lf-ok
+	if lf-ok
+		do clibxml-general-write parameter concat("<",lp-node-name," ",lp-attribute-string,">") 
+			returning lr-ok
+	else
+		set lr-ok = FALSE
+	endif
+#ifdef clibxmlDEBUG
+		set clibxml-text = str-concat("<!-- DEBUG  end of being :",clibxml-stack[i],"-->")
+#endif
+end-procedure
+
+procedure clibxml-end-node  export
+parameters are 
+	lp-node-name					pic x(256) type string
+returning 
+	lr-ok							type boolean
+local
+	lf-ok							type boolean
+	lf-node							pic x(256) type string
+	i type number
+//
+	set lf-ok = FALSE
+#ifdef clibxmlDEBUG
+	for i = 1 to clibxml-stack-top
+		do clibxml-general-write parameter
+			str-concat("<!-- DEBUG  begin of end node. stack :",clibxml-stack[i],"-->")
+	endfor
+#endif
+	for i = 1 to clibxml-stack-top
+		if clibxml-stack[i] = lp-node-name
+			set lf-ok = TRUE
+			break
+		endif
+	endfor
+	if not lf-ok
+		do clibxml-comment parameters concat(
+			"Attempted to close ",lp-node-name
+			,"-at this point but it is not on the stack")
+		exit // the current node is nowhere on the stack.
+	endif
+	do clibxml-pop
+		returning lf-node lf-ok
+	if not lf-ok
+		set lr-ok = FALSE
+		exit
+	endif
+	while lf-node <> lp-node-name
+		do clibxml-general-write parameter concat("</",lf-node,">")
+			returning lr-ok 
+		do clibxml-pop
+			returning lf-node lf-ok
+		if not lf-ok
+			set lr-ok = FALSE
+			exit
+		endif
+	end-while
+	do clibxml-general-write parameter concat("</",lp-node-name,">")
+		returning lr-ok 
+#ifdef clibxmlDEBUG
+		do clibxml-general-write parameter
+			str-concat("<!-- DEBUG  end of end node. -->")
+#endif
+end-procedure
+
+procedure clibxml-comment export
+parameters are 
+	lp-string						pic x(1024) type string
+returning 
+	lr-ok							type boolean
+//
+	set lr-ok = TRUE
+	//
+	do clibxml-check-string parameters are lp-string
+		returning lp-string
+	do clibxml-general-write parameter
+		concat("<!--",lp-string,"-->")
+		returning lr-ok 
+end-procedure
+
+/*
+
+can't see the point of this when you can just use clibxml-general-write
+
+procedure clibxml-text export
+parameters are 
+	lp-string						pic x(1024) type string
+returning 
+	lr-ok							type boolean
+//
+	set lr-ok = TRUE
+	//
+	do clibxml-general-write parameter lp-string
+		returning lr-ok	
+end-procedure
+*/
+
+procedure clibxml-close export
+returning
+	lr-ok							type boolean
+local
+	i								type number
+	for i = clibxml-stack-top down to 1
+		do clibxml-general-write parameter
+			str-concat("</",clibxml-stack[i],">")
+			returning lr-ok	
+	end-for
+	set clibxml-stack-top = 0
+	if clibxml-output = "F"
+		close clibxml-file
+	else
+		report finished
+	endif
+end-procedure
+
+
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                

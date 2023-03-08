@@ -1,0 +1,148 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : 
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2022
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: whse/enqpickjobs.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 05May22  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+#include "../include/i8wrtdefs.spl"
+#include "../include/i8gparam.spl"
+ 
+field
+	ws-function-title					type string
+	ws-whse								like whse-code
+
+mode md-order
+	prompt "Order Enq"
+	help "Display full order details"
+
+procedure main
+local
+	lf-order-no							like so-order-no
+	lf-bo-suffix						like so-bo-suffix
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8secabt-check-abort
+		parameters are sys-consolidation-division login-id() "EMS" "X000"
+		returning ws-function-title 
+	do i8proglog-write-log
+	get warehouse-user-access
+		on index wu-user-id
+		key is login-id()
+	on error ENOREC
+		message "User not setup for any warehouse"
+		exit 1
+	endon
+	set ws-whse = wu-whse-code
+	I8GPARAM_NUM_ALPHA("-order",zero,lf-order-no,lf-bo-suffix)
+	do display-pick-jobs
+		parameters are lf-order-no lf-bo-suffix 
+end-procedure
+
+screen display-pick-jobs
+parameters
+	lp-order-no							like so-order-no
+	lp-bo-suffix						like so-bo-suffix
+	window
+	datagrid
+	title concat("Pick Jobs for " ws-whse)
+	select
+		t0.sopl-pick-job-no,
+		t0.so-order-no, 
+		t0.so-bo-suffix, 
+		t4.so-cust-code,
+		t5.shortname,
+		t0.sol-line-seq,
+		t0.whse-code, 
+		t0.pick-batch-no, 
+		t0.sl-location-code,
+		t0.sol-qty-to-pick, 
+		t0.sol-picked-qty,
+		t1.sopbj-zones,
+		t2.wrf-resource-code,
+		t3.wrf-resource-desc,
+		t6.stock-code
+		t7.stk-description
+		FROM sales-order-picking-location as t0
+		inner JOIN sales-order-pick-batch-jobs as t1 ON t0.sopl-pick-job-no = t1.sopbj-pick-job-no
+		inner JOIN warehouse-resource-trans as t2 
+			ON t2.wrt-oper-ref-no = t0.sopl-pick-job-no 
+			AND t2.wrt-oper-status NOT IN 
+				(I8WRTDEFS_RTS_PICK_ALLOCATED 
+				I8WRTDEFS_RTS_PACK_COMPLETED
+				I8WRTDEFS_RTS_PACK_ALLOCATED) 
+			AND t2.wrt-type = I8WRTDEFS_WRT_PICK_JOB
+		inner JOIN warehouse-resource-status as t3 ON t3.wrf-resource-code = t2.wrf-resource-code 
+		inner join sales-order as t4 on t4.so-order-no = t0.so-order-no and t4.so-bo-suffix = t0.so-bo-suffix
+		inner join deb-master as t5 on t5.accountcode = t4.so-cust-code
+		inner join sales-order-line as t6 
+			on t6.so-order-no = t0.so-order-no 
+			and t6.so-bo-suffix = t0.so-bo-suffix
+			and t6.sol-line-seq = t0.sol-line-seq
+		left outer join stock-master as t7
+			on t7.stock-code = t6.stock-code
+		where 
+			t0.whse-code = :ws-whse
+			AND
+			(
+				( :lp-order-no = 0 )
+				OR
+				(t0.so-order-no = :lp-order-no and t0.so-bo-suffix = :lp-bo-suffix)
+			)
+		order by t0.sopl-pick-job-no
+	allowed search md-order
+detail
+	if screenmode = md-order
+		spl 'so/m5ordenq' parameters are "-e"
+			so-order-no so-bo-suffix
+	endif
+	accept  sopl-pick-job-no col 1
+		when screen-mode = search
+		show-value
+	display so-order-no  col 2 
+		title "Order"
+	display so-bo-suffix  col 3 
+		title "Sfx"
+	display so-cust-code col 4 
+		title "Account"
+	display shortname col 5 
+		title "Name"
+	display sol-line-seq col 6 
+		title "Line"
+	display stock-code col 7
+		title "Stock"
+	display stk-description col 8
+		title "Stk Desc"
+	display	pick-batch-no  col 9 
+		title "Pick Batch"
+	display sl-location-code col 10 
+		title "Location"
+	display sol-qty-to-pick  col 11 
+		title "Pick Qty"
+	display sol-picked-qty col 12 
+		title "Picked Qty"
+	display sopbj-zones col 13 
+		title "Zones"
+	display wrf-resource-code col 14 
+		title "Resource Codes"
+	display wrf-resource-desc col 15 
+		title "Resource Desc"
+end-screen
+
+	
+	
+

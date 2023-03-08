@@ -1,0 +1,32 @@
+#PRONTO Screen Customiser File (Override statements only).
+#PCS_TIMESTAMP : Tue Sep 18 10:36:49 2018 rayb
+screen order-entry
+	{
+	accept
+		{
+		name = po-user-only-alpha20-1
+		suppress = false
+		coordinate = 30.00,17.00
+		}
+	accept
+		{
+		name = po-allocation-code
+		suppress = true
+		default = " "
+		}
+	accept
+		{
+		name = po-allocation-by-item-flag
+		suppress = true
+		default = " "
+		}
+	display
+		{
+		text = "Approver"
+		coordinate = 30.00,8.00
+		orig_coordinate = 31.00,8.00
+		orig_text = "Approver"
+		add = true
+		attributes = background, prompt
+		}
+	}

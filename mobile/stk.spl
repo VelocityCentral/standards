@@ -1,0 +1,367 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : STOCK Enquiry for Mobile
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2020
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: mobile/stk.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 11Jun20  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+#include "../include/i6postatii.spl"
+#include "../include/bmsdef.spl"
+
+link 'clib/clibsearch'
+link 'clib/clibatp'
+link 'clib/clib403'
+
+//#define RTITLE(ONE,TWO,THREE) param-text('{"title1":"<<p1>>","title2":"<<p2>>","title3":"<<p3>>"}',ONE,TWO,THREE)
+ 
+field
+	ws-function-title						type string
+
+mode md-select
+	prompt "Select"
+mode md-add
+	prompt "Add New"
+mode md-remove
+	prompt "Remove"
+
+procedure main
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8secabt-check-abort
+		parameters are sys-consolidation-division login-id() "ZMOB" "M003"
+		returning ws-function-title 
+	do i8proglog-write-log
+	do ent-search entry once
+end-procedure
+
+// ------------------------------------------------------------------------------
+//          Searching functions
+// ------------------------------------------------------------------------------
+
+screen ent-search
+local
+	lf-search							type string
+	lf-query-id							like scr-query-id
+	lf-context-list						type string
+	lf-error-found						type boolean
+	lf-error-message					type string
+	lf-success-message					type string
+	lf-context							like scr-result-context
+	lf-key								like scr-result-object-key
+	lf-item								like stock-code
+	lf-count							type number
+	window @1,1 to @6,50
+		title "Search"
+		window-position 5
+	responsive
+	//
+detail
+	screen-group
+	accept  lf-search
+		title "Key Word"
+	validations
+		set lf-context-list = "2" // only look for stock
+		do clibsearch-keyword-search									
+			parameter 
+				zero
+				lf-search
+				login-id()
+				lf-context-list
+				'N'
+				'N'
+			returning 
+				lf-query-id
+				lf-error-found
+				lf-error-message
+				lf-success-message
+		if lf-error-found
+			message-box 
+				lf-error-message
+				title is ws-function-title
+				message-buttons  MSG_BOX_CANCEL
+				icon MSG_BOX_STOP
+			re-enter
+		else
+			// check how many
+			select lf-count = count(*)
+				from search-central-results
+				where search-central-results.scr-query-id = :lf-query-id
+			end-select
+			if lf-count = 0
+				message "No Items found"
+				reenter lf-search
+			elseif lf-count > 1
+				do select-item parameters are 
+					lf-query-id, lf-search, spaces
+					returning lf-context lf-key
+				if lf-key = spaces
+					reenter lf-search
+				endif
+			else
+				select lf-key = max(scr-result-object-key)
+					from search-central-results
+					where search-central-results.scr-query-id = :lf-query-id
+				end-select
+			endif
+			// only need this if there is more than one context:
+//			do find-key
+//				parameters are lf-context lf-key
+//				returning lf-item
+			set  lf-item = lf-key
+			// check it
+			get stock-master lookup
+				on index stock-code
+				key is lf-item
+			on error ENOREC
+				message "No item found"
+				re-enter lf-search
+			endon
+			do stk-detail parameters are lf-item
+			exit
+		endif
+	end-validations
+	end-screen-group
+end-screen
+
+screen select-item
+parameter
+	lp-query-id							like scr-query-id
+	lp-search-term						type string pic x(250)
+	lp-current-lang						type string
+returning 
+	lr-context							like scr-result-context
+	lr-key								like scr-result-object-key
+	//
+	window @1,1 to @29,115
+		window-position 5
+	title concat("Keyword Search Results for ", upper-case(lp-search-term))
+	select *
+	from 
+		search-central-context-desc
+	inner join 
+		search-central-results
+		on search-central-results.scr-result-context = search-central-context-desc.ssct-context-id and
+			search-central-context-desc.ssct-context-language = lp-current-lang
+	where 
+		lp-query-id = search-central-results.scr-query-id
+	order by 
+		search-central-results.scr-result-object-key
+	//
+	allowed search md-select
+	datagrid occurs 28
+before	
+detail
+	if screenmode = md-select
+		//  Need to work out the CRM key from the searched data
+		set lr-context = scr-result-context
+		set lr-key = scr-result-object-key
+		exit
+	endif
+	accept	scr-result-object-key @1,1 pic x(25)
+		title 'Code'
+	display	scr-result-description @1,2 pic x(25)
+		title 'Description'	
+endscreen
+
+procedure find-key
+parameters
+	lp-context							like scr-result-context
+	lp-key								like scr-result-object-key
+returning
+	lr-item								like stock-code
+//
+	switch lp-context
+	case 4
+		set lr-item = lp-key
+	end-switch
+end-procedure
+
+//------------------------------------------------------------------------------
+//    Stock Functions
+//------------------------------------------------------------------------------
+//
+screen stk-detail
+parameters
+	lp-stock-code							like stock-code
+local
+	lf-group-desc							like sys-description
+	lf-status-desc							like ssd-description
+	window
+		title RTITLE(ws-function-title,stock-code,stk-description)
+	select 
+		t0.*,
+		t1.prc-wholesale-price
+		lf-group-desc = t2.sys-description
+		lf-status-desc = if-then-else(t3.ssd-description is null, "Status Not Found", t3.ssd-description)
+		from stock-master as t0
+		left outer join stock-status-desc as t3 on t3.ssd-status = t0.stk-stock-status and t3.ssd-language = spaces
+		left outer join stock-price as t1 on t1.stock-code = t0.stock-code and t1.prc-region-code = spaces
+		left outer join system-table as t2 on t2.sys-tbl-type = 'PG' and t2.sys-tbl-code = t0.stock-group
+		where t0.stock-code = :lp-stock-code
+	responsive
+	allowed show
+before
+	screen-section 
+		title "Warehouses"
+		do stk-whse parameters stock-code no-wait
+	end-screen-section
+	screen-section 
+		title "Purchases"
+		do stk-purchases parameters stock-code no-wait
+	end-screen-section
+	screen-section 
+		title "Sales"
+		do sg-open-orders parameters stock-code no-wait
+	end-screen-section
+detail
+	refresh title
+	screen-group
+		horizontal
+		accept stock-code
+			title "Code"
+			when screenmode = search
+			show-value
+		field-group
+			title "Description"
+			vertical
+			display stk-description
+			display stk-desc-line-2
+			display stk-desc-line-3
+		end-field-group
+		display lf-status-desc 
+			title "Item Type"
+		display lf-group-desc 
+			title "Group"
+		display prc-wholesale-price 
+			title "Price"
+		display stk-unit-desc pic x(6)
+			title "UOM"
+		display stk-apn-number
+			title "Bar Code"
+	end-screen-group
+end-screen
+
+screen stk-whse
+parameters
+	lp-stock-code							like stock-code
+local
+	lf-available							like whse-qty-on-hand
+	lf-atp									like whse-qty-on-hand
+	window
+	select *
+		from stock-warehouse-detail, system-table
+		where stock-code = :lp-stock-code
+		and sys-tbl-type = 'WH' and sys-tbl-code = whse-code
+	datagrid occurs 5
+detail
+	do clib403-calculate-available
+		parameters stock-code whse-code
+		returning lf-available
+	do clibatp-get-atp-stock-quantity-as-at-date
+		parameters stock-code whse-code loginid() today()
+		returning lf-atp
+	accept whse-code @1,1
+		title "Whse"
+	display sys-description @1,2
+		title "Name"
+	display whse-qty-on-hand @1,3
+		title "On Hand"
+	display whse-qty-on-order @1,4
+		title "On Order"
+	display lf-available @1,5
+		title "Available"
+	display lf-atp @1,6
+		title "ATP"
+end-screen
+
+screen stk-purchases
+parameters
+	lp-stock-code							like stock-code
+	window
+	select *
+		from purchase-order-line as t0
+		inner join purchase-order as t1
+			on t1.po-order-no = t0.po-order-no
+			and t1.po-backorder-flag = t0.po-backorder-flag
+		inner join purchase-order-status-desc as t2
+			on t2.posd-status = t1.po-order-status
+			and t2.posd-language = spaces
+		inner join cre-master as t3
+			on t3.cre-accountcode = t1.cre-accountcode
+		where t0.stock-code = :lp-stock-code
+		and t1.po-order-status < I6PO_UPDATED
+	datagrid occurs 5
+detail
+	accept po-order-no @1,1
+		title "Order"
+		when screenmode = search
+		show-value
+	accept po-backorder-flag @1,2
+		title "Order"
+		when screenmode = search
+		show-value
+	display cr-shortname @1,3 
+		title "Supplier"
+	display posd-description @1,4 pic x(20)
+		title 'Status'
+	display po-whse-code @1,5
+		title "Whse"
+	display po-arrival-date @1,6
+		title "Arrival"
+	display po-order-qty @1,7
+		title "Qty"
+end-screen
+
+screen sg-open-orders
+parameters
+	lp-stock-code							like stock-code
+	window
+	select *
+		from sales-order-line as t0
+		inner join sales-order as t1
+			on t1.so-order-no = t0.so-order-no
+			and t1.so-bo-suffix = t0.so-bo-suffix
+		inner join sales-order-status-desc as t2
+			on t2.sosd-status = t1.so-order-status
+			and t2.sosd-language = spaces
+		inner join deb-master as t3
+			on t3.accountcode = t1.so-cust-code
+		where t0.stock-code = :lp-stock-code
+	datagrid occurs 5
+detail
+	accept so-order-no @1,1
+		title "Order"
+		when screenmode = search
+		show-value
+	accept so-bo-suffix @1,2
+		title "Sfx"
+		when screenmode = search
+		show-value
+	display shortname @1,3 
+		title "Customer"
+	display sosd-description @1,4 pic x(20)
+		title 'Status'
+	display so-whse-code @1,5
+		title "Whse"
+	display so-order-date @1,6
+		title "Arrival"
+	display sol-ordered-qty @1,7
+		title "Qty"
+end-screen
+
+
+

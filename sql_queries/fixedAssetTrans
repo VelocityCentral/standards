@@ -1,0 +1,23 @@
+select 
+t1.location_code,
+t1.am_group,
+t1.sub_group,
+t1.branch_code,
+t1.class_code,
+t1.asset_no,
+t1.asset_status,
+t1.acquisition_cost,
+t1.acquisition_date,
+t1.disposal_date,
+t0.regime,
+t2.regime_desc,
+t0.batch_ref,
+t0.effective_date,
+t0.trans_type,
+t3.attd_description,
+t0.trans_amount
+
+from asset_master_trans t0
+ join asset_master t1 on t0.asset_no = t1.asset_no
+ join asset_regime_table t2 on t0.regime = t2.regime
+ join asset_trans_type_desc t3 on t0.trans_type = t3.attd_type and t3.attd_language = ''

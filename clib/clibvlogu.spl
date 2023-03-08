@@ -1,0 +1,171 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : unix style logging
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2016
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: clib/cliblog.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 04Apr16  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+/*
+
+	This documentation is in RST format.  To view this as a nice pdf goto
+	https://overbits.herokuapp.com/rsteditor/ or rst.ninjs.org and paste this content.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|           |           |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+
+	Alternatively
+
+	 =========== =========== ======================================================== 
+	  Direction   Data Type   Description                                             
+	 =========== =========== ======================================================== 
+	 =========== =========== ======================================================== 
+
+=========
+clibvlogu
+=========
+
+Similar to clibvlog but writes to text file instead of a database table.
+
+Creates a text file identical to standard unix style logging
+
+clibvlogu-set-log-file-name 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	Call this routine first to set the external filename 
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|    In     |String 256 |Full path to file (or pwd)                              |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvlogu-set-routine-name 
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	Call this in EVERY procedure that will write a log record prior to the write.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|    In     |String 256 |Procedure name to include in log file                   |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvloguu-xxxxxxx
+~~~~~~~~~~~~~~~~~~
+
+.. Note:: There are are four of these procedures:
+
+	- clibvlogu-error
+	- clibvlogu-warn
+	- clibvlogu-info
+	- clibvlogu-debug
+
+Parameters 
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|  In       |String 1k  |Message text                                            |
+	+-----------+-----------+--------------------------------------------------------+
+
+*/
+ 
+#include "../include/i8proglogparam.spl"
+
+object logfile
+	type is external
+	record is
+		f-date								type date
+		f-time								type time
+		f-user								pic x(50) type string
+		f-program							pic x(50) type string
+		f-routine							pic x(128) type string
+		f-log-type							pic x(20) type string
+		f-message							pic x(1024) type string
+	end-record
+
+field
+	ws-filename								pic x(256) type string
+	ws-routine								pic x(128) type string
+	ws-file-open							type boolean
+ 
+procedure library-init
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8proglogparam-write-log parameters are "clibvlogu"
+	set ws-file-open = false
+	set ws-filename = "pronto.log"
+end-procedure
+
+procedure write-log
+parameters
+	lp-type									like f-log-type
+	lp-message								like f-message
+	if not ws-file-open
+		open logfile
+			file is ws-filename
+			create permanent
+		set ws-file-open = TRUE
+	endif
+	initialise logfile
+	set f-date = today()
+	set f-time = tod()
+	set f-user = login-id()
+	set f-program = get-param(0)
+	set f-routine = ws-routine
+	set f-message = lp-message
+	set f-log-type = lp-type
+	insert logfile
+	on error
+	endon
+end-procedure
+
+procedure clibvlogu-set-log-file-name export
+parameters
+	lp-filename								like ws-filename
+	set ws-filename = lp-filename
+end-procedure
+
+procedure clibvlogu-set-routine-name export
+parameters
+	lp-routine								like ws-routine
+	set ws-routine = lp-routine
+end-procedure
+
+procedure clibvlogu-debug export
+parameters
+	lp-message								pic x(1024) type string
+	do write-log parameters are "DEBUG" lp-message
+end-procedure
+
+procedure clibvlogu-info export
+parameters
+	lp-message								pic x(1024) type string
+	do write-log parameters are "INFO" lp-message
+end-procedure
+
+procedure clibvlogu-warn export
+parameters
+	lp-message								pic x(1024) type string
+	do write-log parameters are "WARN" lp-message
+end-procedure
+
+procedure clibvlogu-error export
+parameters
+	lp-message								pic x(1024) type string
+	do write-log parameters are "ERROR" lp-message
+end-procedure

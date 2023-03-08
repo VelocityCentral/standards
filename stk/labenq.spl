@@ -1,0 +1,235 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : Laboratory Enquiry 
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2017
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: stk/labenq.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 21Dec17  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+
+#define MAXTESTS	20
+
+#define ACCEPTRESULT(A) \
+	accept lrm-result-A @1,3 + A \
+		title lf-test-title[A]   \
+		when lf-test-count >= A  \
+		conditional-suppress
+
+#define THISCASE(A)\
+	case A\
+		set lrm-result-A = stock-batch-average-result
+
+#define RESULT_DEFN(A) lrm-result-A			type number
+ 
+field
+	ws-function-title						type string
+
+/*
+The whole point of this program is display the test results
+in a datagrid so the user can sort and select.
+Unfortunately you cannot use the selection functions on array items
+so each result has to be fixed value
+*/
+
+object mem-lab-results
+	type is memory
+	record is
+		lrm-batch						like slm-lot-number
+		lrm-classification				like slm-test-classification
+		lrm-useby						type date
+		lrm-last-test-date				type date
+		lrm-next-test-date				type date
+		RESULT_DEFN(001)
+		RESULT_DEFN(002)
+		RESULT_DEFN(003)
+		RESULT_DEFN(004)
+		RESULT_DEFN(005)
+		RESULT_DEFN(006)
+		RESULT_DEFN(007)
+		RESULT_DEFN(008)
+		RESULT_DEFN(009)
+		RESULT_DEFN(010)
+		RESULT_DEFN(011)
+		RESULT_DEFN(012)
+		RESULT_DEFN(013)
+		RESULT_DEFN(014)
+		RESULT_DEFN(015)
+		RESULT_DEFN(016)
+		RESULT_DEFN(017)
+		RESULT_DEFN(018)
+		RESULT_DEFN(019)
+		RESULT_DEFN(020)
+	end-record
+	key is lrm-batch
+
+mode md-select
+	prompt "Select"
+
+procedure main
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+//	do i8secabt-check-abort
+//		parameters are sys-consolidation-division login-id() "ZUSR" "R004"
+//		returning ws-function-title 
+	do i8proglog-write-log
+	do stock-code-select
+end-procedure
+
+screen stock-code-select
+	window
+	select stock-code stk-description
+		from stock-master
+		where stock-code in (select pbt-stock-key from production-batch-tests)
+	datagrid occurs 22
+	allowed md-select search
+detail
+	if screenmode = md-select
+		do test-results parameters are stock-code
+	endif
+	accept stock-code @1,1
+		title "Stock Code"
+		when screenmode in (search)
+		show-value
+	display stk-description @1,2
+		title "Description"
+end-screen
+
+screen test-results
+parameters
+	lp-stock-code							like stock-code
+local
+	lf-test-count							type number
+	lf-test-title							pic x(30) type string occurs MAXTESTS
+	lf-test-codes							like stock-batch-property-code occurs MAXTESTS
+	window
+	datagrid occurs 22
+	select * from mem-lab-results
+before
+	do build-test-titles
+		parameters are lp-stock-code
+		returning lf-test-title lf-test-codes lf-test-count
+	do build-mem-lab-results
+		parameters are lp-stock-code lf-test-codes lf-test-count
+detail
+	accept lrm-batch @1,1
+		title "Batch"
+		when screenmode in (search)
+		show-value
+	display lrm-classification @1,2 pic x(12)
+		center
+		title "Classification"
+	ACCEPTRESULT(001)
+	ACCEPTRESULT(002)
+	ACCEPTRESULT(003)
+	ACCEPTRESULT(004)
+	ACCEPTRESULT(005)
+	ACCEPTRESULT(006)
+	ACCEPTRESULT(007)
+	ACCEPTRESULT(008)
+	ACCEPTRESULT(009)
+	ACCEPTRESULT(010)
+	ACCEPTRESULT(011)
+	ACCEPTRESULT(012)
+	ACCEPTRESULT(013)
+	ACCEPTRESULT(014)
+	ACCEPTRESULT(015)
+	ACCEPTRESULT(016)
+	ACCEPTRESULT(017)
+	ACCEPTRESULT(018)
+	ACCEPTRESULT(019)
+	ACCEPTRESULT(020)
+end-screen
+
+procedure build-mem-lab-results
+parameters
+	lp-stock-code 							like stock-code
+	lp-test-codes							like stock-batch-property-code occurs MAXTESTS
+	lp-test-count							type number
+local
+	i										type number
+//
+	close mem-lab-results
+		and remove
+	open mem-lab-results temporary
+	select *
+		from stock-lot-master
+		where stock-code = :lp-stock-code
+	detail
+		initialise mem-lab-results
+		set lrm-batch = slm-lot-number
+		set lrm-classification = slm-test-classification
+		set lrm-useby =  slm-use-by-date
+		set lrm-next-test-date = slm-retest-date
+		for i = 1 to lp-test-count
+			select * from production-batch-results
+				where stock-code = :lp-stock-code
+				and stock-batch-reference  = :lrm-batch
+				and stock-batch-property-code = :lp-test-codes[i]
+			detail
+				switch i
+				THISCASE(001)
+				THISCASE(002)
+				THISCASE(003)
+				THISCASE(004)
+				THISCASE(005)
+				THISCASE(006)
+				THISCASE(007)
+				THISCASE(008)
+				THISCASE(009)
+				THISCASE(010)
+				THISCASE(011)
+				THISCASE(012)
+				THISCASE(013)
+				THISCASE(014)
+				THISCASE(015)
+				THISCASE(016)
+				THISCASE(017)
+				THISCASE(018)
+				THISCASE(020)
+				end-switch
+			end-select
+		end-for
+		insert mem-lab-results
+	end-select
+end-procedure
+
+procedure build-test-titles
+parameters
+	lp-stock-code							like stock-code
+returning
+	lr-test-titles							pic x(30) type string occurs MAXTESTS
+	lr-test-codes							like stock-batch-property-code occurs MAXTESTS
+	lr-test-count							type number
+//
+	select stock-batch-property-code pbt-seq-no sys-description
+		from production-batch-tests system-table
+		where pbt-stock-key = lp-stock-code
+		and pbt-type = "1"
+		and sys-tbl-type = "PC"
+		and sys-tbl-code = stock-batch-property-code
+		order by pbt-seq-no
+	database-sql
+	before
+		set lr-test-count = 0
+	detail
+		set lr-test-count += 1
+		set lr-test-titles[lr-test-count] = sys-description
+		set lr-test-codes[lr-test-count] = stock-batch-property-code
+	end-select
+end-procedure
+
+
+

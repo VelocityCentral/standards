@@ -1,0 +1,52 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : 
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2019
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: clib/clibfcs.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 22May19  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+ 
+field
+	ws-function-title						type string
+
+procedure library-init
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+end-procedure
+
+
+procedure clibfcs-public-get-manual-forecasting-method export
+////////////////////////////////////////////////////////////////////////////////
+//<CLIB_DOC>
+//<DESC>
+//		This procedure allows the users to define the preferred forecasting 
+//		method to use in forecast detail record. The default value is SPACE.
+//
+//<P1>	Stock master record
+//
+//<R1>	Manual forecastong method
+//
+////////////////////////////////////////////////////////////////////////////////
+	parameter
+		lp-stock-master.*					like stock-master
+	returning
+		lr-manual-forecasting-method		like fd-manual-forecasting-method
+	//
+	set lr-manual-forecasting-method = "MF"	
+	//
+endprocedure //clibfcs-public-get-manual-forecasting-method ------------------
+

@@ -1,0 +1,182 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program :  Overrides
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2018
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: gl/m3cashflo_image.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 27Mar18  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/i8proglogparam.spl"
+
+link "clib/clibgl"
+ 
+field
+	ws-starting-date						type date
+	ws-starting-year						type number
+	ws-starting-period						type number
+
+procedure main export
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8proglogparam-write-log parameters are "m3cashflo_image"
+	report "debug"
+	do next main
+end-procedure
+
+
+procedure m3cashflow-image-custom-values export
+parameter
+	lp-date						type date
+returning
+	lp-num1						like cfpi-user-only-num1
+	lp-num2						like cfpi-user-only-num1
+	lp-num3						like cfpi-user-only-num1
+	lp-num4						like cfpi-user-only-num1
+	lp-num5						like cfpi-user-only-num1
+local
+	lf-dow						type number 
+	lf-amount					like cfpi-user-only-num1 
+	lf-num-array				like cfpi-user-only-num1 occurs 5
+	//
+	// Establish the start starting date
+	//
+	if ws-starting-date = 0
+		select ws-starting-date = min(cfpi-date)
+			from cash-flow-projection-image
+		end-select
+		select ws-starting-year = min(sctd-year)
+			ws-starting-period = min(sctd-period)
+			from system-control-time-dimension
+			where sctd-type = spaces
+			and sctd-date = :ws-starting-date
+		end-select
+	endif
+	//
+	set lf-num-array[*] = 0
+	set lf-num-array[1] = lp-num1
+	set lf-num-array[2] = lp-num2
+	set lf-num-array[3] = lp-num3
+	set lf-num-array[4] = lp-num4
+	set lf-num-array[5] = lp-num5
+	print "start" lf-num-array[1] lf-num-array[2] lf-num-array[3] lf-num-array[4]
+	//
+	// fixed dates
+	//
+	select * from cashflow-trans
+		where cf-date-type = "A"
+		and cf-date = :lp-date
+		and cf-cfpi-uonum between 1 and 5
+	detail
+		do get-amount returning lf-amount
+		set lf-num-array[cf-cfpi-uonum] += lf-amount
+	end-select
+	// 
+	// Dailies
+	//
+	select * from cashflow-trans
+		where cf-date-type = "C"
+		and cf-repeat-basis = "DAY"
+		and cf-cfpi-uonum between 1 and 5
+	detail
+		do get-amount returning lf-amount
+		set lf-num-array[cf-cfpi-uonum] += lf-amount
+	end-select
+	// 
+	// Weekly
+	//
+	set lf-dow = dow(lp-date)
+	select * from cashflow-trans
+		where cf-date-type = "C"
+		and cf-repeat-basis = "WEEK"
+		and cf-repeat-freq = :lf-dow
+		and cf-cfpi-uonum >= 1 
+		and cf-cfpi-uonum <= 5
+	detail
+		do get-amount returning lf-amount
+		set lf-num-array[cf-cfpi-uonum] += lf-amount
+	end-select
+	// 
+	// Monthly
+	//
+	select * from cashflow-trans
+		where cf-date-type = "C"
+		and cf-repeat-basis = "MTH"
+		and day(:lp-date) = cf-repeat-freq
+		and cf-cfpi-uonum between 1 and 5
+	detail
+		do get-amount returning lf-amount
+		set lf-num-array[cf-cfpi-uonum] += lf-amount
+	end-select
+	//
+	// set returning parameters
+	//
+	print "end:" lf-num-array[1] lf-num-array[2] lf-num-array[3] lf-num-array[4]
+	set lp-num1 = lf-num-array[1]
+	set lp-num2 = lf-num-array[2]
+	set lp-num3 = lf-num-array[3]
+	set lp-num4 = lf-num-array[4]
+	set lp-num5 = lf-num-array[5]
+endprocedure //m3cashflow-image-custom-values -------------------------------
+
+procedure get-amount
+// assumes currency on cashflow-trans
+returning
+	lr-amount							type number
+local
+	lf-current-balance					like glhp-amount 
+	lf-future-balance					like glhp-amount 
+	lf-total-balance					like glhp-amount 
+	lf-year-opening-balance				like glhp-amount 
+	lf-ytd-movement						like glhp-amount 
+	lf-period-opening-balance			like glhp-amount 
+	lf-period-movement					like glhp-amount 
+	//
+	if cf-amount-type = "F"
+		set lr-amount = cf-amount
+		exit 0
+	endif
+	//
+	// Gl Based
+	//
+	// Current movement
+	//
+	get gl-master 
+		on index gl-accountcode
+		key is cf-gl-account
+	on error
+		exit 0
+	endon
+	do clibgl-get-master-values
+		parameters are gl-master.* ws-starting-year ws-starting-period
+		returning 
+			lf-current-balance
+			lf-future-balance
+			lf-total-balance
+			lf-year-opening-balance
+			lf-ytd-movement
+			lf-period-opening-balance
+			lf-period-movement
+	//
+	switch cf-amount-type 
+	case  "M"
+		set lr-amount = lf-period-movement
+	case  "B"
+		set lr-amount = lf-current-balance
+	end-switch
+	if cf-negate-sign 
+		set lr-amount = 0 - lr-amount
+	endif
+end-procedure
+	
+

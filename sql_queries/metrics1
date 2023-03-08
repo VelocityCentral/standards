@@ -1,0 +1,11 @@
+select 
+
+
+cm_node_name Site,
+extend(cm_datetime,year to day) stat_date,
+cm_group_name group,
+cm_value_name measure,
+cm_value_numeric value
+
+from cusmetrics
+where cm_value_name in ( 'BUFWTRATIO','RARATIO')

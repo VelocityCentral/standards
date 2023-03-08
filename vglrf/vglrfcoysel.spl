@@ -1,0 +1,141 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : rf version of the company selection screen
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2011
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: vglrfcoysel.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 13Jan11	rayb		written
+////////////////////////////////////////////////////////////////////////////////
+//
+
+#include "../include/i8secabt.spl" 
+#include "../include/i8secok.spl" 
+#include "../include/i8proglog.spl" 
+
+link "vglrf/vglrfclib"
+
+field
+	ws-max-rows							type number
+	ws-max-cols							type number
+
+
+procedure main
+local
+	lf-coy-env							like sys-comp-environment-code
+	get system-control first 
+	on error
+		abort "No Control Record"
+	endon
+	do vglrfclib-screen-size returning ws-max-cols ws-max-rows
+	do i8proglog-write-log
+	do check-company returning lf-coy-env
+	if lf-coy-env = spaces
+		do prompt-for-company returning lf-coy-env
+	endif
+	if lf-coy-env = spaces
+		do vglrfclib-display-message parameters  "No Company Selected " 2
+		exit 
+	endif
+	command "sh" parameters are "-c" str-concat(get-env("PRONTO"),"/lbin/",lf-coy-env)
+	on error
+		do vglrfclib-display-message parameters  
+			str-concat("Unable to select correct Company - " error-description(exit-status)) 2
+	else
+		if exit-status() <> 0
+			do vglrfclib-display-message parameters  str-concat("Unable to select correct Company:" str(exit-status)) 2
+		endif
+	endon
+end-procedure
+
+procedure check-company
+returning
+	lr-coy-env							like sys-comp-environment-code
+local
+	lf-coy-count						type number
+//
+// If the user has only one company defined then return the env
+// otherwise return spaces
+//
+	select * from system-user
+		where user-id = login-id
+	detail
+		set lf-coy-count += 1
+		get system-companies 
+			on index sys-comp-code
+			key is sys-comp-code
+		on error
+		else
+			set lr-coy-env = sys-comp-environment-code
+		endon
+	end-select
+	if lf-coy-count > 1
+		set lr-coy-env = spaces
+	endif
+end-procedure
+
+menu prompt-for-company
+	window @1,1 to @ws-max-rows - 1, ws-max-cols - 1
+returning 
+	lr-env								like sys-comp-environment-code
+local
+//	lf-coys								like sys-comp-desc occurs 20
+	lf-env								like sys-comp-environment-code occurs 20
+	lf-option-text						pic x(20) occurs 20
+	i									type number
+before 
+	box
+	clear
+	set i = 0
+	select * from system-user
+		where user-id = login-id
+	detail
+		get system-companies 
+			on index sys-comp-code
+			key is sys-comp-code
+		on error
+		else
+			set i += 1
+			set lf-env[i] = sys-comp-environment-code
+			set lf-option-text[i] = concat(str(i) "." sys-comp-desc)
+		endon
+	end-select
+detail
+	option lf-option-text[1] @2,2
+		when i >= 1
+		set lr-env = lf-env[1]
+	option lf-option-text[2] @3,2
+		when i >= 2
+		set lr-env = lf-env[2]
+	option lf-option-text[3] @4,2
+		when i >= 3
+		set lr-env = lf-env[3]
+	option lf-option-text[4] @5,2
+		when i >= 4
+		set lr-env = lf-env[4]
+	option lf-option-text[5] @6,2
+		when i >= 5
+		set lr-env = lf-env[5]
+	option lf-option-text[6] @7,2
+		when i >= 6
+		set lr-env = lf-env[6]
+	option lf-option-text[7] @8,2
+		when i >= 7
+		set lr-env = lf-env[7]
+	option lf-option-text[8] @9,2
+		when i >= 8
+		set lr-env = lf-env[8]
+	confirm auto
+	confirmed
+		exit
+	end-confirm
+end-menu
+
+

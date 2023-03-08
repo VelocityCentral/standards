@@ -1,0 +1,1662 @@
+//////////////////////////////////////////////////////////////////////////////
+//
+// Program : Report Generator - Import and defintion tool
+//
+// ?985-2014 Velocity Global Limited. All rights reserved.
+//
+// File : definer.spl
+//
+//////////////////////////////////////////////////////////////////////////////
+#include 'apollodef.spl'
+#include 'common.spl'
+
+#define DIMAXBREAKS 100
+#define TAB ascii-char(9)
+#define APPSERV_COMPILE TRUE //security-level() < 8 
+
+
+link 'clib/clibvfile'
+link 'sys/m8compile'
+
+mode rt-select
+	prompt is "Select"
+mode rt-columns
+	prompt is "Co&lumns"
+mode rt-gen
+	prompt is "Generate"
+mode rt-conditions
+	prompt is "Con&ditions"
+mode rt-compile
+	prompt is "Com&pile"
+mode rt-run
+	prompt is "Run"
+mode rt-notes
+	prompt is "Notes"
+mode rt-sql
+	prompt is "S&QL"
+	help "Edit SQL for this query"
+mode rt-modfunc
+	prompt "Modules and Functions"
+	help "Jump to Modules and functions maintenance"
+mode rt-xml-save
+	prompt "Save"
+	help "Save this report definition to an XML file"
+mode rt-xml-open
+	prompt "Open"
+	help "Open an existing XML report definition file"
+mode rt-preferences
+	prompt "Pre&ferences"
+	help "Set Global Prefrences"
+mode rt-notes-user
+	prompt "User"
+	help "User Notes"
+mode rt-notes-design
+	prompt "Design"
+	help "Designer Notes"
+mode rt-notes-compile
+	prompt "Com&pile"
+	help "Compile results"
+
+field
+	ws-location							pic x(512) type string // PWD containing definition files
+
+object tmp-sqltext-file
+	type text
+	record
+		tmp-seq							like ap-sql-seq
+		tmp-text						like ap-sql-text
+	endrecord
+
+object text-file
+	type is text
+	record
+		tf-text							pic x(4096) type varchar
+	end-record
+
+object mem-file
+	type is memory
+	record
+		mf-seq							type number
+		mf-text							pic x(4096) type varchar
+	end-record
+	key is mf-seq
+
+#define INSERT_TEXT(A) \
+	set tf-text = A \
+	insert text-file \
+	on error \
+	endon
+
+#define INSERT_MEM_TEXT(A,B) \
+	set mf-seq = A \
+	set mf-text = B \
+	insert mem-file \
+	on error \
+	endon \
+	set A += smallest-increment(mf-seq)
+
+procedure main
+local
+	lf-ok					type boolean
+	lf-di-project			type string
+	set ws-current-dictionary = get-env("PRODICT")
+	//
+	//  Set the global preferences.  These are stored in ws-pref global
+	//  variables and defined in common
+	//
+	do get-global-preferences
+	if file-exists(ws-pref-xmlfolder,false) <> 2
+		do maintain-preferences entry once
+	endif
+	do check-pcs-file returning lf-ok
+	if not lf-ok
+		message-box param-text("<<P1>><<BR>><<p2>>"
+			,"There appears to be no PROSCREEN mode for Apollo"
+			,"Select Yes to fix this or No to use it without the mode")
+			title is "Apollo Report Writer"
+			message-buttons MSG_BOX_YES_NO
+			icon MSG_BOX_WARNING
+		if message-status() = MSG_BOX_YES
+			do update-pcs-file
+		endif
+	endif
+	do open-empty-files
+	do para-check-value parameters are "-di" returning lf-di-project
+	if lf-di-project <> spaces
+		do import-di-project
+			parameters are lf-di-project
+	endif
+	do one-rtvl-screen 
+end-procedure
+
+screen one-rtvl-screen
+local
+	lf-file-spec						pic x(1024) type string
+	lf-dir-spec							pic x(1024) type string
+	lf-xml-filename						pic x(1024) type string
+	lf-apollo-dir						pic x(100) type string
+	lf-ok								type boolean
+	lf-message							pic x(256) type string
+	lf-exit-status						type number
+	window @1,1 to @24,100
+	title PROGRAM_NAME
+	form-entry
+	select * from reportdef
+	allowed correct rt-xml-open rt-xml-save rt-columns rt-conditions rt-sql 
+		rt-notes rt-gen rt-compile rt-run rt-preferences rt-modfunc
+before
+	box @13,4 to @16,85 
+		title "Program Attributes" 
+	box @9,4 to @12,85 
+		title "Data File" 
+	box @2,4 to @8,85 
+		title "Program Details" 
+detail
+	if screen-mode() = rt-preferences
+		do maintain-preferences entry once
+	endif
+	if screen-mode() = rt-xml-open
+		do clibvfile-chooser 
+			parameters are "?*.xml" ws-pref-xmlfolder
+			returning lf-file-spec lf-dir-spec
+		if lf-file-spec <> spaces
+			do load-from-xml 
+				parameters are str-concat(lf-dir-spec "/" lf-file-spec)
+			reselect
+			refresh data
+		endif
+	endif
+	if screen-mode() = rt-gen
+		do determine-xml-filename parameter are ap-name
+			returning lf-xml-filename
+		do save-as-xml parameters ap-name lf-xml-filename
+		do get-apollo-dir returning lf-apollo-dir
+		spl str-concat(lf-apollo-dir,"/generator") parameters are "-xml" lf-xml-filename
+		on error
+			if exit-status = -3  // could not find program
+				spl "apollo/generator" parameters are ap-name ws-location
+			endif
+		endon
+		do load-from-xml parameters are lf-xml-filename
+		reselect
+		refresh data
+	endif
+	if screen-mode() = rt-compile
+		if operating-system = 'WINDOWS'
+			command "procmp" parameters are "-lw" "-I" str-concat(get-env("BMS"),"/include") ap-full-pgm
+			if exit-status() = 0
+				// always need to load the errors to ensure that if the pgm
+				// did compile the old ones are removed.
+				do load-compile-errors parameters are ap-name ap-full-pgm
+				message "Compiled OK"
+			else
+				do load-compile-errors parameters are ap-name ap-full-pgm
+				message "Did Not Compile"
+				do maintain-notes parameters are
+					ap-name "COMPILE" false
+			endif
+		else
+			if APPSERV_COMPILE
+				//
+				do m8compile-compile-program parameter ap-full-pgm 
+						concat("-lw -I ",str-concat(get-env("BMS"),"/include") )
+						FALSE
+					returning lf-exit-status lf-message
+				do load-compile-errors parameters are ap-name ap-full-pgm
+				if lf-exit-status = 1
+					message-box param-text("<<P1>><<BR>><<p2>>"
+						,"Program Failed to Compile"
+						,lf-message)
+						title is PROGRAM_NAME
+						message-buttons MSG_BOX_CANCEL
+						icon MSG_BOX_STOP
+					do maintain-notes parameters are
+						ap-name "COMPILE" false
+				endif
+			else
+				command 'sh' parameters '-c' 
+					concat('procmp -lw ' ap-full-pgm ' > /dev/null')
+				if not exit-status()
+					do load-compile-errors parameters are ap-name ap-full-pgm
+						returning lf-ok
+					message "Compiled OK"
+				else
+					message "Did Not Compile"
+					do load-compile-errors parameters are ap-name ap-full-pgm
+						returning lf-ok
+					do maintain-notes parameters are
+						ap-name "COMPILE" false
+				endif
+			endif
+		endif
+	endif
+	if screen-mode() = rt-run
+		spl ap-full-pgm //concat(get-env('CUS'),"/apollo/",ap-spl-name)
+	endif
+	if screen-mode() = rt-columns
+		do rtvl-sel-files
+			parameters are ap-name
+	endif
+	if screen-mode() = rt-run
+		spl ap-full-pgm //concat(get-env('CUS'),"/apollo/",ap-spl-name)
+	endif
+	if screen-mode() = rt-conditions
+		do rtvl-conditions
+	endif
+	if screenmode = rt-notes
+		do maintain-notes
+			parameters are ap-name "USER" TRUE
+	endif
+	if screen-mode() = rt-xml-save
+		do determine-xml-filename parameter are ap-name
+			returning lf-xml-filename
+		do save-as-xml parameter are ap-name lf-xml-filename
+		message "XML File saved"
+	endif
+	if screen-mode() = rt-sql
+		do rtvl-sql parameters are ap-name
+	endif
+	if screenmode() = rt-modfunc
+		spl 'sys/m8modfunc'
+	endif
+	display ap-name @3,18 pic x(10)
+		title "Name :"
+	accept ap-di-project @3,59
+		title "DI Project"
+		help "Data Intelligence Project"
+	accept ap-desc @4,18 pic x(30)
+		title "Description :"
+		help "This is the name and title of the report"
+	accept ap-spl-name @5,18
+		title "Program Name :"
+		help "This is the name that the final program will be called"
+	accept ap-skeleton @6,18 pic x(30)
+		title "Skeleton :"
+		default "apolloskeldi.spl"
+		help "This is the name of the skeleton that will be used when generating"
+	accept ap-full-pgm @7,18 pic x(60)
+		title "Full Path :"
+		show-value
+		help "Full path to generated program"
+	before-accept
+		if ap-full-pgm = spaces
+			set ap-full-pgm = str-concat(get-env("CUS"),"\",ap-spl-name,".spl")
+			if operating-system = "WINDOWS"
+				do swap-character parameters are ap-full-pgm "/" "\" returning ap-full-pgm
+			else
+				do swap-character parameters are ap-full-pgm "\" "/"  returning ap-full-pgm
+			endif
+		endif
+	end-before-accept
+//	accept ap-primary @10,18 pic x(30)
+//		title "Primary File :"
+//		optional
+//		help "This is the primary file - Lowest level of the detail"
+	accept ap-monitor @10,18 pic x(30)
+		title "Monitor :"
+		help "This is the field that is displayed on the screen when the program is running"
+		optional
+	check-box ap-xml @14,16
+		values YES NO
+		title "Full XML"
+		right-coordinate
+		default is YES
+		help "Y for full xml report N for not"
+	end-check-box 
+	accept ap-module @14,32
+		uppercase
+		default "ZUSR"
+		help "Module Code"
+		title "Module:"
+	accept ap-function @14,49
+		uppercase
+		default "R001"
+		help "Function Code"
+		title "Function:"
+after
+	// check if the di project needs updating
+	if ap-di-project <> spaces
+		get data-intel-master
+			on index dim-project-id
+			key is ap-di-project
+		on error
+		else
+			if ap-module <> dim-project-module
+			or ap-function <> dim-project-function
+				message-box param-text("<<P1>><<BR>><<p2>>"
+					,"The Data Intelligence Project has a different Module and Function code from the report"
+					,"Select YES to change the Data Intelligence Project to match the report")
+					title is "Apollo Generator"
+					message-buttons MSG_BOX_YES_NO
+					icon MSG_BOX_QUESTION
+				if message-status = MSG_BOX_YES
+					get data-intel-master
+						on index dim-project-id
+						key is ap-di-project
+						lock
+					set dim-project-module = ap-module
+					set dim-project-function = ap-function
+					update data-intel-master
+					on error
+					endon
+				endif
+			endif
+		endon
+	endif
+end-screen
+
+screen rtvl-sel-files
+parameters
+	lp-name								like ap-name
+local
+	last-obj			like ap-obj-name
+	l-ok				type boolean
+	lf-sort-seq			pic 9999 occurs 100
+	i					type number
+	lf-counter			type number
+	lf-found-it			type boolean
+	lf-dict				pic X
+	allowed search entry remove correct rt-select 
+	datagrid occurs 22
+	select * from  reportfil
+		order by ap-name ap-print-line ap-col
+		where ap-name = :lp-name
+	window @1,1 to @24,100
+	title "Fields and files"
+detail
+	if screen-mode() = rt-select
+		do rtvl-sel-files-detail
+		refresh review
+	endif
+	if screen-mode() = entry
+		set ap-obj-name = last-obj
+	endif
+	accept ap-obj-name @1,1 pic x(15)
+		title "File"
+		default ap-obj-name
+		lowercase
+		help "* here will allow you to key in any field name for working fields"
+	on help-key
+		do select-file returning ap-obj-name
+		reenter optional
+	endon
+	validations
+		if ap-obj-name <> "*"
+			do get-dict-object
+				parameters are ap-obj-name returning l-ok
+			if not l-ok
+				message "Invalid File"
+				re-enter 
+			endif
+		endif
+	end-validations
+	accept ap-fld-name @1,2 pic x(15)
+		title "Field"
+		default ap-fld-name
+		lowercase
+	on help-key
+		do select-field parameters are ap-obj-name returning ap-fld-name
+		reenter optional
+	endon
+	validations
+		if ap-obj-name <> "*"
+//			do get-dict-field
+//				parameters are ap-fld-name spaces returning l-ok lf-dict
+			do get-dict-obj-field
+				parameter are ap-obj-name ap-fld-name spaces 
+				returning l-ok lf-dict
+			set ap-fld-source = lf-dict
+			if not l-ok
+				message "Invalid field"
+				re-enter 
+			endif
+			get dict-record
+				on index fld-id obj-id 
+				key is  fld-id obj-id
+			on error
+				get cus-dict-record
+					on index fld-id obj-id 
+					key is  fld-id obj-id
+				on error
+					get dist-dict-record
+						on index fld-id obj-id 
+						key is  fld-id obj-id
+					on error
+					message "Field not in this file"
+					re-enter 
+					endon
+				endon
+			endon
+		else
+			if pattern(ap-fld-name,"^ws-.*")
+				message-box param-text("<<P1>><<BR>><<p2>>"
+					,"Working fields cannot start with ws-"
+					,"Try using lf-")
+					title is "Apollo Report Writer"
+					message-buttons MSG_BOX_CANCEL
+					icon MSG_BOX_STOP
+				re-enter
+			endif
+		endif
+	end-validations
+	accept ap-sort-seq @1,5 pic z(4)
+		centre
+		title "Sort"
+		optional
+	accept ap-col @1,6 pic z(4)
+		centre
+		title "Seq"
+		optional
+		help 'enter the column sequence across the page'
+	accept ap-total-flg @1,7 pic x(5)
+		centre
+		title "Total"
+		optional
+		uppercase
+		allowed YES NO spaces
+		help 'enter Y to total this column'
+	accept ap-group @1,8 pic z(6)
+		centre
+		title "Group"
+		optional
+		uppercase
+		help 'Enter the number of the level to print totals on change of this column'
+	accept ap-suppress-dup @1,9 pic x(9)
+		centre
+		title "Supp Dup"
+		optional
+		uppercase
+		allowed YES NO spaces
+		help 'enter Y to suppress duplicate values in this column'
+	accept ap-xml-hide @1,10 pic x(7)
+		centre
+		title "Hide"
+		optional
+		uppercase
+		allowed spaces "C" "H"
+		help 'Spaces causes no xml hiding.  C will make the section able to be hidden, H will hide it'
+	accept ap-print-line @1,11 pic z(6)
+		centre
+		title "Line"
+		optional
+		help "0 or spaces will print in a detail line, 1-99 will print in a sub heading - must be the same as the sort seq"
+	accept ap-print-pic @1,12 
+		centre
+		title "Picture"
+		optional
+		help "x(30), z(5), s(9).99, $$$,$$$.00 - not that dollar signs will format the spreadsheet column as currency."
+	validations
+		if ap-obj-name = "*" and ap-print-pic = spaces
+			message "You must have a picture clause for working fields"
+			reenter
+		endif
+	end-validations
+	confirm auto
+		set last-obj = ap-obj-name
+	end-confirm
+after
+	select * from reportfil
+		order by ap-name ap-fld-name
+		where ap-name = :lp-name
+	before ap-fld-name
+		set lf-counter = 0
+	detail
+		set lf-counter += 1
+	after ap-fld-name
+		if lf-counter > 1
+			acknowledge "Report " ap-name " field " ap-fld-name " occurs " str(lf-counter) " times"
+			acknowledge "You cannot have the same field name chosen"
+			acknowledge "More than once.  The generated program will"
+			acknowledge "be crap."
+			back-to-detail
+		endif
+	end-select
+	select * from reportfil
+	detail
+		if ap-sort-seq <> 0
+			set lf-found-it = false
+			for i = 1 to occurence(lf-sort-seq)
+				if lf-sort-seq[i] = ap-sort-seq
+					set lf-found-it = true
+					break
+				endif
+			endfor
+			if not lf-found-it
+				for i = 1 to occurence(lf-sort-seq)
+					if lf-sort-seq[i] = 0
+						break
+					endif
+				endfor
+				set lf-sort-seq[i] = ap-sort-seq
+			endif
+		endif
+	end-select
+	select * from reportfil
+	detail
+		if ap-print-line <> 0
+			set lf-found-it = false
+			for i = 1 to occurence(lf-sort-seq)
+				if lf-sort-seq[i] = ap-print-line
+					set lf-found-it = true
+					break
+				endif
+			endfor
+			if not lf-found-it
+				acknowledge "You have set a print line variable to a value"
+				acknowledge "for which there is no corresponding sort sequence"
+				back-to-detail
+			endif
+		endif
+	end-select
+end-screen
+
+screen rtvl-sel-files-detail
+local 
+	l-pic-string			pic x(20)
+	l-ok					type boolean
+	l-dict					pic x
+	lf-col-head				like doc-line
+	lf-field-is-array		type boolean
+	allowed correct 
+	form-entry
+	primary reportfil
+	same ap-name ap-obj-name ap-fld-name
+	window @1,1 to @23,80
+	title "Detail of fields"
+before
+	box @1,4 to @4,75 
+		title "Field"
+	box @9,4 to @15,77 
+		title "Layout"
+	box @5,4 to @8,75 
+		title "Attributes "
+detail
+	if ap-suppress-prt not in (YES SPACES)
+		set ap-suppress-prt = spaces
+	endif
+	if ap-obj-name = "*"
+		set l-pic-string = spaces
+		set lf-col-head = spaces
+	else
+		do picture-string parameters are ap-fld-name returning l-pic-string
+		do get-fld-col-head parameters are ap-fld-name ap-fld-source
+			returning lf-col-head
+	endif
+	set lf-field-is-array = FALSE
+//	do get-dict-field parameters are ap-fld-name spaces returning l-ok l-dict
+	do get-dict-obj-field
+		parameter are ap-obj-name ap-fld-name spaces 
+		returning l-ok l-dict
+	if l-ok
+		if fld-occurs > 1
+			set lf-field-is-array = TRUE
+		endif
+	endif
+	display lf-col-head @13,46 pic x(30)
+			foreground prompts
+	if ap-print-pic = spaces
+		set ap-print-pic = l-pic-string
+	endif
+	if ap-col-head[1] = spaces
+		set ap-col-head[1] = lf-col-head
+	endif
+	accept ap-obj-name @2,22 pic x(30)
+		title "File :"
+		lowercase
+	on help-key
+		do select-file
+	endon
+	validations
+		if ap-obj-name <> "*"
+			do get-dict-object parameters are ap-obj-name returning l-ok l-dict
+			if not l-ok
+				message "Invalid File"
+				re-enter 
+			endif
+		endif
+	end-validations
+	accept ap-fld-name @3,22 pic x(30)
+		title "Field :"
+		lowercase
+	validations
+		if ap-obj-name <> "*"
+//			do get-dict-field parameters are ap-fld-name spaces returning l-ok l-dict
+			do get-dict-obj-field
+				parameter are ap-obj-name ap-fld-name spaces 
+				returning l-ok l-dict
+			if not l-ok 
+				message "Invalid field"
+				re-enter 
+			endif
+			if l-dict = "B"
+				get dict-record
+					on index fld-id obj-id 
+					key is  fld-id obj-id
+				on error
+					message "Field not in this file"
+					re-enter 
+				endon
+			elseif l-dict = "C"
+				get cus-dict-record
+					on index fld-id obj-id 
+					key is  fld-id obj-id
+				on error
+					message "Field not in this file"
+					re-enter 
+				endon
+			else
+				get dist-dict-record
+					on index fld-id obj-id 
+					key is  fld-id obj-id
+				on error
+					message "Field not in this file"
+					re-enter 
+				endon
+			endif
+		endif
+	end-validations
+	accept ap-array-offset @3,60 pic zzzz
+		title "Array offset:"
+		help "If the field is an array, then enter the array offset"
+		when lf-field-is-array
+	accept ap-sort-seq @6,22 pic zz
+		title "Sort:"
+		optional
+	accept ap-col @6,35 pic zz
+		title "Column:"
+		optional
+		help 'enter the column sequence across the page'
+	accept ap-group @6,48 pic zz
+		title "Group:"
+		optional
+		uppercase
+		help "This is numeric and should match the sort number"
+	check-box ap-suppress-dup @7,28
+		values YES SPACES
+		title "Suppress Duplicate:"
+		right-coordinate
+		default is spaces
+	end-check-box 
+	check-box ap-total-flg @7,38
+		values YES SPACES
+		title "Total:"
+		right-coordinate
+		default is Spaces
+	end-check-box 
+	check-box ap-suppress-prt @7,58
+		values YES SPACES
+		title "Suppress Print:"
+		right-coordinate
+		default is spaces
+	end-check-box 
+	display ap-print-pos @10,23 pic zzz9
+		title "Print Pos:"
+	display l-pic-string @11,46
+			foreground prompts
+	accept ap-print-pic @11,23
+		default ap-print-pic
+		title "Pic"
+		optional
+	if ap-obj-name <> "*"
+		display fld-col-name @12,46
+			foreground prompts
+	endif
+	accept ap-col-head[1] @12,23
+		title "Col Heading :"
+		default ap-col-head[1]
+	accept ap-col-head[2] @13,23
+	accept ap-col-head[3] @14,23
+	confirm auto
+	end-confirm
+end-screen
+
+screen rtvl-conditions
+local
+	lf-ok								type boolean
+	lf-count							type number
+	lf-fld-obj-name						like obj-name
+	allowed search entry remove correct 
+	datagrid occurs 22
+	title "Conditions"
+	primary reportsel
+	same ap-name
+	window @1,1 to @24,80
+detail
+	accept ap-sel-seq @1,3 pic Z9
+		title "Seq"
+	accept ap-fld-name @1,10 pic x(30)
+		title "Field"
+		help "Either dictionary field or some name starting with 'ws-'"
+		lowercase
+	validations
+		if substring(ap-fld-name,1,3) <> "ws-"
+			select lf-count = count(*)
+				from reportfil
+				where ap-fld-name = :ap-fld-name
+			end-select
+			if lf-count = 0 
+				message-box param-text("<<P1>><<BR>><<p2>>"
+					,"This field is not in this project.  The field must be part of the project"
+					,"You can select the field and mark it as 'suppress print' on the details page")
+					title is PROGRAM_NAME
+					message-buttons MSG_BOX_CANCEL
+					icon MSG_BOX_STOP
+				re-enter
+			endif
+			// get current on the object name that contains the field
+			select ap-obj-name
+				from reportfil
+				where ap-fld-name = :ap-fld-name
+			detail
+				set lf-fld-obj-name = ap-obj-name
+				break
+			end-select
+//			do get-dict-field parameters are ap-fld-name space
+//				returning lf-ok
+			do get-dict-obj-field
+				parameter are lf-fld-obj-name ap-fld-name spaces 
+				returning lf-ok 
+			if not lf-ok
+				message "Invalid field"
+				re-enter 
+			endif
+		else
+			set ap-ws-fld-name = ap-fld-name
+		endif
+	end-validations
+	accept ap-operator @1,36 pic xx
+		title "Op"
+		allowed ">" ">=" "<" "<=" "=" "<>"
+		help 'Operator code : ">" ">=" "<" "<=" "=" "<>"'
+	accept ap-sel-prompt @1,43 pic x(30)
+		title "Prompt"
+		optional
+	accept ap-default @1,50 pic x(30)
+		title "Default"
+		optional
+		help "Any Value.  Special Date Codes : FDCM FDLM TODAY LDPP"
+	validations
+		if ap-default <> spaces and substring(ap-fld-name,1,3) <> "ws-"
+			if fld-type = "D" 
+				if ap-default not in { "FDCM" "FDLM" "TODAY" "LDPP" }
+				and date2julian(ap-default) = 0
+					message "Invalid default value"
+					re-enter
+				endif
+			elseif fld-type = "A"
+				if pattern(ap-default "'") or pattern(ap-default '"')
+					message "Quotes in default not allowed"
+					re-enter
+				endif
+			else
+				if not valid-number(ap-default)
+					message "Default is not a valid numeric"
+					re-enter
+				endif
+			endif
+		endif
+	end-validations
+	accept ap-ws-fld-name @1,60
+		title "Field Name"
+		optional
+		help "The name of this field in the generated program"
+	accept ap-sel-pic @1,70
+		title "Pic Clause"
+		optional
+		help "The pic clause for internal variables.  Note that you must enter the word 'pic' or 'type' as appropriate."
+	confirm auto
+	before
+		if substring(ap-fld-name,1,3) = "ws-"
+			and ap-sel-pic = spaces
+			message "If you are entering a working variable, you must enter a pic clause"
+			re-enter ap-sel-pic
+		endif
+	end-confirm
+end
+
+
+procedure rtvl-sql
+// maintain the sql for the file
+parameters
+	lp-ap-name							like ap-name
+local field														
+	lf-ok								type boolean
+	lf-seq								like ap-sql-seq
+	open tmp-sqltext-file temporary local
+	select * from reportsql
+		where ap-name = :lp-ap-name
+	detail
+		set tmp-seq = ap-sql-seq
+		set tmp-text = ap-sql-text
+		insert tmp-sqltext-file
+	endselect								
+	command "prowp" parameters are
+		"-h" "SQL Text"
+		"-b" "22" "80" "2" "2" 					
+		"-t" "10"  "-r" sizeof(tmp-seq) + 2
+		file-name(tmp-sqltext-file)
+	//
+	transaction begin
+	set lf-ok = true
+	select * from reportsql
+		where ap-name = :lp-ap-name
+		for-update
+	detail
+		delete reportsql
+		on error
+			set lf-ok = FALSE
+		endon
+	end-select
+	set lf-seq = 1
+	select * from tmp-sqltext-file
+	detail
+		initialise reportsql
+		set ap-name = lp-ap-name
+		set ap-sql-seq = lf-seq
+		set ap-sql-text = tmp-text
+		insert reportsql
+		on error
+			set lf-ok = FALSE
+		endon
+		set lf-seq += 1
+	end-select
+	if lf-ok
+		transaction commit
+	else
+		transaction rollback
+		message "There was an error updating the text.  No changes made"
+	endif
+endprocedure 
+
+
+screen select-file
+returning 
+	l-obj-name 				like obj-name
+	allowed rt-select search //rt-next-dict
+	select obj-id, obj-name , obj-dict from all-dict-object
+		where not pattern(obj-name,"^\~?*")
+			order by obj-name
+	datagrid occurs 22
+	title "File Search"
+	no-prompt-for-search
+	window @1,1 to @24,80
+before
+	clear
+	box
+detail
+	if screen-mode = rt-select
+		set l-obj-name = obj-name
+		exit
+	endif
+	display obj-id @1,2
+		title "Obj Id"
+	accept obj-name @1,8
+		title  "obj Name" 
+	display obj-dict @1,20
+		title "Dict"
+	confirm auto
+	end-confirm
+end
+
+screen select-field
+parameters
+	l-obj-name					like obj-name
+returning 
+	l-obj-field 				like fld-name
+//
+	allowed rt-select search
+	select * from one-dict-rec
+	order by rec-fld-seq
+	datagrid occurs 22
+	no-prompt-for-search
+	window @1,1 to @24,80
+	title concat("Select Fields:" l-obj-name)
+before
+	do populate-one-dict-rec
+		parameters are l-obj-name
+detail
+	if screen-mode = rt-select
+		set l-obj-field = fld-name
+		exit
+	endif
+		accept rec-fld-seq @1,3 pic zzzz9
+			title "Offset"
+		display fld-name @1,10
+			title "Field Nane"
+			/* this is wrong
+			the column ititle is stored in dict-usr-documentation
+			with 
+				doc-type = 4
+				dic-id = fld-id
+				doc-line-no = 0
+				and
+				doc-line = contains the column heading
+		display fld-col-name @1,50
+			title "Col Heading"
+			*/
+		display fld-doc @1,50
+			title "Description"
+	confirm auto
+	end-confirm
+end
+
+/*
+menu ask-dictionary
+	tree-menu
+	window
+returning
+	l-dictionary				pic x(100) type string
+before
+	display "Select Dictionary" @10,10 inverse
+detail
+	option get-env("PRODICT") @12,10
+		set l-dictionary = get-env("PRODICT")
+		exit
+	option get-env("PROUSRDICT") @14,10
+		set l-dictionary = get-env("PROUSRDICT")
+		exit
+end-menu
+*/
+
+procedure import-di-project
+parameters
+	lp-project							type string
+local
+	i									type number
+	lf-field-count						type number
+	lf-field-order-count				type number
+	lf-ok								type boolean
+	lf-sql								type blob
+	lf-doc								type xml-handle
+	lf-root								type xml-handle
+	lf-line								type xml-handle
+	lf-xml-filename						pic x(1024) type string
+//
+	get data-intel-master
+		on index dim-project-id
+		key is lp-project
+	on error
+		message-box param-text("<<P1>><<BR>><<p2>>"
+			,"The following project does not exist:"
+			,lp-project)
+			title is PROGRAM_NAME
+			message-buttons MSG_BOX_CANCEL
+			icon MSG_BOX_STOP
+		exit
+	endon
+	// 
+	// check this has not already been done.
+	//
+	if file-exists(str-concat(ws-pref-xmlfolder,"/",lp-project,".xml"),FALSE) = 1
+		message-box param-text("<<P1>><<BR>><<p2>>"
+			,"An xml file already exists with this name."
+			,"Press OK to OVERWRITE this definition or Cancel to exit this process")
+			title is PROGRAM_NAME
+			message-buttons MSG_BOX_OK_CANCEL
+			icon MSG_BOX_WARNING
+		if message-status = MSG_BOX_CANCEL
+			exit
+		endif
+	endif
+	//
+	select lf-field-count = count(*)
+		from data-intel-fields
+		where dim-project-id = :lp-project
+	end-select
+	select lf-field-order-count = count(*)
+		from data-intel-order-by
+		where dim-project-id = :lp-project
+	end-select
+	if lf-field-count = lf-field-order-count
+		message-box param-text("<<P1>><<BR>><<p2>><<BR>><<P3>><<BR>><<P4>>"
+			,"It would appear that you have not used the order by function to determine the sort sequence"
+			,"Every field is defined as a sort.  This is not a good idea"
+			,"Press Ok to continue and import the report (you can fix this later)"
+			,"or Cancel to exit and assign the sort order.")
+			title is PROGRAM_NAME
+			message-buttons MSG_BOX_OK_CANCEL
+			icon MSG_BOX_WARNING
+		if message-status() = MSG_BOX_CANCEL
+			exit
+		endif
+	endif
+	//
+	// clean out anything already in places
+	//
+	do remove-all-records
+	//
+	get reportdef
+		on index ap-name
+		key is lp-project
+	on error
+	else
+		message-box param-text("<<P1>><<BR>><<p2>>"
+			,str-concat("Project:" lp-project " already exists")
+			,"Press Yes to skip the import or No to replace it")
+			title is PROGRAM_NAME
+			message-buttons MSG_BOX_YES_NO
+			icon MSG_BOX_QUESTION
+		if message-status() = MSG_BOX_YES
+			exit
+		endif
+	endon
+	initialise reportdef
+	set ap-name = lp-project
+	set ap-di-project = lp-project
+	set ap-desc = dim-description
+	set ap-spl-name = str-concat(lp-project,".spl")
+	select * from data-intel-objects
+		where dim-project-id = :lp-project
+		and dio-table-type = "A"
+	detail
+		set ap-primary = dio-table-name
+		// set the monitor to the first selected fields
+		select *
+			from data-intel-order-by
+			where dim-project-id = :lp-project
+			order by diob-sequence
+		detail
+			set ap-monitor = diob-field-name
+			break
+		end-select
+	end-select
+	set ap-skeleton = ws-pref-skeleton
+	set ap-full-pgm = str-concat(ws-pref-rptfolder,"/",lp-project,".spl")
+	set ap-xml = YES
+	set ap-module = dim-project-module
+	set ap-function = dim-project-function
+	insert reportdef
+	on error
+		message "unable to add def"
+		exit
+	endon
+	//
+	//
+	// Fields
+	//
+	select * from data-intel-fields
+		where dim-project-id = :lp-project
+//		and dif-suppress = FALSE
+		order by dif-custom-seq // to ensure the primary "A" comes first
+	detail
+		get reportfil
+			on index ap-name ap-obj-name ap-fld-name
+			key is lp-project dif-object-name dif-field-name
+		on error
+			initialise reportfil
+				leaving ap-name
+			set ap-obj-name = dif-object-name
+			set ap-fld-name = dif-field-name
+			set ap-suppress-prt = if-then-else(dif-suppress,YES,spaces)
+//			do get-dict-field
+//				parameters are ap-fld-name spaces
+//				returning lf-ok 
+			do get-dict-obj-field
+				parameter are ap-obj-name ap-fld-name spaces 
+				returning lf-ok 
+			if fld-occurs > 1
+				set ap-array-offset = 1
+			else
+				set ap-array-offset = 0
+			endif
+			select *
+				from data-intel-order-by
+				where dim-project-id = :lp-project
+				and diob-field-name = :dif-field-name
+				database-sql
+			detail
+				set ap-sort-seq = diob-sequence
+				set ap-group = diob-sequence
+				if fld-occurs > 1
+					message-box param-text(
+						"You have an Array in the sort sequence (<<P1>>)<<BR>><<P2>>"
+						,dif-field-name
+						,"This is not permitted")
+						title is PROGRAM_NAME
+						message-buttons MSG_BOX_CANCEL
+						icon MSG_BOX_STOP
+					exit
+				endif
+				break // there will only be on
+			end-select
+			set ap-col = dif-custom-seq
+			if dif-subtotal-on-me or dif-total-on-me
+				set ap-total-flg = YES
+			endif
+			if dif-listing-unique
+				set ap-suppress-dup = YES
+			endif
+			set i = 1
+			do split-col-head parameters are dif-custom-title
+				returning ap-col-head
+			insert reportfil
+			on error
+			endon
+		endon
+	end-select
+	//
+	// calculations
+	//
+	select *
+		from data-intel-calculations
+		where dim-project-id = :lp-project
+		and dic-type <> 'B'
+	detail
+		initialise reportcal
+			leaving ap-name
+		set ap-calc-fld-name = dic-field-name
+		set ap-calc-fld-title = dic-column-title
+		set ap-expression = dic-expression
+		set ap-calc-pic = dic-picture
+		set ap-type = dic-type		
+		insert reportcal
+		on error
+		endon
+		initialise reportfil
+			leaving ap-name
+		set ap-obj-name = "*"
+		set ap-fld-name = str-concat("lf-",dic-field-name)
+		set ap-col = dic-custom-seq
+		set ap-print-pic = dic-picture
+		do split-col-head parameters are dic-column-title
+			returning ap-col-head
+		insert reportfil
+		on error
+		endon
+	end-select
+	//
+	// Notes
+	//
+	select * from data-intel-project-notes
+		where dim-project-id = :lp-project
+		and  dipn-note-type in ("U","D")
+	detail
+		initialise reporttxt
+			leaving ap-name
+		switch dipn-note-type 
+		case "U"
+			set ap-txt-type = "USER"
+		case "D"
+			set ap-txt-type = "DESIGN"
+		end-switch
+		set ap-txt-seq = dipn-seq-no
+		set ap-txt-line = dipn-note-line
+		insert reporttxt
+		on error
+		endon
+	end-select
+	//
+	// SQL
+	//
+	do clibdisql-get-sql parameters are lp-project FALSE returning lf-sql
+	set lf-doc = xml-parse-text(lf-sql)
+	set lf-root = xml-get-root-node(lf-doc)
+	set lf-line = xml-get-first-child-node(lf-root)
+	set ap-sql-seq = 1
+	while lf-line
+		initialise reportsql
+			leaving ap-name ap-sql-seq
+		set ap-sql-text = xml-node-text(lf-line)
+		insert reportsql
+		on error
+		endon
+		set ap-sql-seq += 1
+		set lf-line = xml-get-next-node(lf-line)
+	end-while
+	// 
+	// filters
+	//
+	set ap-sel-seq = 1
+	// start with Param types
+	select *
+		from data-intel-project-filters
+		where dim-project-id = :lp-project
+		and dipf-expression like "<<Para%"
+		order by dipf-expression
+	detail
+		do add-filter-from-current-dipf
+			parameters are ap-sel-seq
+		set ap-sel-seq += 1
+	end-select
+	// then do fixed ones
+	select *
+		from data-intel-project-filters
+		where dim-project-id = :lp-project
+		and dipf-expression not like "<<Para%"
+		order by dipf-filter-id
+	detail
+		do add-filter-from-current-dipf
+			parameters are ap-sel-seq
+		set ap-sel-seq += 1
+	end-select
+	do determine-xml-filename parameter are ap-name
+		returning lf-xml-filename
+	do save-as-xml parameter are ap-name lf-xml-filename
+end-procedure
+
+procedure add-filter-from-current-dipf
+parameters are 	
+	lp-seq								like ap-sel-seq
+local
+	lf-ok								type boolean
+	lf-obj-name							like obj-name
+	initialise reportsel
+		leaving ap-name ap-sel-seq
+	set ap-fld-name = dipf-field-name
+	// get current on the object name that contains the field
+	select ap-obj-name
+		from reportfil
+		where ap-fld-name = :ap-fld-name
+	detail
+		set lf-obj-name = ap-obj-name
+		break
+	end-select
+//	do get-dict-field
+//		parameters are ap-fld-name spaces
+//		returning lf-ok 
+	do get-dict-obj-field
+		parameter are lf-obj-name ap-fld-name spaces 
+		returning lf-ok 
+	do convert-filter-code parameters are dipf-comparison-type
+							returning ap-operator
+	set ap-sel-prompt = concat( ap-fld-name " " ap-operator )
+	switch on dipf-field-type
+	case "A"
+		set ap-default = spaces
+	case "N"
+		set ap-default = "0"
+	case "D"
+		set ap-default = "today()"
+	end-switch
+	switch ap-operator
+	case  ">=" ">"
+		set ap-ws-fld-name = str-concat("ws-start-" ap-fld-name)
+		switch dipf-field-type
+		case "D" "N"
+			set ap-default = "0"
+		else
+			set ap-default = concat(" ")
+		end-switch
+		set ap-sel-prompt = concat("Start " fld-doc)
+	case "<" "<="
+		set ap-sel-prompt = concat("End " ap-fld-name)
+//		set ap-default = concat("max-value(" ap-fld-name ")")
+		set ap-sel-prompt = concat("End " fld-doc)
+		set ap-ws-fld-name = str-concat("ws-end-" ap-fld-name)
+	end-switch
+	insert reportsel
+	on error
+	endon
+end-procedure
+
+/*
+procedure di-totals
+// this procedure returns an array containing the field breaks for sub totals
+// There is a single record on data-intel-calculations that contains the
+// subtotals in pipe delimited format
+parameters
+	lp-di-project						like dim-project-id
+returning
+	lr-breaks							like fld-name occurs DIMAXBREAKS
+local
+	i									type number
+	j									type number
+	//
+	set i = 1
+	set j = 1
+	set lr-breaks[*] = spaces
+	select * 
+		from data-intel-calculations
+		where dic-type = "B"
+		and dim-project-id = lp-di-project
+		order by dim-project-id, dic-field-sequence
+		database-sql
+	detail
+		// there should only be one record with a list of fields, in order 
+		for j = 1 to str-len(dic-expression)
+			if sub-string(dic-expression,j,j) = "|"
+				set i += 1
+			else
+				string lr-breaks[i] appending sub-string(dic-expression,j,j)
+			endif
+		end-for
+	end-select
+end-procedure
+*/
+
+screen  maintain-preferences
+local
+	lf-apollo-dir					pic x(1024) type string
+	window @1,1 to @15,60
+		relative to @5,5
+	title concat(PROGRAM_NAME " Preferences")
+	form-entry
+before
+	do get-global-preferences
+	do get-apollo-dir returning lf-apollo-dir
+detail
+	accept ws-pref-xmlfolder @2,15 pic x(40)
+		title "XML Folder"
+		help "Folder to store XML files in"
+		default if-then-else(ws-pref-xmlfolder = spaces,get-env("CUS"),ws-pref-xmlfolder)
+	validations
+		if file-exists(ws-pref-xmlfolder,false) <> 2
+			message-box ,"This is not a valid folder name"
+				title is PROGRAM_NAME
+				message-buttons MSG_BOX_RETRY
+				icon MSG_BOX_STOP
+			re-enter
+		endif
+	end-validations
+	accept ws-pref-rptfolder @3,15 pic x(40)
+		title "Report Folder"
+		help "Folder to store generated report programs"
+		default if-then-else(ws-pref-rptfolder = spaces,get-env("CUS"),ws-pref-rptfolder)
+	validations
+		if file-exists(ws-pref-rptfolder,false) <> 2
+			message-box ,"This is not a valid folder name"
+				title is PROGRAM_NAME
+				message-buttons MSG_BOX_RETRY
+				icon MSG_BOX_STOP
+			re-enter
+		endif
+	end-validations
+	accept ws-pref-skeleton @4,15 pic x(30)
+		title "Skeleton"
+		help "The skeleton file used in the program generation process"
+		default if-then-else(ws-pref-skeleton = spaces,"apolloskeldi.spl",ws-pref-skeleton)
+	validations
+		if file-exists(str-concat(lf-apollo-dir,"/",ws-pref-skeleton),false) <> 1
+			message-box param-text("<<p1>> is not a valid file ",
+				str-concat(lf-apollo-dir,"/",ws-pref-skeleton))
+				title is PROGRAM_NAME
+				message-buttons MSG_BOX_RETRY
+				icon MSG_BOX_STOP
+			re-enter
+		endif
+	end-validations
+	confirm auto
+	confirmed
+		do set-global-preferences
+	end-confirm
+end-screen
+
+procedure check-pcs-file
+returning
+	lr-ok								type boolean
+	// if a file exists then the folder the file exists in is returned here
+	lr-folder							pic x(1024) type string
+local
+	lf-pcs-folder						pic x(1024) type string
+	lf-one-folder						pic x(1024) type string
+	lf-file-folder						pic x(1024) type string
+	set lf-pcs-folder = str-concat(get-env("PROPCSPATH"))
+	// will need to iterate through this because there could be many places.
+	repeat
+		if pattern(lf-pcs-folder,"[:;]") = 1
+			string lf-pcs-folder deleting 1 
+		endif
+	until lf-pcs-folder = spaces
+		if pattern(lf-pcs-folder,"[:;]")
+			set  lf-one-folder = substring(lf-pcs-folder,1,pattern(lf-pcs-folder,"[:;]"))
+		else
+			set lf-one-folder = lf-pcs-folder
+		endif
+		do check-one-pcs-folder parameters are lf-one-folder
+			returning lr-ok lf-file-folder
+		if lf-file-folder <> spaces
+			set lr-folder = lf-file-folder
+		endif
+		if lr-ok
+			exit
+		endif
+		string lf-pcs-folder deleting 1 to str-len(lf-one-folder)
+	end-repeat
+end-procedure
+
+procedure check-one-pcs-folder
+parameters are 
+	lp-folder-name						pic x(1024) type string
+returning 
+	lr-ok								type boolean
+	lr-folder							pic x(1024) type string
+local
+	lf-pcs-file							pic x(1024) type string
+	set lr-ok = FALSE
+	set lf-pcs-file = str-concat(lp-folder-name,"/datagrid-wiz.pcs")
+	if file-exists(lf-pcs-file,FALSE)
+		set lr-folder = lp-folder-name
+		do check-pcs-file-for-string parameter are lf-pcs-file "definer"
+			returning lr-ok
+	else
+		set lr-folder = spaces
+		set lr-ok = FALSE
+	endif
+end-procedure
+
+procedure check-pcs-file-for-string
+parameters
+	lp-pcs-file							pic x(1024) type string
+	lp-string							pic x(100) type string
+returning
+	lr-ok								type boolean
+	lr-message							type string
+	//
+	open text-file
+		file is lp-pcs-file
+	on error
+		set lr-ok = FALSE
+		set lr-message = error-description(file-status())
+	else
+		select * from text-file
+		detail
+			if pattern(uppercase(tf-text),uppercase(lp-string))
+				set lr-ok = TRUE
+				exit
+			endif
+		end-select
+	endon
+	set lr-message  = "String not found"
+	close text-file
+end-procedure
+
+procedure update-pcs-file
+local
+	lf-ok								type boolean
+	lf-add-screen					type boolean
+	lf-file-folder						pic x(1024) type string
+	lf-pcs-file							pic x(1024) type string
+	lf-counter							type number
+	lf-screen-line						type number
+//
+	do check-pcs-file returning lf-ok lf-file-folder
+	if lf-file-folder = spaces
+		// get the first folder and use that
+		set lf-file-folder = get-env("PROPCSPATH")
+		if pattern(get-env("PROPCSPATH"),"[:;]") > 0
+			string lf-file-folder deleting 1 to  pattern(get-env("PROPCSPATH"),"[:;]") 
+		endif
+		if lf-file-folder = spaces
+			message "PROPCSPATH Not correctly defined"
+			exit
+		endif
+	endif
+	set lf-pcs-file = lf-file-folder 
+	string lf-pcs-file appending "/datagrid-wiz.pcs"
+//
+// If the file does not exist, then create it
+//
+	if not file-exists(lf-pcs-file,FALSE)
+		open text-file
+			file is lf-pcs-file
+			create permanent
+		on error
+			message "Unable to create new pcs file"
+			exit
+		endon
+		INSERT_TEXT("# Created by Apollo")
+		close text-file
+	endif
+//
+// we now have the path to either the existing file or a new file
+//
+// load the text file into a memory file
+//
+	open text-file
+		file is lf-pcs-file
+	on error
+		message "Unable to open existing pcs file"
+		exit
+	endon
+	open mem-file temporary
+	on error
+		message "Unable to open memory file"
+		exit
+	endon
+	set mf-seq = 0
+	set lf-add-screen = TRUE
+	select * from text-file
+	detail
+		set mf-seq += 1
+		initialise mem-file
+			leaving mf-seq
+		set mf-text = tf-text
+		if pattern(uppercase(mf-text),"SCREEN SELECT-SAVED-PROJECTS") > 0
+			set lf-screen-line = mf-seq
+			set lf-add-screen = FALSE
+		endif
+		insert mem-file
+	end-select
+//
+// Deal with the screen not defined at all - add it at the end
+//
+	if lf-add-screen 
+		select lf-screen-line = max(mf-seq)
+			from mem-file
+		end-select
+		set lf-screen-line += 1
+		INSERT_MEM_TEXT(lf-screen-line, "screen select-saved-projects" )
+		INSERT_MEM_TEXT(lf-screen-line,concat(TAB, "{"))
+	endif
+	set lf-counter = 0
+	select * from mem-file
+	detail
+		set lf-counter += 1
+		if pattern(uppercase(mf-text),"SCREEN SELECT-SAVED-PROJECTS") > 0
+			break
+		endif
+	end-select
+	set lf-counter += 1  // need to do the next one after the "{"
+	INSERT_MEM_TEXT(lf-counter,str-concat(TAB,'mode'))
+	INSERT_MEM_TEXT(lf-counter,str-concat(TAB,TAB,'{'))
+	INSERT_MEM_TEXT(lf-counter,str-concat(TAB,TAB,'name = "apollo"'))
+	INSERT_MEM_TEXT(lf-counter,str-concat(TAB,TAB,'add = true'))
+	INSERT_MEM_TEXT(lf-counter,str-concat(TAB,TAB,'text = "Apollo"'))
+	INSERT_MEM_TEXT(lf-counter,str-concat(TAB,TAB,'}'))
+	INSERT_MEM_TEXT(lf-counter,str-concat(TAB,'trigger'))
+	INSERT_MEM_TEXT(lf-counter,str-concat(TAB,TAB,'{'))
+	INSERT_MEM_TEXT(lf-counter,str-concat(TAB,TAB,'trigger_point = confirmed'))
+	INSERT_MEM_TEXT(lf-counter,str-concat(TAB,TAB,'name = "apollo"'))
+	INSERT_MEM_TEXT(lf-counter,str-concat(TAB,TAB,'run = "apollodi/definer" "-di" dim-project-id'))
+	INSERT_MEM_TEXT(lf-counter,str-concat(TAB,TAB,'type = pronto'))
+	INSERT_MEM_TEXT(lf-counter,str-concat(TAB,TAB,'}'))
+	if lf-add-screen
+		INSERT_MEM_TEXT(lf-counter,str-concat(TAB,'}'))
+	endif
+//
+// Now write it all out again
+//
+	open text-file
+		file is lf-pcs-file
+		truncate permanent
+	on error 
+		message "Unable to write final pcs file"
+		exit
+	endon
+	select * from mem-file
+	detail
+		INSERT_TEXT(mf-text)
+	end-select
+	close text-file
+	close mem-file and remove
+end-procedure
+
+screen maintain-notes
+parameters are 
+	lp-name								like ap-name
+	lp-type								like ap-txt-type
+	lp-maintenance-allowed				type boolean
+//
+	window @1,1 to @22,80
+	title PROGRAM_NAME
+	select * 
+		from reporttxt
+		where ap-name = :lp-name
+		and ap-txt-type = :lp-type
+	datagrid occurs 17
+	allowed entry search correct remove rt-notes-user rt-notes-design rt-notes-compile
+before
+	set ap-txt-type = lp-type
+	display concat(rtrim(lp-type) ," NOTES") @1,4
+detail
+	if screenmode = rt-notes-user
+		set lp-type = "USER"
+		set lp-maintenance-allowed = TRUE
+		reselect
+		refresh prompts
+		refresh review
+	endif
+	if screenmode = rt-notes-design
+		set lp-type = "DESIGN"
+		set lp-maintenance-allowed = TRUE
+		reselect
+		refresh prompts
+		refresh review
+	endif
+	if screenmode = rt-notes-compile
+		set lp-type = "COMPILE"
+		set lp-maintenance-allowed = FALSE
+		reselect
+		refresh prompts
+		refresh review
+	endif
+	accept ap-txt-seq @3,1 
+		when screenmode in {search , entry}
+		show-value
+		title "Seq"
+	accept ap-txt-line @3,2 pic x(80)
+		title "Text"
+		when screenmode in {entry,correct} and lp-maintenance-allowed
+		show-value
+	confirm 
+		auto
+	before 
+		if screenmode = entry
+			set ap-name = lp-name
+			set ap-txt-type = lp-type
+		endif
+	confirmed
+	end-confirm 
+end-screen
+
+procedure convert-filter-code
+parameters
+	lp-di-code									like dipf-expression
+returning 
+	lr-apollo-code								like ap-operator
+	switch lp-di-code
+	case "A" set lr-apollo-code = "=" //FILTER_CODE_EQUAL_TO					
+	case "B" set lr-apollo-code = "<>" //FILTER_CODE_NOT_EQUAL_TO				
+	case "C" set lr-apollo-code = ">" //FILTER_CODE_GREATER_THAN				
+	case "D" set lr-apollo-code = ">=" //FILTER_CODE_GREATER_THAN_OR_EQUAL_TO	
+	case "E" set lr-apollo-code = "<" //FILTER_CODE_LESS_THAN					
+	case "F" set lr-apollo-code = "<=" //FILTER_CODE_LESS_THAN_OR_EQUAL_TO		
+	// the following are not yet supported
+	case "G" set lr-apollo-code = "xx" //FILTER_CODE_IN							
+	case "H" set lr-apollo-code = "xx" //FILTER_CODE_NOT_IN						
+	case "I" set lr-apollo-code = "xx" //FILTER_CODE_BETWEEN						
+	case "J" set lr-apollo-code = "xx" //FILTER_CODE_NOT_BETWEEN					
+	case "K" set lr-apollo-code = "xx" //FILTER_CODE_CONTAINS					
+	case "L" set lr-apollo-code = "xx" //FILTER_CODE_DOES_NOT_CONTAIN			
+	end-switch
+end-procedure

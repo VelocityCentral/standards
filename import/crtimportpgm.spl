@@ -1,0 +1,1676 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program :  Create a Program to add records to tables.
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2021
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: sys/crtimportpgm.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 15Jul21  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+//
+
+/*
+
+
+	This documentation is in RST format.  To view this as a nice pdf goto
+	https://overbits.herokuapp.com/rsteditor/ or rst.ninjs.org and paste this content.
+
+================================================
+Create an Import data program - crtimportpgm.spl
+================================================
+
+.. WARNING:: This is Velocity copyright code.  Source code is NOT to 
+					be left on customers machines.
+
+This program writes programs that can import data into pronto.  The generated
+program will allow paste into a datagrid or import from a csv file.
+When importing from csv file, the program can be run in batch mode by passing the filename
+preceded by the "-csvfile" keyword.
+
+At generation time the csv file delimiter can be selected.
+
+Array fields are not supported.  You can generate an import for fields with multiple occurrences
+but it will not compile.  You will need to change the generated code.
+
+Process
+-------
+
+On entry the user is prompted with a list of tables.  Select the table.
+All the fields (except those with an occurs clause > 1) are selected by default.
+Either mark or unmark with the mark button or select the "unselect all" button.
+
+Default values can be specified for fields.  Fields with defaulted values cannot be
+selected as fields in which you want the user to supply data.
+
+When complete select the generation option.
+
+
+Setup
+-----
+
+All that is required is the program installed in cus in a folder called import.
+There needs to be a skeleton of the generated code and this must be in the same folder
+and called crtimpskel.spl.
+There needs to be a clib in the same folder and it must be called clibvimport.
+
+clibvimport
+-----------
+
+The purpose of this routine is that it allows for installer to write
+customer specific validation and defaults.  When a new table is required
+the programmer should add the routines as specified in the skeleton in the clib.
+
+Some standard validations are provided.  If you write a new
+table import that has not been done before and you think tthe validations
+are standard, follow the process below and then pass to ray for inclusion
+in the standard.  Please put these in the std-validation / std-default
+and leave the clib code for customer/site specific default/validation.
+
+Let Ray know and he will copy you code into the standard so we gradually develop
+a large clib with most of the tables.
+
+*/
+ 
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+link "clib/clibdict"
+link "clib/clibvfile"
+
+#define IMPORTFLDR "import"
+#define SELECTCOLOUR colour is if-then-else(mf-pk-seq != 0,red, if-then-else(mf-selected,green,black))
+#define MAXTAGS 100
+#define MAX512ARR 100
+
+#define SQUIRT(A,B) \
+	initialise final-pgm \
+	set fp-seq = A \
+	set fp-line = B \
+	insert final-pgm \
+	on error \
+	endon \
+	set A += smallest-increment(A)
+
+#define MF_FLDNAME_CVT if-then-else(mf-occurs <= 1, mf-fld-name, concat(mf-fld-name,"[1]"))
+
+#define TAB ascii-char(9)
+
+object mem-objects
+	type is memory
+	record is
+		mo-selected						type boolean
+		mo-dict							pic x // B)ms C)us D)ist
+		mo-obj-name						like obj-name
+		mo-obj-doc						like obj-doc
+		mo-obj-file						like obj-file
+		mo-obj-id						like obj-id
+	end-record
+	key is mo-obj-name
+
+object mem-fields
+	type is memory
+	record is
+		mf-seq							type number
+		mf-selected						type boolean
+		mf-fld-name						like fld-name
+		mf-fld-doc						like fld-doc
+		mf-fld-type						like fld-type
+		mf-fld-tot-size					like fld-tot-size
+		mf-fld-decs						like fld-decs
+		mf-signed						like fld-signed
+		mf-occurs						like fld-occurs
+		mf-default						pic x(60) type string
+		mf-pk-seq						pic 99999 // the sequence of this field as a primary key.  0 if not in a key
+		mf-internal-field-name			pic x(30)
+	end-record
+	key is  mf-seq
+
+object source-file
+	type is text
+	record is 
+		sf-line							pic x(1024) type string
+	end-record
+
+object text-file
+	type is text
+	record
+		tf-line							pic x(1024) type string
+	end-record
+
+object final-pgm
+	type is memory
+	record
+		fp-seq							type number
+		fp-line							pic x(1024) type string
+	end-record
+	key is fp-seq
+
+object clibvimport-tables
+	type is memory
+	record is
+		ct-tbl-name						pic x(1024) type string
+	end-record
+	key is ct-tbl-name
+
+object mem-run-pgms
+	type is memory
+	record is
+		rp-seq							type number
+		rp-shortname					pic x(30) type string
+		rp-full-name					pic x(128) type string
+		rp-probable-filename			pic x(40) type string
+	end-record
+	key is rp-seq
+
+// TODO: make the prompting for directtories smarter.
+ 
+field
+	ws-function-title					type string
+	ws-bms-file							pic x(512) type string
+	ws-cus-file							pic x(512) type string
+	ws-dist-file						pic x(512) type string
+	// these are needed throughout the code
+	ws-selected-object-name				like obj-name
+	ws-selected-dictionary				pic x
+	ws-selected-object-id				like obj-id
+	// Tags are the constants in the skeleton that mark where the program is
+	// going to insert lines.
+	// Required tags is hard coded array of the tags we need for the program
+	// to work.
+	ws-tags-required					pic x(128) type string occurs MAXTAGS
+	// ws-tags is the tags found in the skeleton
+	ws-tags								pic x(128) type string occurs MAXTAGS
+	// ws-tags-seq is the sequence number where the tags are found in the
+	// program
+	ws-tag-seq							type number occurs MAXTAGS
+
+mode md-create-pgm
+	prompt "Create Import Pgm"
+mode md-select-fields
+	prompt "Select Fields"
+mode md-mark
+	prompt "Mark"
+	always-show
+	when mf-default = spaces and mf-pk-seq = 0
+	help "Toggle Mark of field on and off"
+	process correct
+mode md-unselect-all
+	prompt "Unselect All"
+	help "Deselect all fields"
+mode md-set-default
+	prompt "Change &Default"
+	help "Change the default value"
+	process correct
+mode md-run
+	prompt "Run"
+	help "Run Program"
+
+
+procedure main
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8secabt-check-abort
+		parameters are sys-consolidation-division login-id() "ZVG" "M019"
+		returning ws-function-title 
+	do load-clib-files
+	do set-dict-file-names
+	do main-menu
+end-procedure
+
+menu main-menu
+	window
+detail
+	option "Create Import Program" @1,1
+		help "Create a new program"
+		do select-tables
+	option "Run a previously created program" @2,1
+		do build-pgms-to-execute
+		do select-program
+end-menu
+
+procedure build-pgms-to-execute
+	close mem-run-pgms and remove
+	open mem-run-pgms temporary
+	if START-DIR_SEARCH(concat(get-env("CUS"),"/",IMPORTFLDR),"?*.op7$")
+		repeat
+			set rp-shortname = NEXT-DIR-ENTRY()
+		until rp-shortname = spaces
+			if rp-shortname not in ("crtimportpgm.op7", "crtimpskel.op7", "clibvimport.op7")
+				initialise mem-run-pgms leaving rp-seq rp-shortname
+				set rp-seq += 1
+				set rp-full-name = concat(get-env("CUS"),"/",IMPORTFLDR,"/",rp-shortname)
+				do get-file-from-pgm parameters are
+					concat(substring(rp-full-name,1,str-len(rp-full-name) - 4), ".spl")
+					returning rp-probable-filename
+				if exit-status != 0
+					set rp-probable-filename = "Unable to detect"
+				endif
+				insert mem-run-pgms
+				on error
+				endon
+			endif
+		end-repeat
+	else
+		exit 1
+	endif
+	if FINISH-DIR-SEARCH endif
+end-procedure
+
+screen select-program
+	window
+		title "Run selected program"
+	datagrid occurs 22
+	select * from mem-run-pgms
+	allowed search md-run
+detail
+	if screenmode = md-run
+		spl rp-full-name
+	endif
+	accept rp-seq @1,1 pic z(4)
+		title "Seq"
+		when screenmode = find
+		show-value
+	display rp-shortname @1,2 pic x(20)
+		title 'Name'
+	display rp-full-name @1,3 pic x(30)
+		title "Full Name"
+	display rp-probable-filename @1,4
+		title "File name"
+end-screen
+
+
+
+procedure set-dict-file-names
+	if get-env("PRODICT") <> spaces
+		do clibdict-get-dict-name-with-suffix
+			parameters are get-env("PRODICT")
+			returning ws-bms-file
+	endif
+	if get-env("PROUSRDICT") <> spaces
+		do clibdict-get-dict-name-with-suffix
+			parameters are get-env("PROUSRDICT")
+			returning ws-cus-file
+	endif
+	if get-env("PRODISTDICT") <> spaces
+		do clibdict-get-dict-name-with-suffix
+			parameters are get-env("PRODISTDICT")
+			returning ws-dist-file
+	endif
+end-procedure
+
+screen select-tables
+local
+	lf-existing-only					type boolean
+	lf-count							type number
+	lf-returned-count					type number
+	allowed search md-select-fields
+	select * from mem-objects
+	datagrid occurs 22
+	window 
+	title "Select Tables to Print Dictionary "
+before
+	open mem-objects temporary
+	set lf-existing-only = FALSE
+	set lf-count = 0
+	if ws-bms-file <> spaces
+		do build-mem-objects parameters are ws-bms-file "B"
+			returning lf-returned-count
+		set lf-count += lf-returned-count
+	endif
+	if ws-cus-file <> spaces
+		do build-mem-objects parameters are ws-cus-file "C"
+			returning lf-returned-count
+		set lf-count += lf-returned-count
+	endif
+	if ws-dist-file <> spaces
+		do build-mem-objects parameters are ws-dist-file "D"
+			returning lf-returned-count
+		set lf-count += lf-returned-count
+	endif
+	if lf-count = 0
+		acknowledge "No tables were found"
+	endif
+detail
+	if screenmode = md-select-fields
+		// verify we have a clib.
+		get clibvimport-tables
+			on index ct-tbl-name
+			key is mo-obj-name
+		on error ENOREC
+			message-box param-text("<<P1>><<BR>><<p2>>"
+				,"Cannot find any reference to this table in a clibvimport.spl"
+				,"Do you wish to continue (The program will be created with no validations)?")
+				title is ws-function-title
+				message-buttons  MSG_BOX_OK_CANCEL
+				icon MSG_BOX_WARNING
+			if message-status() = MSG_BOX_CANCEL
+				continue // back to list of objects
+			endif
+		endon
+		set ws-selected-object-name = mo-obj-name
+		set ws-selected-dictionary = mo-dict
+		set ws-selected-object-id = mo-obj-id
+		do select-fields parameters are mo-dict mo-obj-id
+	endif
+	display mo-dict @1,2
+		title "Dict"
+		colour is if-then-else(mo-selected,red,black)
+	accept mo-obj-name @1,3
+		title "Object"
+		when screenmode = search
+		showvalue
+		colour is if-then-else(mo-selected,red,black)
+	display mo-obj-doc @1,4
+		title "Description"
+		colour is if-then-else(mo-selected,red,black)
+	display mo-obj-file @1,5
+		title "File"
+		colour is if-then-else(mo-selected,red,black)
+end-screen
+
+procedure build-mem-objects
+parameter
+	lp-file								pic x(1024) type string
+	lp-dict-type						pic x
+returning
+	lr-count							type number
+local
+	lf-file-name						pic x(512) type string
+//
+	set lf-file-name = lp-file
+	string lf-file-name appending "o"
+	open dict-object 
+		read-only
+		file is lf-file-name
+	on error
+		acknowledge error-description(file-status)  
+		acknowledge lf-file-name
+		acknowledge file-name(dict-object)
+		exit
+	endon
+	select * from dict-object
+		where not pattern(obj-name,"^\~?*")
+		local-sql
+	detail
+		set mo-selected = FALSE
+		set mo-dict = lp-dict-type
+		set mo-obj-name = obj-name
+		set mo-obj-doc = obj-doc
+		set mo-obj-file = str-concat(obj-file,obj-version)
+		set mo-obj-id = obj-id
+		while pattern(mo-obj-file,"/")
+			string mo-obj-file deleting 1 to pattern(mo-obj-file,"/")
+		end-while
+		set mo-obj-file = lowercase(mo-obj-file)
+		insert mem-objects
+		on error
+		else
+			set lr-count += 1
+		endon
+	end-select
+end-procedure
+
+screen select-fields
+parameters
+	lp-dict								pic x // D)ist C)us B)ms
+	lp-id								like obj-id
+//
+	window 
+	title "Select fields"
+	select * from 
+		mem-fields
+		order by mf-seq
+	allowed search md-mark md-create-pgm md-unselect-all md-set-default
+	datagrid occurs 22
+before
+	do build-mem-fields parameters are lp-dict lp-id
+detail
+	if screenmode = md-mark
+		if mf-selected
+			set mf-selected = false
+		else
+			if mf-occurs > 1
+				message-box param-text("<<P1>><<BR>><<p2>>"
+					,"You have selected an array"
+					,"You can generate the pgm but only the first array element will be set.")
+					title is ws-function-title
+					message-buttons  MSG_BOX_OK
+					icon MSG_BOX_WARNING
+			endif
+			set mf-selected = true
+		endif
+	endif
+	if screenmode = md-create-pgm
+		do create-pgm-prompt entry once 
+		exit
+	endif
+	if screenmode = md-unselect-all
+		select * from mem-fields
+			for update
+		detail
+			if mf-pk-seq = 0
+				set mf-selected = FALSE
+			endif
+			update mem-fields
+		end-select
+		get mem-fields first
+		refresh data
+	endif
+	accept mf-seq @1,1 pic z(5)
+		title "Sequence"
+		when screenmode = search
+		show-value
+		SELECTCOLOUR
+	display mf-fld-name @1,2
+		title "Field Name"
+		SELECTCOLOUR
+	accept mf-default @1,3
+		title "Default Value"
+		help "Will not be included in input but will be set to this value - if string enlose in quites.  can use today()"
+		when screenmode = md-set-default
+		show-value
+		SELECTCOLOUR
+	validations
+		if mf-fld-type in ( "A" "S" "V") 
+			if substring(mf-default,1,1) not in ("'" '"')
+			// it is possible that a function call is in here e.g. loginid()
+			// so just see if it looks like a string first
+				if pattern(mf-default,"[!$-()]") = 0
+					message-box param-text("<<P1>><<BR>><<p2>>"
+						,"This field is an alpha but the default value does not start with quotes."
+						,"Are you sure you have this right?")
+						title is ws-function-title
+						message-buttons  MSG_BOX_OK
+						icon MSG_BOX_WARNING
+				endif
+			endif
+		else // it's not a string
+			if substring(mf-default,1,1) in ("'" '"')
+				message-box param-text("<<P1>><<BR>><<p2>>"
+					,"This field is not an alpha but your default starts with a quote"
+					,"Are you sure you have this right?")
+					title is ws-function-title
+					message-buttons  MSG_BOX_OK
+					icon MSG_BOX_WARNING
+			endif
+		endif
+	end-validations
+	display mf-fld-doc @1,4
+		title "Documentation"
+		SELECTCOLOUR
+	display mf-fld-type @1,5
+		title "Type"
+		SELECTCOLOUR
+	display mf-fld-tot-size @1,6
+		title "Total Size"
+		SELECTCOLOUR
+	display mf-fld-decs @1,7
+		title "Decs"
+		SELECTCOLOUR
+	display mf-signed @1,8
+		title "Signed"
+		SELECTCOLOUR
+	display mf-occurs @1,9
+		title "Occurs"
+		SELECTCOLOUR
+	display mf-pk-seq pic z(3) @1,10
+		title "PKey"
+		SELECTCOLOUR
+	confirm auto
+	before
+		if screenmode = md-set-default
+			set mf-selected = FALSE
+		endif
+	confirmed
+		if screenmode = md-set-default
+			refresh data
+		endif
+	end-confirm
+end-screen
+
+procedure build-mem-fields
+parameters
+	lp-dict								pic x // D)ist C)us B)ms
+	lp-id								like obj-id
+local
+	lf-file-name						pic x(512) type string
+	lf-seq								like mf-seq
+	lf-key-array						pic x(30) occurs 100
+	i 									type number
+//
+	close mem-fields and remove
+	open mem-fields temporary
+	switch lp-dict
+	case "B"
+		do clibdict-get-dict-name-with-suffix
+			parameters are get-env("PRODICT")
+			returning lf-file-name
+	case "C"
+		do clibdict-get-dict-name-with-suffix
+			parameters are get-env("PROUSRDICT")
+			returning lf-file-name
+	case "D"
+		do clibdict-get-dict-name-with-suffix
+			parameters are get-env("PRODISTDICT")
+			returning lf-file-name
+	end-switch
+	open dict-record 
+		read-only
+		file is concat(lf-file-name,"r")
+	on error
+		acknowledge error-description(file-status)  
+		acknowledge lf-file-name
+		acknowledge file-name(dict-record)
+		exit 1
+	endon
+	open dict-field 
+		read-only
+		file is concat(lf-file-name,"f")
+	on error
+		acknowledge error-description(file-status)  
+		acknowledge lf-file-name
+		acknowledge file-name(dict-field)
+		exit 1
+	endon
+	open dict-keys 
+		read-only
+		file is concat(lf-file-name,"k")
+	on error
+		acknowledge error-description(file-status)  
+		acknowledge lf-file-name
+		acknowledge file-name(dict-field)
+		exit 1
+	endon
+	// Look for the primary key - Assume this is the first index with unique
+	// keys
+	select * 
+		from dict-keys
+		where obj-id = :lp-id
+		and key-flags = 0  // Unique
+		order by obj-id,index-no
+	detail
+		break // select only the first one - assume this is the Primary key
+	end-select
+	// now fleshout an array with the field names
+	for i = 1 to num-fields
+		get dict-field
+			on index fld-id
+			key is k-fld-id[i]
+		on error ENOREC
+		else
+			set lf-key-array[i] = fld-name
+		endon
+	end-for
+	// now get the fields		
+	select *
+		from dict-record
+		inner join dict-field
+			on dict-record.fld-id = dict-field.fld-id
+		where dict-record.obj-id = :lp-id
+		order by rec-fld-seq
+	detail
+		initialise mem-fields
+		set lf-seq += 1
+		set mf-seq = lf-seq
+		set mf-fld-name = fld-name
+		set mf-fld-doc = fld-doc
+		set mf-fld-type = fld-type
+		set mf-fld-tot-size = fld-tot-size
+		set mf-fld-decs = fld-decs
+		set mf-signed = fld-signed
+		set mf-occurs = fld-occurs
+		set mf-selected = if-then-else(mf-occurs > 1,FALSE,TRUE)
+		// if this is a primary key then update the field
+		for i = 1 to occurence(lf-key-array)
+			if lf-key-array[i] = fld-name
+				set mf-pk-seq = i
+				set mf-selected = TRUE // must select the primary key
+			endif
+		end-for
+		// Pronto accepts only 30 characters for a field name
+		// we prepend either "mi-" or "csv-" so there is a chance that we may 
+		// blow the limit if pronto has used close to 30 characters.
+		// We want to use std field names if possible so only change these
+		// if they extend beyond 30 characters
+		set mf-internal-field-name = mf-fld-name
+ 		if str-len(mf-fld-name) > 26 
+			// we need to ensure that we can prepend 4 characters and the
+			// field name remain unique
+			// In this case, the internal field name cannot exceed 26.
+			set mf-internal-field-name = substring(mf-fld-name,1,26)
+			// now splat the sequence nummber over the last 4 bytes
+			string mf-internal-field-name replacing concat("-" format-picture(lf-seq,"999"))
+				at 23
+		endif
+		insert mem-fields
+		on error
+		endon
+	end-select
+end-procedure
+
+#if BMS_DICT_VER < 7600
+
+screen create-pgm-prompt
+local
+	lf-skeleton						pic x(1024) type string
+	lf-final-pgm					pic x(1024) type string
+	lf-new-module					pic xxxx
+	lf-new-function					pic xxxx
+	lf-csv-delimiter				pic x
+	lf-tmp-string					pic x(1024) type string
+	lf-overwrite-confirmed			type boolean
+	lf-use-field-names-for-title	type boolean
+	window
+	window-position 5
+	title ws-function-title
+	form-entry
+	no-ok-cancel
+before
+	set lf-new-module = "EMS"
+	set lf-new-function = "X000"
+	set lf-use-field-names-for-title = FALSE
+	// get the folder of this pgm
+	do find-file-in-path parameters are "crtimpskel.spl" get-env("PROPATH") ":" 
+		returning lf-skeleton
+	do get-propath-1 returning lf-final-pgm
+	if file-exists(concat(lf-final-pgm,"/" IMPORTFLDR ),FALSE) != 2
+		message-box param-text("<<P1>><<BR>><<p2>>"
+			,"The default target folder is called 'import' and should be in the first folder in PROPATH"
+			,"You will need to override the final pgm path")
+			title is ws-function-title
+			message-buttons  MSG_BOX_OK
+			icon MSG_BOX_WARNING
+	endif
+	string lf-final-pgm appending  str-concat("/" IMPORTFLDR "/pgm" str(ws-selected-object-id), ".spl")
+detail
+	accept lf-skeleton @1,20 pic x(60)
+		title "Skeleton"
+		default lf-skeleton
+	validations
+		if not file-exists(lf-skeleton,false)
+			message "This file does not exist"
+			re-enter
+		endif
+	end-validations
+	accept lf-final-pgm @2,20 pic x(60)
+		title "Final Pgm"
+		default lf-final-pgm
+	validations
+		if file-exists(lf-final-pgm,false) = 1 and not lf-overwrite-confirmed
+			message-box param-text("<<P1>><<BR>><<p2>>"
+				,"This file already exists"
+				,"Select OK to overwrite")
+				title is ws-function-title
+				message-buttons  MSG_BOX_OK_CANCEL
+				icon MSG_BOX_WARNING
+			if message-status() = MSG_BOX_CANCEL
+				re-enter
+			else 
+				set lf-overwrite-confirmed = TRUE
+			endif
+		endif
+		// Verify the folder exists
+		// trim off everything up to the last slash
+		set lf-tmp-string = lf-final-pgm
+		while lf-tmp-string != spaces and substring(lf-tmp-string,str-len(lf-tmp-string),strlen(lf-tmp-string)) != "/"
+			string lf-tmp-string deleting str-len(lf-tmp-string)
+		end-while
+		// remove the slash
+		string lf-tmp-string deleting str-len(lf-tmp-string)
+		// now check the folder exists
+		if file-exists(lf-tmp-string,FALSE) != 2
+			message-box param-text("<<P1>> (<<P2>>)<<BR>><<P3>>"
+				,"This folder does not exist."
+				,lf-tmp-string
+				,"Please choose another")
+				title is ws-function-title
+				message-buttons  MSG_BOX_CANCEL
+				icon MSG_BOX_STOP
+			re-enter lf-final-pgm
+		endif
+	end-validations
+	radio-button lf-csv-delimiter
+		@3,20 "," title  "Comma Separator CSV file"
+		@3,40 "|" title  "Pipe Separator CSV File"
+		default lf-csv-delimiter
+		before-radio-button
+			if screenmode = form-entry-defaults
+				set lf-csv-delimiter = ","
+			endif
+		end-before-radio-button
+		validations
+			//
+		end-validations
+		on change
+			//
+		end-on
+	end-radio-button 		
+	accept  lf-new-module  @4,20 
+		title "Module"
+		default lf-new-module
+		uppercase
+	accept lf-new-function @5,20
+		title "Function"
+		default lf-new-function
+		uppercase
+	box @6,10 to @8,60
+		title "Column Titles"
+	radio-button lf-use-field-names-for-title
+		@7,20 FALSE title  "Column titles"
+		@7,40 TRUE title  "Field Names"
+		help "What do you want to use for the column titles in the generated datagrid?"
+		default lf-use-field-names-for-title
+	end-radio-button 
+	confirm auto
+	confirmed
+		do build-the-program
+			parameters are lf-skeleton 
+				lf-final-pgm 
+				lf-new-module 
+				lf-new-function 
+				lf-csv-delimiter
+				lf-use-field-names-for-title
+	end-confirm
+end-screen
+
+#else 
+ // Ginger
+screen create-pgm-prompt
+local
+	lf-skeleton						pic x(1024) type string
+	lf-final-pgm					pic x(1024) type string
+	lf-new-module					pic xxxx
+	lf-new-function					pic xxxx
+	lf-csv-delimiter				pic x
+	lf-tmp-string					pic x(1024) type string
+	lf-overwrite-confirmed			type boolean
+	lf-use-field-names-for-title	type boolean
+	window
+		window-position 5
+	title ws-function-title
+	responsive
+	no-ok-cancel
+before
+	set lf-new-module = "ZUSR"
+	set lf-new-function = "T999"
+	set lf-use-field-names-for-title = FALSE
+	// get the folder of this pgm
+	do find-file-in-path parameters are "crtimpskel.spl" get-env("PROPATH") ":" 
+		returning lf-skeleton
+	do get-propath-1 returning lf-final-pgm
+	if file-exists(concat(lf-final-pgm,"/" IMPORTFLDR ),FALSE) != 2
+		message-box param-text("<<P1>><<BR>><<p2>>"
+			,"The default target folder is called 'import' and should be in the first folder in PROPATH"
+			,"You will need to override the final pgm path")
+			title is ws-function-title
+			message-buttons  MSG_BOX_OK
+			icon MSG_BOX_WARNING
+	endif
+	string lf-final-pgm appending  str-concat("/" IMPORTFLDR "/pgm" str(ws-selected-object-id), ".spl")
+detail
+	screen-group // ---- Build Parameters ----------------------------
+		title "Build Parameters"  // The title is optional
+		accept lf-skeleton pic x(60)
+			title "Skeleton"
+			default lf-skeleton
+		validations
+			if not file-exists(lf-skeleton,false)
+				message "This file does not exist"
+				re-enter
+			endif
+		end-validations
+		accept lf-final-pgm pic x(60)
+			title "Final Pgm"
+			default lf-final-pgm
+		validations
+			if file-exists(lf-final-pgm,false) = 1 and not lf-overwrite-confirmed
+				message-box param-text("<<P1>><<BR>><<p2>>"
+					,"This file already exists"
+					,"Select OK to overwrite")
+					title is ws-function-title
+					message-buttons  MSG_BOX_OK_CANCEL
+					icon MSG_BOX_WARNING
+				if message-status() = MSG_BOX_CANCEL
+					re-enter
+				else 
+					set lf-overwrite-confirmed = TRUE
+				endif
+			endif
+			// Verify the folder exists
+			// trim off everything up to the last slash
+			set lf-tmp-string = lf-final-pgm
+			while lf-tmp-string != spaces and substring(lf-tmp-string,str-len(lf-tmp-string),strlen(lf-tmp-string)) != "/"
+				string lf-tmp-string deleting str-len(lf-tmp-string)
+			end-while
+			// remove the slash
+			string lf-tmp-string deleting str-len(lf-tmp-string)
+			// now check the folder exists
+			if file-exists(lf-tmp-string,FALSE) != 2
+				message-box param-text("<<P1>> (<<P2>>)<<BR>><<P3>>"
+					,"This folder does not exist."
+					,lf-tmp-string
+					,"Please choose another")
+					title is ws-function-title
+					message-buttons  MSG_BOX_CANCEL
+					icon MSG_BOX_STOP
+				re-enter lf-final-pgm
+			endif
+		end-validations
+		field-group // ---- External File  ----------------------------
+			title "External File Separators"  // Title is optional
+			horizontal
+			radio-button lf-csv-delimiter
+				@3,20 "," title  "Comma Separator CSV file"
+				@3,40 "|" title  "Pipe Separator CSV File"
+				default lf-csv-delimiter
+				before-radio-button
+					if screenmode = form-entry-defaults
+						set lf-csv-delimiter = ","
+					endif
+				end-before-radio-button
+				validations
+					//
+				end-validations
+				on change
+					//
+				end-on
+			end-radio-button 		
+		end-field-group // ---- External File  --------------------------------------
+		field-group // ---- Module & Function ----------------------------
+			title "Security"  // Title is optional
+			horizontal
+			accept  lf-new-module  @4,20 
+				title "Module"
+				default lf-new-module
+				uppercase
+			accept lf-new-function @5,20
+				title "Function"
+				default lf-new-function
+				uppercase
+		end-field-group // ---- Module & Function --------------------------------------
+		field-group // ---- Datagrid Column Titles ----------------------------
+			title "Datagrid Column Titles"  // Title is optional
+			horizontal
+			radio-button lf-use-field-names-for-title
+				@7,20 FALSE title  "Column titles"
+				@7,40 TRUE title  "Field Names"
+				help "What do you want to use for the column titles in the generated datagrid?"
+				default lf-use-field-names-for-title
+			end-radio-button 
+		end-field-group // ---- Datagrid Column Titles --------------------------------------
+	end-screen-group // ---- Build Parameters --------------------------------------
+	confirm auto
+	confirmed
+		do build-the-program
+			parameters are lf-skeleton 
+				lf-final-pgm 
+				lf-new-module 
+				lf-new-function 
+				lf-csv-delimiter
+				lf-use-field-names-for-title
+	end-confirm
+end-screen
+
+#endif 
+
+procedure build-the-program
+parameters
+	lp-skeleton						pic x(1024) type string
+	lp-final-pgm					pic x(1024) type string
+	lp-new-module					pic xxxx
+	lp-new-function					pic xxxx
+	lp-csv-delimiter				pic x
+	lp-use-field-names-for-title	type boolean
+	//
+	do build-required-tags
+	do load-the-skeleton parameters are lp-skeleton
+	do verify-tags
+	if exit-status != 0
+		message-box param-text("<<P1>><<BR>><<p2>>"
+			,"There are required tags missing from the skeleton"
+			,"Cannot create program")
+			title is ws-function-title
+			message-buttons  MSG_BOX_CANCEL
+			icon MSG_BOX_STOP
+		exit 1
+	endif
+	// Now put the necessary lines into the final pgm
+	do populate-file-with-generated-code
+		parameters lp-new-module lp-new-function lp-csv-delimiter lp-use-field-names-for-title
+	do debug-print-skeleton
+	do write-file-to-pgm parameters are lp-final-pgm
+	if exit-status != 0
+		message "Unable to create pgm"
+		exit 1
+	endif
+//  Compile and run.
+	command 'procmp' parameters '-li' lp-final-pgm
+	on error
+		message 'Unable to compile' lp-final-pgm
+	else
+		if exit-status = 0 
+			do build-pgms-to-execute
+			spl lp-final-pgm
+		else
+			message "A problem arose during compilation"
+			do clibvfile-display-text-file
+				parameters are 
+					concat(substring(lp-final-pgm,1,strlen(lp-final-pgm) - 4),".err")
+					80
+					spaces
+		endif
+	endon
+	//
+end-procedure
+
+
+
+procedure load-the-skeleton
+/*
+At the end of this routine we have
+a) a memory table containing the skeleton program and sequence numbers
+b) an array of tags
+c) a mathing array of tag sequence numbers
+*/
+parameters
+	lp-skeleton						pic x(1024) type string
+local
+	lf-seq							type number
+	lf-next-array					type number
+	lf-looking-for-end				type boolean
+	//
+	open text-file
+		file is lp-skeleton
+		read-only
+	on error 
+		message "Unable to open skeleton"
+		exit 1
+	endon
+	// memory
+	close final-pgm and remove
+	open final-pgm temporary
+	set lf-next-array = 0
+	set lf-looking-for-end = FALSE
+	select *
+		from text-file
+	detail
+		if lf-looking-for-end 
+			if tf-line = "// ** END"
+				set lf-looking-for-end = FALSE
+			endif
+			continue // thereby skipping this line
+		endif
+		// lines will be added between seq nos using smallest-increment.
+		// The field is 4 decimal places therefore using a seq increment
+		// of 100 gives a max no of lines between tags of 100 * 1000 (100,000)
+		// check if the line is a tag
+		set lf-seq += 100
+		if pattern(tf-line,"^// \*\*") = 1
+			set lf-looking-for-end = TRUE
+			// extract the tag and add to the array
+			if lf-next-array = MAXTAGS
+				// no more so crap out
+				message "ran out of tags. Max is " MAXTAGS
+				exit 1
+			endif
+			set lf-next-array += 1
+			set ws-tags[lf-next-array] = substring(tf-line,7,str-len(tf-line))
+			set ws-tag-seq[lf-next-array] = lf-seq
+		else
+			set fp-seq = lf-seq
+			set fp-line = tf-line
+			insert final-pgm
+		endif
+	end-select
+	if lf-looking-for-end
+		message "Something went wrong - still looking for ** End at end of skeleton"
+	endif
+	// Now check that we have all the things we need
+end-procedure
+
+
+procedure verify-tags
+local
+	i									type number
+	j 									type number
+	lf-found							type number
+	for i = 1 to MAXTAGS
+		// exit if we get to end of required tags array
+		if ws-tags-required[i] = spaces
+			exit 0
+		endif
+		// look for requred tag in found tags
+		set lf-found = FALSE
+		for j = 1 to MAXTAGS
+			if ws-tags[j] = ws-tags-required[i]
+				set lf-found = TRUE
+				break
+			endif
+		end-for
+		if not lf-found
+			message "Missing Tag:" ws-tags-required[i]
+			exit 1
+		endif
+	endfor
+	exit 0
+end-procedure
+
+procedure get-tag-seq
+parameters 
+	lp-tag							type string
+returning
+	lr-seq							type number
+local
+	i 								type number
+	//
+	for i = 1 to MAXTAGS
+		if ws-tags[i] = lp-tag
+			set lr-seq = ws-tag-seq[i]
+			exit 
+		endif
+	endfor
+end-procedure
+	
+
+procedure populate-file-with-generated-code
+parameters
+	lp-new-module					pic xxxx
+	lp-new-function					pic xxxx
+	lp-csv-delimiter				pic x
+	lp-use-field-names-for-title	type boolean
+local
+	lf-line							like fp-line
+	lf-seq							like fp-seq
+	lf-validation-exists			type boolean
+	get clibvimport-tables
+		on index ct-tbl-name
+		key is ws-selected-object-name
+	on error ENOREC
+		set lf-validation-exists = FALSE
+	else
+		set lf-validation-exists = TRUE
+	endon
+	// ------------------------------------------------------------------
+	// Miscellaneous Stuff...
+	// ---------------------------------------------------------------------
+	do get-tag-seq parameters are "PGMNAME" returning lf-seq
+	set lf-line = concat("// Auto Generated Import Program for : " ws-selected-object-name )
+	SQUIRT(lf-seq,lf-line)
+	// Security
+	do get-tag-seq parameters are "SECURITY" returning lf-seq
+	set lf-line = concat(TAB,TAB,"parameters are sys-consolidation-division login-id() ")
+	string lf-line appending str-concat(' "' lp-new-module '"')
+	string lf-line appending str-concat(' "' lp-new-function '"')
+	SQUIRT(lf-seq,lf-line)
+	// Object NAme
+	do get-tag-seq parameters are "OBJECTNAME" returning lf-seq
+	set lf-line = concat(TAB,"set ws-object-name = '")
+	string lf-line appending ws-selected-object-name
+	string lf-line appending ascii-char(39) // ' - keeps vim colour coding.
+	SQUIRT(lf-seq,lf-line)
+	if lf-validation-exists
+		SQUIRT(lf-seq,concat(TAB "set ws-data-validated = TRUE"))
+	else
+		SQUIRT(lf-seq,concat(TAB "set ws-data-validated = FALSE"))
+	endif
+	// PROMPT_SCREEN_TTILE
+	do get-tag-seq parameters are "PROMPT_SCREEN_TITLE_PRE760" returning lf-seq
+	SQUIRT(lf-seq,concat(TAB,"Title "
+						ascii-char(39)
+						"Import for ", ws-selected-object-name
+						". Created " format-picture(today(),"dd-mmm-yyyy"),
+						ascii-char(39) ))
+	do get-tag-seq parameters are "PROMPT_SCREEN_TITLE_POST760" returning lf-seq
+	SQUIRT(lf-seq,concat(TAB,"Title "
+						ascii-char(39)
+						"Import for ", ws-selected-object-name
+						". Created " format-picture(today(),"dd-mmm-yyyy"),
+						ascii-char(39) ))
+	// ------------------------------------------------------------------
+	// populate the object definitions
+	// ---------------------------------------------------------------------
+	do populate-object-definitions parameter are lp-csv-delimiter
+	// ---------------------------------------------------------------
+	// process-datagrid (the accept statements on the screen)
+	// ---------------------------------------------------------------
+	do populate-process-datagrid parameters are lp-use-field-names-for-title
+	// ---------------------------------------------------------------
+	// Validate DG
+	// ---------------------------------------------------------------
+	do populate-validate-datagrid parameters are lf-validation-exists
+	// ---------------------------------------------------------------
+	// Data grid update
+	// ---------------------------------------------------------------
+	do populate-post-datagrid parameters are lf-validation-exists
+	// ---------------------------------------------------------------
+	// CSV stuff
+	// ---------------------------------------------------------------
+	do populate-process-csv parameters are lf-validation-exists 
+end-procedure
+
+procedure populate-object-definitions
+parameters
+	lp-csv-delimiter				pic x
+local
+	lf-line							like fp-line
+	lf-seq							like fp-seq
+	// set the delimiteer
+	do get-tag-seq parameters are "INPUTCSV_TYPE" returning lf-seq
+	if lp-csv-delimiter = ","
+		SQUIRT(lf-seq,concat(TAB,"type is CSV "))
+	else
+		SQUIRT(lf-seq,concat(TAB,"type is EXTERNAL "))
+	endif
+	// input dg fields
+	do get-tag-seq parameters are "INPUTDG_FIELDS" returning lf-seq
+	select * from mem-fields
+		where mf-selected
+		order by mf-seq
+	detail
+		set lf-line = concat(TAB,TAB,"mi-" mf-internal-field-name , TAB,TAB,TAB,TAB, "like " mf-fld-name)
+		if mf-occurs > 1
+			string lf-line appending " occurs 1"
+		endif
+		SQUIRT(lf-seq,lf-line)
+	end-select
+	// Input CSV Fields
+	do get-tag-seq parameters are "INPUTCSV_FIELDS" returning lf-seq
+	select * from mem-fields
+		where mf-selected
+		order by mf-seq
+	detail
+		set lf-line = concat(TAB,TAB,"csv-" mf-internal-field-name , TAB,TAB,TAB,TAB, "like " mf-fld-name)
+		if mf-occurs > 1
+			string lf-line appending " occurs 1"
+		endif
+		SQUIRT(lf-seq,lf-line)
+	end-select
+end-procedure
+
+procedure populate-process-datagrid
+parameters
+	lp-use-field-names				type boolean 
+	// If true then a title line is added with the field name
+	// if false, no title line is added and therefore the column titles will
+	// be used.
+local
+	lf-line							like fp-line
+	lf-seq							like fp-seq
+	lf-fld-num						type number
+	// DG input fields
+	do get-tag-seq parameters are "DGFIELD" returning lf-seq
+	set lf-fld-num = 1
+	select * from mem-fields
+		where mf-selected
+		order by mf-seq
+	detail
+		set lf-line = concat(TAB "accept mi-" mf-internal-field-name  " @1," str(lf-fld-num + 1))
+		SQUIRT(lf-seq,lf-line)
+		//
+		if lp-use-field-names
+			set lf-line = concat(TAB,TAB 'title "' mf-fld-name '"' )
+			SQUIRT(lf-seq,lf-line)
+		endif
+		SQUIRT(lf-seq,concat(TAB TAB "optional"))
+		set lf-line = concat(TAB TAB "help '" mf-fld-doc "'")
+		SQUIRT(lf-seq,lf-line)
+		//
+		SQUIRT(lf-seq,concat(TAB,TAB,"STATUSCOLOUR"))
+		set lf-fld-num += 1
+	end-select
+end-procedure
+
+procedure populate-validate-datagrid
+parameters
+	lp-validation-exists			type boolean
+local
+	lf-line							like fp-line
+	lf-seq							like fp-seq
+	do get-tag-seq parameters are "VALIDATEDG" returning lf-seq
+	SQUIRT(lf-seq,concat(TAB,TAB,"initialise ", ws-selected-object-name))
+	if lp-validation-exists
+		SQUIRT(lf-seq,concat(TAB,TAB,"do clibvimport-default-" ws-selected-object-name))
+		SQUIRT(lf-seq,concat(TAB,TAB,TAB,"parameters " ws-selected-object-name ".*"))
+		SQUIRT(lf-seq,concat(TAB,TAB,TAB,"returning " ws-selected-object-name ".*"))
+	endif
+	select * from mem-fields
+		where mf-selected
+		order by mf-seq
+	detail
+		set lf-line = concat(TAB,TAB,"set " MF_FLDNAME_CVT " = mi-" mf-internal-field-name )
+		SQUIRT(lf-seq,lf-line)
+	end-select
+	select * from mem-fields
+		where mf-default != spaces
+	detail
+		set lf-line = concat(TAB,TAB,"set " mf-fld-name " = " mf-default)
+		SQUIRT(lf-seq,lf-line)
+	end-select
+	//
+	// check if we ahve a clib
+	//
+	if lp-validation-exists
+		SQUIRT(lf-seq,concat(TAB,TAB,"do clibvimport-validate-" ws-selected-object-name))
+		SQUIRT(lf-seq,concat(TAB,TAB,TAB,"parameters " ws-selected-object-name ".*"))
+		SQUIRT(lf-seq,concat(TAB,TAB,TAB,"returning mi-mistatus,mi-mimessage"))
+		SQUIRT(lf-seq,concat(TAB,TAB,"if mi-mistatus != 'E'"))
+		SQUIRT(lf-seq,concat(TAB,TAB,TAB,"set mi-mistatus = 'V'"))
+		SQUIRT(lf-seq,concat(TAB,TAB,"endif"))
+	endif
+end-procedure
+
+
+procedure populate-post-datagrid
+parameters
+	lp-validation-exists			type boolean
+local
+	lf-line							like fp-line
+	lf-seq							like fp-seq
+	// get the record - checking primary key
+	do get-tag-seq parameters are "GETANDLOCKDG" returning lf-seq
+	// GET
+	SQUIRT(lf-seq,concat(TAB,TAB,"get " ws-selected-object-name))
+	// On index...
+	set lf-line = concat(TAB,TAB,TAB," on index ")
+	select * from mem-fields 
+		where mf-pk-seq != 0
+		order by mf-pk-seq
+	detail
+		if mf-pk-seq > 1
+			string lf-line appending ","
+		endif
+		string lf-line appending concat(" ",mf-fld-name)
+	end-select
+	SQUIRT(lf-seq,lf-line)
+	// key is .....
+	set lf-line = concat(TAB,TAB,TAB," key is ")
+	select * from mem-fields 
+		where mf-pk-seq != 0
+		order by mf-pk-seq
+	detail
+		if mf-pk-seq > 1
+			string lf-line appending ","
+		endif
+		string lf-line appending " mi-"
+		string lf-line appending mf-internal-field-name 
+	end-select
+	SQUIRT(lf-seq,lf-line)
+	//
+	// insert mode so...
+	do get-tag-seq parameters are "INSERTDG" returning lf-seq
+	//
+	// initialise ....
+	//
+	SQUIRT(lf-seq,concat(TAB,TAB,TAB,"initialise ", ws-selected-object-name))
+	// do clibvimport-default....
+	if lp-validation-exists
+		SQUIRT(lf-seq,concat(TAB,TAB,TAB,"do clibvimport-default-" ws-selected-object-name))
+		SQUIRT(lf-seq,concat(TAB,TAB,TAB,TAB,"parameters " ws-selected-object-name ".*"))
+		SQUIRT(lf-seq,concat(TAB,TAB,TAB,TAB,"returning " ws-selected-object-name ".*"))
+	endif
+	// sets ....
+	select * from mem-fields
+		where mf-selected
+		order by mf-seq
+	detail
+		set lf-line = concat(TAB,TAB,TAB,"set " MF_FLDNAME_CVT " = mi-" mf-internal-field-name )
+		SQUIRT(lf-seq,lf-line)
+	end-select
+	select * from mem-fields
+		where mf-default != spaces
+	detail
+		set lf-line = concat(TAB,TAB,TAB,"set " MF_FLDNAME_CVT " = " mf-default)
+		SQUIRT(lf-seq,lf-line)
+	end-select
+	SQUIRT(lf-seq,concat(TAB,TAB,TAB,"insert " ws-selected-object-name))
+	// from here the skeleton does the on error checking
+	//
+	// Now into the update section....
+	//
+	// sets ....
+	do get-tag-seq parameters are "UPDATEDG" returning lf-seq
+	//
+	select * from mem-fields
+		where mf-selected and mf-pk-seq = 0 // cannot update key fields
+		order by mf-seq
+	detail
+		set lf-line = concat(TAB,TAB,TAB,"set " MF_FLDNAME_CVT " = mi-" mf-internal-field-name )
+		SQUIRT(lf-seq,lf-line)
+	end-select
+	select * from mem-fields
+		where mf-default != spaces
+	detail
+		set lf-line = concat(TAB,TAB,TAB,"set " MF_FLDNAME_CVT " = " mf-default)
+		SQUIRT(lf-seq,lf-line)
+	end-select
+	SQUIRT(lf-seq,concat(TAB,TAB,TAB,"update " ws-selected-object-name))
+end-procedure
+
+procedure populate-process-csv
+parameters
+	lp-validation-exists			type boolean
+local
+	lf-line							like fp-line
+	lf-seq							like fp-seq
+	// ---------------------------------------------------------------
+	// Updatte csv
+	// ---------------------------------------------------------------
+	// get the record - checking primary key
+	do get-tag-seq parameters are "GETANDLOCKCSV" returning lf-seq
+	// GET
+	SQUIRT(lf-seq,concat(TAB,TAB,"get " ws-selected-object-name))
+	// On index...
+	set lf-line = concat(TAB,TAB,TAB," on index ")
+	select * from mem-fields 
+		where mf-pk-seq != 0
+		order by mf-pk-seq
+	detail
+		if mf-pk-seq > 1
+			string lf-line appending ","
+		endif
+		string lf-line appending concat(" ",mf-fld-name)
+	end-select
+	SQUIRT(lf-seq,lf-line)
+	// key is .....
+	set lf-line = concat(TAB,TAB,TAB," key is ")
+	select * from mem-fields 
+		where mf-pk-seq != 0
+		order by mf-pk-seq
+	detail
+		if mf-pk-seq > 1
+			string lf-line appending ","
+		endif
+		string lf-line appending " csv-"
+		string lf-line appending mf-internal-field-name 
+	end-select
+	SQUIRT(lf-seq,lf-line)
+	// 
+	// add the stuff for the insert of the record
+	//
+	do get-tag-seq parameters are "INSERTCSV" returning lf-seq
+	//
+	SQUIRT(lf-seq,concat(TAB,TAB,TAB,"initialise ", ws-selected-object-name))
+	if lp-validation-exists
+		SQUIRT(lf-seq,concat(TAB,TAB,TAB,"do clibvimport-default-" ws-selected-object-name))
+		SQUIRT(lf-seq,concat(TAB,TAB,TAB,TAB,"parameters " ws-selected-object-name ".*"))
+		SQUIRT(lf-seq,concat(TAB,TAB,TAB,TAB,"returning " ws-selected-object-name ".*"))
+	endif
+	select * from mem-fields
+		where mf-selected
+		order by mf-seq
+	detail
+		set lf-line = concat(TAB,TAB,TAB,"set " MF_FLDNAME_CVT " = csv-" mf-internal-field-name )
+		SQUIRT(lf-seq,lf-line)
+	end-select
+	select * from mem-fields
+		where mf-default != spaces
+	detail
+		set lf-line = concat(TAB,TAB,TAB,"set " MF_FLDNAME_CVT " = " mf-default)
+		SQUIRT(lf-seq,lf-line)
+	end-select
+	if lp-validation-exists
+		SQUIRT(lf-seq,concat(TAB,TAB,TAB,"do clibvimport-validate-" ws-selected-object-name))
+		SQUIRT(lf-seq,concat(TAB,TAB,TAB,TAB,"parameters " ws-selected-object-name ".*"))
+		SQUIRT(lf-seq,concat(TAB,TAB,TAB,TAB,"returning lf-status,lf-message"))
+	endif
+	SQUIRT(lf-seq,concat(TAB,TAB,TAB,"if lf-status = 'E'"))
+	SQUIRT(lf-seq,concat(TAB,TAB,TAB,TAB,"print lf-seq pic z(9)"))
+	SQUIRT(lf-seq,concat(TAB,TAB,TAB,TAB,TAB,"lf-message col 15"))
+	SQUIRT(lf-seq,concat(TAB,TAB,TAB,TAB,"set lf-error-count += 1"))
+	SQUIRT(lf-seq,concat(TAB,TAB,TAB,"else"))
+	SQUIRT(lf-seq,concat(TAB,TAB,TAB,TAB,"insert " ws-selected-object-name))
+	// 
+	// Add the stuff to support updateing the record
+	//
+	do get-tag-seq parameters are "UPDATECSV" returning lf-seq
+	//
+	select * from mem-fields
+		where mf-selected and mf-pk-seq = 0
+		order by mf-seq
+	detail
+		set lf-line = concat(TAB,TAB,TAB,"set " MF_FLDNAME_CVT " = csv-" mf-internal-field-name )
+		SQUIRT(lf-seq,lf-line)
+	end-select
+	// add the default stuff
+	select * from mem-fields
+		where mf-default != spaces
+	detail
+		set lf-line = concat(TAB,TAB,TAB,"set " MF_FLDNAME_CVT " = " mf-default)
+		SQUIRT(lf-seq,lf-line)
+	end-select
+	if lp-validation-exists
+		SQUIRT(lf-seq,concat(TAB,TAB,TAB,"do clibvimport-validate-" ws-selected-object-name))
+		SQUIRT(lf-seq,concat(TAB,TAB,TAB,TAB,"parameters " ws-selected-object-name ".*"))
+		SQUIRT(lf-seq,concat(TAB,TAB,TAB,"returning lf-status,lf-message"))
+	endif
+	SQUIRT(lf-seq,concat(TAB,TAB,TAB,"if lf-status = 'E'"))
+	SQUIRT(lf-seq,concat(TAB,TAB,TAB,TAB,"print lf-seq pic z(9)"))
+	SQUIRT(lf-seq,concat(TAB,TAB,TAB,TAB,TAB,"lf-message col 15"))
+	SQUIRT(lf-seq,concat(TAB,TAB,TAB,TAB,"set lf-error-count += 1"))
+	SQUIRT(lf-seq,concat(TAB,TAB,TAB,"else"))
+	SQUIRT(lf-seq,concat(TAB,TAB,TAB,TAB,"update " ws-selected-object-name))
+	//
+end-procedure
+
+procedure write-file-to-pgm
+parameters
+	lp-file-name						pic x(1024) type string
+	open text-file
+		file is lp-file-name
+		create permanent truncate
+	on error
+		message "Unable to Create Pgm" error-description(file-status())
+		exit 1
+	endon
+	select * from final-pgm
+		order by fp-seq
+	detail
+		set tf-line = fp-line
+		insert text-file
+	end-select
+end-procedure
+
+
+procedure debug-print-skeleton
+local 
+	i									type number
+	report "debug skeleton"
+		spool-only
+	select * from final-pgm
+	detail
+		print fp-seq fp-line
+	end-select
+	for i = 1 to MAXTAGS
+		if ws-tags[i] != spaces
+			print ws-tags[i] ws-tag-seq[i] col 50
+		endif
+	endfor
+end-procedure
+
+procedure get-propath-1
+returning
+	lr-propath1							pic x(1024) type string
+local
+	lf-dir-list							pic x(512) type string occurs MAX512ARR
+	do split parameters are get-env("PROPATH") ":" returning lf-dir-list
+	set lr-propath1 = lf-dir-list[1]
+end-procedure
+
+procedure load-clib-files
+local
+	lf-cmd								pic x(1024) type string
+	lf-dir-list							pic x(512) type string occurs MAX512ARR
+	i 									type number
+	lf-tmpfile-name						pic x(512)
+	lf-found							type boolean
+	//
+	set lf-tmpfile-name = concat("/tmp/find",str(pid()),".txt")
+	do split parameters are get-env("PROPATH") ":" returning lf-dir-list
+	set i = 1
+	while i <= MAX512ARR and lf-dir-list[i] != spaces
+		set lf-cmd = concat("find " lf-dir-list[i]  " -name clibvimport.spl >> " lf-tmpfile-name)
+		command "sh" parameters are "-c" lf-cmd
+		//
+		set i += 1
+	end-while
+	open text-file
+		file is lf-tmpfile-name
+	set lf-found = false
+	select * from text-file
+	detail
+		do read-clibvimport parameters are tf-line
+		if exit-status = 0
+			set lf-found = TRUE
+		endif
+	end-select
+	close text-file and remove
+	if lf-found = FALSE
+		message "Unable to locate clibvimport source"
+		exit 1
+	endif
+end-procedure
+
+
+procedure read-clibvimport
+parameters
+	lp-filename							pic x(1024) type string
+	open source-file
+		file is lp-filename
+		read-only
+	on error
+		message "unable to find clibvimport source"
+	endon
+	open clibvimport-tables
+		temporary
+	//
+	// now look for the table names
+	//
+	select * from source-file
+	detail
+		if pattern(sf-line,"^procedure") = 1
+		and pattern(sf-line,"clibvimport-validate") != 0
+			initialise clibvimport-tables
+			set ct-tbl-name = sf-line
+			string ct-tbl-name deleting 1 to pattern(sf-line, "clibvimport-validate-") - 1
+			string ct-tbl-name deleting 1 to strlen("clibvimport-validate-") 
+			string ct-tbl-name deleting pattern(ct-tbl-name," ") to strlen(ct-tbl-name)
+			insert clibvimport-tables
+		endif
+	end-select
+end-procedure
+
+procedure split
+parameters
+	lp-input							pic x(1024) type string
+	lp-delimiter						pic x
+returning 
+	lr-split							pic x(512) type string occurs MAX512ARR
+local
+	i 									type number
+	//
+	set i = 1
+	while  lp-input != spaces
+		if substring(lp-input,1,1) = lp-delimiter
+			set i += 1
+			if i > MAX512ARR
+				exit
+			endif
+		else
+			string lr-split[i] appending substring(lp-input,1,1)
+		endif
+		string lp-input deleting 1 to 1
+	end-while
+end-procedure
+
+procedure find-file-in-path
+// non 0 exit status means file not found
+parameters
+	lp-filename							pic x(1024) type string
+	lp-path								pic x(1024) type string
+	lp-delimiter						pic x
+returning
+	lr-full-path						pic x(1024) type string
+local
+	lf-cmd								pic x(1024) type string
+	lf-dir-list							pic x(512) type string occurs MAX512ARR
+	i 									type number
+	lf-tmpfile-name						pic x(512)
+	lf-found							type boolean
+	//
+	set lf-tmpfile-name = concat("/tmp/find",str(pid()),".txt")
+	do split parameters are lp-path lp-delimiter returning lf-dir-list
+	set i = 1
+	while i <= MAX512ARR and lf-dir-list[i] != spaces
+		set lf-cmd = concat("find " lf-dir-list[i]  " -name " lp-filename " >> " lf-tmpfile-name)
+		command "sh" parameters are "-c" lf-cmd
+		//
+		set i += 1
+	end-while
+	open text-file
+		file is lf-tmpfile-name
+	set lf-found = false
+	select * from text-file
+	detail
+		set lr-full-path = tf-line
+		exit 0
+	end-select
+	close text-file and remove
+	exit 1
+end-procedure
+
+procedure get-file-from-pgm
+parameters
+	lf-filename						pic x(512) type string
+returning
+	lr-import-file					pic x(60) type string
+local
+	lf-line-seq						type number
+	open text-file
+		file is lf-filename
+		read-only
+	on error
+		exit 1
+	endon
+	select * from text-file
+	detail
+		set lf-line-seq += 1
+		if lf-line-seq = 2
+			if pattern(uppercase(tf-line),"AUTO GENERATED IMPORT PROGRAM") = 4
+				set lr-import-file = substring(tf-line,40,str-len(tf-line))
+				close text-file
+				exit 0
+			endif
+		endif
+	end-select
+	close text-file
+	exit 1
+end-procedure
+
+procedure build-required-tags
+// Note that the sequence each item appears is not important
+// new ones can just be tacked on the end
+	set ws-tags-required[1] = "INPUTDG_FIELDS"
+	set ws-tags-required[2] = "INPUTCSV_FIELDS"
+	set ws-tags-required[3] = "SECURITY"
+	set ws-tags-required[4] = "OBJECTNAME"
+	set ws-tags-required[5] = "DGFIELD"
+	set ws-tags-required[6] = "VALIDATEDG"
+	set ws-tags-required[7] = "UPDATEDG"
+	set ws-tags-required[8] = "INSERTCSV"
+	set ws-tags-required[9] = "INPUTCSV_TYPE"
+	set ws-tags-required[10] = "PROMPT_SCREEN_TITLE_PRE760"
+	set ws-tags-required[11] = "PROMPT_SCREEN_TITLE_POST760"
+	set ws-tags-required[12] = "GETANDLOCKDG"
+	set ws-tags-required[13] = "INSERTDG"
+	set ws-tags-required[14] = "GETANDLOCKCSV"
+	set ws-tags-required[15] = "UPDATECSV"
+	set ws-tags-required[16] = "PGMNAME"
+end-procedure

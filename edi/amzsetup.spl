@@ -1,0 +1,277 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : 
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2018
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: edi/amzsetup.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 22Nov18  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+ 
+field
+	ws-function-title						type string
+
+mode md-fees
+	prompt "Fees"
+
+procedure main
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+//	do i8secabt-check-abort
+//		parameters are sys-consolidation-division login-id() "ZUSR" "R004"
+//		returning ws-function-title 
+	do i8proglog-write-log
+	do setup-menu
+end-procedure
+
+menu setup-menu
+local
+	lf-count							type number
+	window
+	title "Setup Menu"
+detail
+	option "Set Customer Code" @1,1
+		select lf-count = count(*) 
+			from system-user-only-table
+			where suot-tbl-type = 'AMZSYS'
+			and suot-tbl-code = 'CUS'
+		end-select
+		if lf-count != 0
+			do set-customer-code correct once
+		else
+			do set-customer-code entry once
+		endif
+	option "Set Product Tax Code" @2,1
+		select lf-count = count(*) 
+			from system-user-only-table
+			where suot-tbl-type = 'AMZSYS'
+			and suot-tbl-code = 'TAX'
+		end-select
+		if lf-count != 0
+			do set-tax-code correct once
+		else
+			do set-tax-code entry once
+		endif
+	option "GL Postings for Tax Codes" @3,1
+		do maintain-tax-codes
+	option "Set the Channel Codes" @4,1
+		do maintain-channels
+end-menu
+
+screen set-customer-code
+	window @1,1 to @10,60
+		window-position 5
+	title "Set Customer Code"
+	select *
+		from system-user-only-table
+		where suot-tbl-type = 'AMZSYS'
+		and suot-tbl-code = 'CUS'
+	allowed entry correct remove
+detail
+	accept suot-alpha-20-1 @2,30 pic x(10)
+		title "Customer Code"
+		help "This must be the customer that orders will be posted to "
+	validations
+		get deb-master
+			on index accountcode
+			key is suot-alpha-20-1
+		on error ENOREC
+			message "Invalid Customer Account"
+			re-enter
+		endon
+	end-validations
+	confirm auto
+	before
+		set suot-tbl-type = "AMZSYS"
+		set suot-tbl-code = "CUS"
+		set suot-description = "Amazon Customer Code"
+	end-confirm
+end-screen
+
+screen set-tax-code
+	window @1,1 to @10,60
+		window-position 5
+	title "Set Tax Code"
+	select *
+		from system-user-only-table
+		where suot-tbl-type = 'AMZSYS'
+		and suot-tbl-code = 'TAX'
+	allowed entry correct remove
+detail
+	accept suot-alpha-20-1 @2,30 pic x(10)
+		title "Stock Code"
+		help "This must be a Z item code for tax postings"
+	validations
+		get stock-master
+			on index stock-code
+			key is suot-alpha-20-1
+		on error ENOREC
+			message "Invalid Stock Code"
+			re-enter
+		endon
+		if stk-stock-status != "Z"
+			message "Not a Z Item"
+			re-enter
+		endif
+	end-validations
+	confirm auto
+	before
+		set suot-tbl-type = "AMZSYS"
+		set suot-tbl-code = "TAX"
+		set suot-description = "Amazon Tax Code"
+	end-confirm
+end-screen
+
+screen maintain-channels
+	window @1,1 to @15,60
+	title "Sales Channels"
+	datagrid occurs 13
+	allowed entry remove correct md-fees
+	select * 
+		from system-user-only-table
+		where suot-tbl-type = "AMZCHANNEL"
+detail
+	if screenmode = md-fees
+		do maintain-fees parameters are suot-tbl-code
+	end-if
+	accept suot-tbl-code @1,1 pic x(4)
+		title "Channel Code"
+		help "Some Code classifying the channel"
+		when screenmode in ( entry search )
+		show-value
+	accept suot-description @1,2 
+		title "Amazon Sales Channel"
+		help "This must match EXACTLY the contents of the sales channel node in the xml file"
+	confirm auto
+	before
+		set suot-tbl-type = "AMZCHANNEL"
+	end-confirm
+end-screen
+
+screen maintain-fees
+parameters
+	lp-channel-code						like suot-tbl-code
+local
+	lf-gl-count							type number
+	window @1,1 to @15,60
+	title "Sales Channels"
+	datagrid occurs 13
+	allowed entry remove correct md-fees
+	select * 
+		from system-user-only-table
+		where suot-tbl-type = concat("AMZORDFEE" lp-channel-code)
+detail
+	accept suot-tbl-code @1,1 pic x(4)
+		title "Fee Code"
+		help "Some Code classifying the Fee (the value of the code is unimportant)"
+		uppercase
+		when screenmode in ( entry search )
+		show-value
+	accept suot-description @1,2 
+		title "Payment Detail"
+		help "This must match EXACTLY the contents of the payment detail field that identifies the fee"
+	accept suot-alpha-20-1 @1,3
+		uppercase
+		title "Stock Code"
+		help "The Stock code of the Z item for this fee"
+	validations
+		get stock-master
+			on index stock-code
+			key is suot-alpha-20-1
+		on error ENOREC
+			message "Invalid Stock Code"
+			re-enter
+		endon
+		if stk-stock-status != "Z"
+			message "Not a Z Item"
+			re-enter
+		endif
+	end-validations
+	accept suot-alpha-20-1 @1,4
+		uppercase
+		title "GL Code"
+		optional
+		help "Override GL Code for this fee"
+	validations
+		if suot-alpha-20-2 != spaces
+			get gl-master
+				on index gl-accountcode
+				key is suot-alpha-20-2
+			on error
+				message  "Invalid GL Account "
+				re-enter
+			endon
+			// Now check special accounts
+			select  lf-gl-count = count(*)
+				from special-accounts
+				where gl-accountcode = suot-alpha-20-2
+			end-select
+			if lf-gl-count = 0
+				message str-concat(suot-alpha-20-2, " does not appear in special accounts")
+				re-enter
+			endif
+		endif
+	end-validations
+	confirm auto
+	before
+		set suot-tbl-type = concat("AMZORDFEE" lp-channel-code)
+	end-confirm
+end-screen
+
+screen maintain-tax-codes
+local
+	lf-gl-count							type number
+	window @1,1 to @15,60
+	title "Tax Codes "
+	datagrid occurs 13
+	allowed entry remove correct 
+	select * 
+		from system-user-only-table
+		where suot-tbl-type = "AMZTXGL"
+detail
+	accept suot-tbl-code @1,1
+		uppercase
+		title "Code"
+		help "This must be a concatentation of the country and state tax codes for this order"
+	accept suot-alpha-20-1 @1,4
+		uppercase
+		title "GL Code"
+		optional
+		help "Override GL Code for this fee"
+	validations
+		if suot-alpha-20-1 != spaces
+			get gl-master
+				on index gl-accountcode
+				key is suot-alpha-20-1
+			on error
+				message  "Invalid GL Account "
+				re-enter
+			endon
+			// Now check special accounts
+			select  lf-gl-count = count(*)
+				from special-accounts
+				where gl-accountcode = suot-alpha-20-1
+			end-select
+			if lf-gl-count = 0
+				message str-concat(suot-alpha-20-1, " does not appear in special accounts")
+				re-enter
+			endif
+		endif
+	end-validations
+	confirm auto
+	before
+		set suot-tbl-type = "AMZTXGL"
+	end-confirm
+end-screen

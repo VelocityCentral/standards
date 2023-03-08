@@ -1,0 +1,252 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : Clibs to support new fixedassets
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2014
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: clib/clibvgfa.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 10Nov14  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+/*
+
+	This documentation is in RST format.  To view this as a nice pdf goto
+	https://overbits.herokuapp.com/rsteditor/ or rst.ninjs.org and paste this content.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|           |           |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+
+	Alternatively
+
+	 =========== =========== ======================================================== 
+	  Direction   Data Type   Description                                             
+	 =========== =========== ======================================================== 
+	 =========== =========== ======================================================== 
+
+========
+clibvgfa
+========
+
+	This clib contains a selection of sql statements that returns common information
+	for fixed assets.
+
+clibvgfa-depn 
+~~~~~~~~~~~~~
+
+	Return the depreciation between two dates for a give asset.
+
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 10  |Asset No (like asset-no)                                |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |String 4   |Regime code                                             |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |Date       |Start Date                                              |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |Date       |End Date                                                |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |Number     |Depreciation value between dates                        |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvgfa-cost 
+~~~~~~~~~~~~~
+
+	Return the capital cost transactions (Acquisition and revaluations) between two dates
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 10  |Asset No (like asset-no)                                |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |String 4   |Regime code                                             |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |Date       |Start Date                                              |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |Date       |End Date                                                |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |Number     |Capital value between dates                             |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvgfa-wdv 
+~~~~~~~~~~~~
+
+	Return the written down value between two dates
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 10  |Asset No (like asset-no)                                |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |String 4   |Regime code                                             |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |Date       |Start Date                                              |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |Date       |End Date                                                |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |Number     |Written Down value between dates                        |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvgfa-reval 
+~~~~~~~~~~~~~~
+
+	Return the sum of any revaluation transactions between two dates
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 10  |Asset No (like asset-no)                                |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |String 4   |Regime code                                             |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |Date       |Start Date                                              |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |Date       |End Date                                                |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |Number     |Revaluation value between dates                         |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvgfa-generic 
+~~~~~~~~~~~~~~~~
+
+	Return the sum of any specified transaction type between two dates
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 10  |Asset No (like asset-no)                                |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |String 4   |Regime code                                             |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |Date       |Start Date                                              |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |Date       |End Date                                                |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |String 2   |Specified transaction type                              |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |Number     |Sum of value between dates                              |
+	+-----------+-----------+--------------------------------------------------------+
+*/
+
+#include "../include/i8proglogparam.spl"
+#define CAPITAL ("AQ" "RI" "RW" "RV" )
+#define DEPN ("DN" "AD" "AP" "BC")
+ 
+field
+	ws-function-title						type string
+
+procedure library-init
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8proglogparam-write-log parameters are "clibvgfa"
+end-procedure
+
+procedure clibvgfa-depn export
+parameters are
+	lp-asset-no							like asset-no
+	lp-regime							like art-regime
+	lp-from-date						type date
+	lp-to-date							type date
+returning 
+	lr-value							type number
+	//
+	select lr-value = sum(0 - amt-trans-amount)
+		from asset-master-trans
+		where asset-no = :lp-asset-no
+		and amdr-regime = :lp-regime
+		and amt-trans-type in DEPN
+		and amt-period-effective-date between :lp-from-date and :lp-to-date
+	end-select
+end-procedure
+
+procedure clibvgfa-cost export
+parameters are
+	lp-asset-no							like asset-no
+	lp-regime							like art-regime
+	lp-from-date						type date
+	lp-to-date							type date
+returning 
+	lr-value							type number
+	//
+	select lr-value = sum(amt-trans-amount)
+		from asset-master-trans
+		where asset-no = :lp-asset-no
+		and amdr-regime = :lp-regime
+		and amt-trans-type in CAPITAL
+		and amt-period-effective-date between :lp-from-date and lp-to-date
+	end-select
+end-procedure
+
+procedure clibvgfa-wdv export
+parameters are
+	lp-asset-no							like asset-no
+	lp-regime							like art-regime
+	lp-from-date						type date
+	lp-to-date							type date
+returning 
+	lr-value							type number
+local
+	lf-cap								type number
+	lf-reval							type number
+	lf-depn								type number
+	do clibvgfa-cost 
+		parameters are lp-asset-no	lp-regime lp-from-date lp-to-date					
+		returning  lf-cap
+	do clibvgfa-reval 
+		parameters are lp-asset-no	lp-regime lp-from-date lp-to-date					
+		returning  lf-reval
+	do clibvgfa-depn 
+		parameters are lp-asset-no	lp-regime lp-from-date lp-to-date					
+		returning  lf-depn
+	set lr-value = lf-cap + lf-reval - lf-depn
+end-procedure
+
+procedure clibvgfa-reval export
+parameters are
+	lp-asset-no							like asset-no
+	lp-regime							like art-regime
+	lp-from-date						type date
+	lp-to-date							type date
+returning 
+	lr-value							type number
+	//
+	select lr-value =  sum(amt-trans-amount)
+		from asset-master-trans
+		where asset-no = :lp-asset-no
+		and amdr-regime = :lp-regime
+		and amt-trans-type in ( "RV" "RW" "RI")
+		and amt-period-effective-date between :lp-from-date and :lp-to-date
+	end-select
+end-procedure
+
+
+procedure clibvgfa-generic export
+parameters are
+	lp-asset-no							like asset-no
+	lp-regime							like art-regime
+	lp-from-date						type date
+	lp-to-date							type date
+	lp-type								like amt-trans-type
+returning 
+	lr-value							type number
+	//
+	select lr-value = sum(amt-trans-amount)
+		from asset-master-trans
+		where asset-no = :lp-asset-no
+		and amdr-regime = :lp-regime
+		and amt-trans-type = :lp-type
+		and amt-period-effective-date between :lp-from-date and lp-to-date
+	end-select
+end-procedure

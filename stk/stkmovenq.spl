@@ -1,0 +1,1088 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : 
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2018
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: stk/stkmovenq.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 07Mar18  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/bmsdef.spl"
+#include "../include/stddef.spl"
+#include "../include/ibmsstyle.spl"
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+#include "../include/i8costsecu.spl"
+#define I4TRANSDESC_LONG_DESC_REQUIRED
+#include "../include/i4trandesc.spl"
+#include "../include/i3doctype.spl"
+#define I4LOTENQ_ENQUIRY_ONLY
+#include "../include/i4lotenq.spl"
+#include "../include/i8batchgle.spl"
+#define I8STKMOVE_ORDER_ENQUIRE		'1'
+#define I8STKMOVE_CHECK_ORDER_ONLY	'2'
+
+link 'clib/clibstk'
+link 'clib/clibcurrency'
+
+field
+	ws-function-title						type string
+	ws-cost-security						type boolean
+	i8stkmove-found-order				type boolean
+	i8stkmove-saved-stock-code			like stock-code
+	i8stkmove-item-value				like stk-trans-value
+	i8stkmove-item-cost					like stk-trans-cost
+	i8stkmove-decimal-pic				pic x(10)
+
+object 
+	like-stk-movements				like stock-movements
+
+mode i8stkmove-dummy-mode
+mode i8stkmove-md-full-detail
+	prompt 'Details'
+	help 'Show full details for this option'
+	currency
+mode i8stkmove-md-continue
+	prompt 'Continue'
+mode i8stkmove-md-order
+	prompt 'Order'
+	help 'Press return to enquiry on this sales/purchase order'
+	currency
+	when i8stkmove-found-order
+	always-show
+mode i8stkmove-md-archive
+	prompt 'Archive'
+	help 'Press return to enquiry on archive file'
+mode i8stkmove-md-stk-lot-enquiry
+	prompt 'Item Lots'
+	help 'Enquiry on all lots for this item code'
+	currency	
+	when stk-serialized-flag in { 'L' 'P' }
+mode i8stkmove-md-lot-enquiry
+	prompt 'Document &Lots'
+	help 'Enquiry on all lots related to this document'
+	currency	
+	when stk-serialized-flag in { 'L' 'P' }
+mode i8stkmove-md-gl-batch											
+	prompt 'GL Details'
+	help "Enquire on gl transactions for this stk batch"
+	currency
+mode i8stkmove-md-batch-serial-enquiry
+	prompt "Doc&ument Serials"
+	help 'Enquiry on all serials related to this document'
+	currency	
+	when stk-serialized-flag = 'Y'
+	always-show
+mode i8stkmove-md-tracking-id
+	help 'Tracking ID drilldown'
+	prompt 'Trac&king'
+	currency
+	when stk-document-no <> SPACES
+	always-show
+ 
+
+procedure main
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+//	do i8secabt-check-abort
+//		parameters are sys-consolidation-division login-id() "ZUSR" "R004"
+//		returning ws-function-title 
+	do i8proglog-write-log
+	do i8costsecu-check-cost-security
+	get stock-master
+		on index stock-code
+		key is get-param(1)
+	on error
+		exit 1
+	endon
+	do show-movements
+end-procedure
+
+screen show-movements
+local field															
+	lf-alt-trans-qty				like stk-trans-qty
+	lf-created-by					like user-id
+	lf-cost-ref						like stk-trans-ref1
+	lf-stk-document-no				like slmv-document-no
+	//
+	window @3,1 to @24,120					
+		title concat(translate "Stock Movements : ",
+			strconcat(stock-code)," ",stk-description)
+	help-context 'index_CSH.htm' 90092
+	select *
+		lf-alt-trans-qty =
+			stk-trans-qty / :stk-conversion-factor
+		I4TRANDESC_STK_TRANS_DESC_SHORT
+		lf-cost-ref =
+			if-then-else((stk-trans-type in ("RM","RV") 
+						 and not i8costsecu-cost-security-ok),
+						 " ",stk-trans-ref1)
+	from				 
+		stock-movements 
+	order by 
+		stock-code desc 
+		stk-trans-date desc
+	where :stock-code = stock-code
+	/*
+	and (
+		(not :i8stkmove-filtered
+		and stk-document-no between :i8stkmove-document-no-from and :i8stkmove-document-no-to
+		)
+		or
+		(:i8stkmove-filtered
+		and stk-trans-date between :i8stkmove-date-from and :i8stkmove-date-to
+		and stk-accountcode between :i8stkmove-acc-from and :i8stkmove-acc-to
+		and stk-trans-type in
+						{:i8stkmove-type1 :i8stkmove-type2 :i8stkmove-type3
+						 :i8stkmove-type4 :i8stkmove-type5 :i8stkmove-type6})
+		and stk-document-no between :i8stkmove-document-no-from and :i8stkmove-document-no-to
+		)
+	*/
+	datagrid occurs 16
+	review-bottom-to-top
+	allow search i8stkmove-md-full-detail i8stkmove-md-stk-lot-enquiry 
+		i8stkmove-md-lot-enquiry i8stkmove-md-order // i8stkmove-md-archive
+		i8stkmove-md-gl-batch 
+		i8stkmove-md-tracking-id
+		i8stkmove-md-batch-serial-enquiry
+before
+	box @19,1 to @23,120
+		title "Detail"
+	display "   Reason:" @20,1
+	display "Batch Ref:" @21,1
+	display "Value:" @20,39
+	display "SO Ref:" @21,38
+	if i8costsecu-cost-security-ok
+		display "Cost:" @20,66
+	endif
+detail
+	if screenmode() in { next prev }
+		do i8stkmove-enquiry-on-order
+			parameter I8STKMOVE_CHECK_ORDER_ONLY
+	endif
+	accept stk-trans-date @3,2 						
+		title "Trans"
+		help 'Enter the date you wish to enquire on/from'
+	display stk-trans-whse @3,4
+	display stk-trans-type @3,6 pic x(5)
+	display i4trandesc-trans-desc-short @3,8 pic x(9)
+		title is "Type Desc"
+	display stk-accountcode @3,10
+	display lf-cost-ref @3,12
+		title is "Ref 1"
+	display stk-trans-ref2 @3,14
+		title is "Ref 2"
+	display stk-trans-ref3 @3,16
+		title is "Ref 3"
+	display stk-trans-qty @3,18 pic i8stkmove-decimal-pic
+	display stk-document-type @3,20 pic x(8)
+	display stk-document-no @3,22
+	display stk-document-suffix @3,24 pic x(3)
+	display stk-document-seq @3,26
+	// 
+	save system-user-control
+	get system-user-control
+		on index user-unix-id-no
+		key is stk-trans-created-by
+	on error
+		set lf-created-by = 'Unknown'
+	else
+		set lf-created-by = user-id
+	endon
+	restore system-user-control
+	display lf-created-by @3,30
+		title is "Created By"
+	//
+	display stk-trans-created-by @3,32
+		title is "Created By Id"
+	if i8costsecu-cost-security-ok
+		display stk-trans-whse-avg-cost @3,34 pic ---,---,--9.9999
+			title 'Avg Cost'
+		display stk-trans-current-cost @3,36 pic ---,---,--9.9999
+			title 'Current Cost'
+	endif
+	display stk-trans-qty-on-hand @3,38 pic i8stkmove-decimal-pic
+		title 'Current OH'
+	display stk-trans-qty-on-consignment @3,40 pic i8stkmove-decimal-pic
+		title 'Current On Consign'
+	accept stk-trans-user-only-alpha4-1 @3,50
+		title 'Type'
+		read-only
+		suppress
+	//
+	if screenmode() not in { next-scr prev-scr }
+		do i8stkmove-display-extra-info
+	endif
+	confirm auto
+	confirmed
+		switch screenmode()
+		case i8stkmove-md-full-detail
+			save stock-movements
+			do i8stkmove-trans-detail							
+				initial-mode i8stkmove-dummy-mode
+			if i8stkmove-saved-stock-code != stock-code				
+				restore stock-movements
+				position stock-movements
+					on index stock-code stk-trans-date
+				refresh review
+			endif													
+		case i8stkmove-md-lot-enquiry
+			if stk-serialized-flag not in { 'L' 'P' }
+				message 'The item must be flagged as lot '
+					'tracked before using this option'
+			else
+				if stk-document-no = SPACES 
+					set lf-stk-document-no = 
+						right-justify(stk-trans-ref1,sizeof(slmv-document-no))
+				else
+					set lf-stk-document-no = 
+						right-justify(stk-document-no,sizeof(slmv-document-no))
+				endif
+				if stk-trans-type in { "TO" "TI" }
+				and stk-document-type = I3DOCTYPE_TRFMANUAL
+					set slm-lot-number = stk-trans-ref1
+					get stock-lot-master
+						on index stock-code slm-lot-number
+						key is stock-code slm-lot-number
+					on error
+						do i4lotenq-select-lot-with-doc
+							parameters
+								stock-code
+								stk-trans-whse
+								stk-trans-type
+								lf-stk-document-no 
+								stk-document-suffix
+								stk-document-seq
+					else
+						do i4lotenq-display-lot-movements
+							parameters stock-code stk-trans-whse
+					endon
+				else
+					do i4lotenq-select-lot-with-doc
+						parameters
+							stock-code
+							stk-trans-whse
+							stk-trans-type
+							lf-stk-document-no 
+							stk-document-suffix
+							stk-document-seq
+				endif
+			endif
+		case i8stkmove-md-stk-lot-enquiry
+			if stk-serialized-flag not in { 'L' 'P' }
+				message 'The item must be flagged as lot '
+					'tracked before using this option'
+			else
+				do i4lotenq-select-lot parameters stock-code
+			endif
+		case i8stkmove-md-order
+			do i8stkmove-enquiry-on-order
+				parameter I8STKMOVE_ORDER_ENQUIRE
+//		case i8stkmove-md-archive
+//			do i8stkmove-stock-movements-archive
+		case i8stkmove-md-gl-batch									
+			set gl-trans-date = stk-trans-date
+			set gl-batch-ref = stk-batch-ref
+			do i8batchgle-enquire-on-gl-batch
+		case i8stkmove-md-batch-serial-enquiry
+			push stock-movements
+			spl "lib/h4serenq"
+				parameters
+					"-batch"
+					stk-batch-ref
+					stk-batch-trans-no
+					SPACES		// All warehouses
+			pop stock-movements
+			position stock-movements
+				on index stock-code stk-trans-date
+			refresh review
+		case i8stkmove-md-tracking-id
+			spl 'gl/m3trackid'
+				parameter
+					stk-document-type
+					stk-document-no
+					stk-document-suffix
+					ZERO	//Position on first transaction of Track ID.
+					stk-batch-ref
+		endswitch
+	endconfirm
+endscreen //i8stkmove-stock-movements-screen -----------------------------------
+
+
+procedure i8stkmove-enquiry-on-order
+	parameter
+		lp-enquiry-mode							pic x
+	returning
+		lr-order-no							like so-order-no
+		lr-bo-suffix						like so-bo-suffix
+	//
+	local field
+		lf-direct-transfer					type boolean						
+		lf-sales-order-found				type boolean						
+		lf-internal-so						type boolean				
+	//
+	set lr-order-no = ZERO
+	set lr-bo-suffix = SPACES
+	set i8stkmove-found-order = FALSE
+	set lf-internal-so = FALSE
+	set so-cust-reference = SPACES
+	if stk-trans-type = 'MU'
+		do i8stkmove-setup-order-no
+			returning lf-direct-transfer lf-sales-order-found
+					lf-internal-so
+	endif
+	//QA Reject type transactions, stk-document-no is the next
+	//available serial number from system table. This number
+	//does not refer to any valid sales order or work order.
+	if (stk-trans-type in { 'SO', 'TO' 'TI' 'CO' 'SW' 'RB' 'TX' 'CX' }
+		or lf-internal-so
+		or (stk-trans-type in { 'RV' 'IV' }
+			and stk-document-type = I3DOCTYPE_SALESORDER))
+	and not (stk-trans-type in { 'TO' 'TI' }		// Issue to work order
+			and stk-document-type in { I3DOCTYPE_ISSUEWO I3DOCTYPE_RETURNWO
+				I3DOCTYPE_QAREJECT })
+	then
+		if stk-trans-type != 'MU' // already setup for 'MU's
+			// moved code out to seperate procedure - i8stkmove-setup-order-no
+			//
+			do i8stkmove-setup-order-no
+				returning lf-direct-transfer lf-sales-order-found
+						lf-internal-so
+		endif
+		if lf-direct-transfer = TRUE
+			// don't display this message, in XI it pop up as window. It is
+			// annoying. If really needed this message please see Michelle.
+			//message "Direct transfers are not linked to sales orders."
+		elseif lf-sales-order-found	
+			set lr-order-no = so-order-no
+			set lr-bo-suffix = so-bo-suffix
+			set i8stkmove-found-order = TRUE
+			if lp-enquiry-mode = I8STKMOVE_ORDER_ENQUIRE
+				spl 'so/m5ordenq' parameters are '-e'
+					stk-document-no stk-document-suffix
+					stk-trans-ref1	//so-invoice-no
+			endif
+		endif
+	elseif stk-trans-type in { 'PO' }
+	or (stk-trans-type in { 'RV' 'IV' }
+		and stk-document-type = I3DOCTYPE_PURCHASEORDER )
+		set i8stkmove-found-order = TRUE
+		if lp-enquiry-mode = I8STKMOVE_ORDER_ENQUIRE
+			spl 'po/m6enquiry' parameters are '-q' 	
+				stk-document-no	stk-document-suffix
+		endif
+	elseif stk-trans-type in { 'MU' 'MF' }
+	or (stk-trans-type in { 'TO' 'TI' }			// Issue to work order
+		and stk-document-type in { I3DOCTYPE_ISSUEWO I3DOCTYPE_RETURNWO })
+	or (stk-trans-type = 'RV'
+		and stk-document-type in { I3DOCTYPE_WORKORDER I3DOCTYPE_ISSUEWO })
+		// Get the work order.
+		set lr-order-no = num(stk-document-no)
+		set lr-bo-suffix = SPACES
+		if stk-document-type in { 'WO' 'IW' 'WR' }
+			set i8stkmove-found-order = TRUE
+			set work-order = right-justify(stk-document-no,sizeof(work-order))
+			get bom-work-order
+				key is work-order
+			on error
+				if lp-enquiry-mode = I8STKMOVE_ORDER_ENQUIRE
+					message "This manufacture trans. doesn't have a work "
+							"order attached to it"
+					pause
+				endif
+			else
+				if lp-enquiry-mode = I8STKMOVE_ORDER_ENQUIRE
+					spl 'bom/m9womaint' parameters
+						are '-single' work-order
+					on error endon
+				endif
+			endon
+		else
+			if lp-enquiry-mode = I8STKMOVE_ORDER_ENQUIRE
+				message "This manufacture trans. doesn't have a work "
+						"order attached to it"
+				pause
+			endif
+		endif
+	elseif lp-enquiry-mode = I8STKMOVE_ORDER_ENQUIRE
+		message 'The movement type selected has no enquiry function'
+		pause
+	endif
+endprocedure //i8stkmove-enquiry-on-order --------------------------------
+
+
+procedure i8stkmove-display-extra-info
+	local
+		lf-authorised-user				like user-id
+		lf-user-unix-pos				pic 99
+		lf-user-unix-id-no				like stk-trans-ref2
+		lf-gl-accountcode				pic x(30)
+	//
+	if stk-document-type = I3DOCTYPE_QAREJECT
+		get system-table			
+			on index sys-tbl-type sys-tbl-code
+			key is "HR" stk-trans-reason-code
+		on error ENOREC
+			get system-table			
+				on index sys-tbl-type sys-tbl-code
+				key is 'HR' substring(stk-trans-ref3,8,9)			
+			on error ENOREC
+				set sys-description = spaces
+			endon
+		endon						
+	elseif stk-document-type in { I3DOCTYPE_REJECT I3DOCTYPE_SCRAP }
+		get system-table			
+			on index sys-tbl-type sys-tbl-code
+			key is "MD" stk-trans-reason-code
+		on error ENOREC
+			get system-table			
+				on index sys-tbl-type sys-tbl-code
+				key is 'MD' substring(stk-trans-ref3,5,10)			
+			on error ENOREC
+				set sys-description = spaces
+			endon
+		endon						
+	elseif stk-trans-type = 'SA'							
+		if stk-accountcode = 'SCRAP'								
+			get system-table										
+				on index sys-tbl-type sys-tbl-code
+				key is "MD" stk-trans-reason-code
+			on error ENOREC
+				get system-table										
+					on index sys-tbl-type sys-tbl-code
+					key is 'MD' stk-trans-ref3							
+				on error ENOREC
+					set sys-description = spaces						
+				endon
+			endon													
+		else														
+			get system-table
+				on index sys-tbl-type sys-tbl-code
+				key is "IR" stk-trans-reason-code
+			on error ENOREC
+				get system-table
+					on index sys-tbl-type sys-tbl-code
+					key is 'IR' stk-trans-ref3
+				on error ENOREC
+					set sys-description = spaces
+				endon
+			endon
+		endif														
+	elseif stk-trans-type = 'SW'
+	or (stk-trans-type = 'SO' and stk-trans-value < 0)
+		get system-table
+			on index sys-tbl-type sys-tbl-code
+			key is "CN" stk-trans-reason-code
+		on error ENOREC
+			get system-table
+				on index sys-tbl-type sys-tbl-code
+				key is 'CN' substring(stk-trans-ref2,10,11)
+			on error ENOREC
+				set sys-description = spaces
+			endon
+		endon
+	else
+		set sys-description = spaces
+	endif
+	display sys-description @20,12 pic x(25)
+	if (stk-trans-type in { 'TO' 'TI' }			//If transfer &cost 
+	and sys-charge-for-inter-transfers != 'N' 	//held in price fld	
+	and i8costsecu-cost-security-ok )
+	or stk-trans-type not in { 'TO' 'TI' }		//NOT transfer		
+		display stk-trans-value @20,46 pic -,---,---,---,--9.99
+	else															
+		display ZERO @20,46 pic -,---,---,---,--9.99
+	endif															
+	display stk-batch-ref @21,12
+	if i8costsecu-cost-security-ok
+		display stk-trans-cost @20,72 pic -,---,---,---,--9.99
+	endif
+	if stk-document-type = 'SO'
+		get sales-order
+			on index so-order-no so-bo-suffix
+			key is num(stk-document-no) stk-document-suffix
+		on error ENOREC
+			get sales-order-archive
+				on index so-order-no so-bo-suffix
+				key is num(stk-document-no) stk-document-suffix
+			on error ENOREC
+				display SPACES @21,46 pic x(20)
+			else
+				display so-cust-reference @21,46
+			endon
+		else
+			display so-cust-reference @21,46
+		endon
+	else
+		display SPACES @21,46 pic x(20)
+	endif
+	//
+	do i8stkmove-authorised-details
+		returning lf-user-unix-pos
+	set lf-authorised-user = SPACES
+	if lf-user-unix-pos <> ZERO
+		if stk-document-type in {I3DOCTYPE_GLISSUE I3DOCTYPE_GLRETURN I3DOCTYPE_DEPTISSU }
+			set lf-user-unix-id-no =
+				substring(stk-trans-ref3, 
+					lf-user-unix-pos, sizeof(stk-trans-ref3))
+		else
+			set lf-user-unix-id-no =
+				substring(stk-trans-ref2, 
+					lf-user-unix-pos, sizeof(stk-trans-ref2))
+		endif
+		if valid-number(lf-user-unix-id-no)
+			save system-user-control
+			get system-user-control
+				on index user-unix-id-no
+				key is num(lf-user-unix-id-no)
+			on error
+				set lf-authorised-user = 'Unknown'
+			else
+				set lf-authorised-user = user-id
+			endon
+			restore system-user-control
+		endif
+		display 'Auth:' @21,66 background
+		display lf-authorised-user @21,72
+	else
+		clear @21,66 to @21,102
+	endif
+	//
+	//display the full GL account where applicable
+	if stk-document-type in { I3DOCTYPE_GLISSUE I3DOCTYPE_GLRETURN
+		I3DOCTYPE_SERISSUE }
+		set lf-gl-accountcode = concat(stk-trans-ref2,stk-accountcode)
+		display lf-gl-accountcode @22,12
+			title "GL Account:"
+	else
+		clear @22,1 to @22,88
+	endif
+endprocedure //i8stkmove-display-extra-info ------------------------------------
+
+
+screen i8stkmove-trans-detail
+	//Please reflect any changes in this screen with the screen below
+	//which simply uses a different index (which includes stk-trans-whse)
+	local field															
+		lf-user-name					like user-id
+		lf-order-no						like so-order-no
+		lf-bo-suffix					like so-bo-suffix
+		lf-user-unix-id-no				like stk-trans-ref2
+		lf-authorised-user				like user-id
+		lf-user-unix-pos				pic 99
+		lf-stk-batch-ref				like stk-batch-ref
+		lf-stk-batch-trans-no			like stk-batch-trans-no
+		lf-stk-trans-date-time			like stk-trans-date-time
+		lf-gl-accountcode				pic x(30)
+	//
+	window @2,1 to @21,95
+		title is "Transaction Detail"
+	primary like-stk-movements
+		on index stock-code stk-trans-date
+	allow i8stkmove-md-continue search i8stkmove-md-order i8stkmove-md-gl-batch
+before
+	box @2,2 to @20,47
+		title 'Movement Details'
+	box @2,48 to @13,95
+		title 'Transaction Details'
+	box @14,48 to @20,95
+		title 'Document Details'
+	display "  Trans Type:" @5,6
+	display "        Whse:" @6,6
+	display "        Date:" @7,6
+	display "     Account:" @9,6
+	display "  Batch Ref.:" @3,49
+	display " Reference 2:" @12,6
+	display " Reference 3:" @13,6
+	display "    Quantity:" @5,49
+	display " Trans Value:" @6,49
+	display "  Item Value:" @7,49
+	display "   Item Code:" @3,6
+	if i8costsecu-cost-security-ok
+		display "   Trans Cost:" @8,48
+		display " GL Item Cost:" @9,48
+	endif
+	set i8stkmove-saved-stock-code = stock-code		
+	display "   Trans. No.:" @4,48
+	display "      Date/Time:" @18,3
+	do i8stkmove-setup-qty-pic-format
+	//
+	set lf-stk-batch-ref = stk-batch-ref
+	set lf-stk-batch-trans-no = stk-batch-trans-no
+	set lf-stk-trans-date-time = stk-trans-date-time
+detail
+	//Dummy mode is required to gain currency on the actual record -
+	//as the object has no unique index
+	if screenmode() = i8stkmove-dummy-mode
+		extract like-stk-movements
+			on index stock-code stk-trans-date
+			key is stock-code stk-trans-date
+			next same stock-code stk-trans-date
+			where stk-batch-ref = lf-stk-batch-ref
+			and stk-batch-trans-no = lf-stk-batch-trans-no
+			and stk-trans-date-time = lf-stk-trans-date-time
+		detail
+			break
+		endextract
+		refresh
+		continue
+	endif
+	do i8stkmove-enquiry-on-order
+		parameter I8STKMOVE_CHECK_ORDER_ONLY
+		returning lf-order-no lf-bo-suffix
+	accept stock-code @3,20
+		help 'Enter the required item code'
+	validation
+		if stock-code != i8stkmove-saved-stock-code
+			message 'Warning: This is not the current item code'
+		endif
+	endvalidation
+	if stock-code != i8stkmove-saved-stock-code
+		display 'NO LONGER ON SELECTED ITEM CODE' @4,12 IBMSSTYLE_TITLE
+	else
+		clear @4,12 to @4,46
+	endif
+	display stk-trans-type @5,20
+	display stk-trans-whse @6,20
+	accept stk-trans-date @7,20
+		help 'Enter the required transaction date'
+	display stk-accountcode @9,20
+	display stk-batch-ref @3,63
+	if not (stk-trans-type in ("RM", "RV") and not i8costsecu-cost-security-ok)
+		display " Reference 1:" @11,6 background	
+		display stk-trans-ref1 @11,20
+	endif
+	display stk-trans-ref2 @12,20
+	display stk-trans-ref3 @13,20
+	display stk-trans-qty @5,63 pic ---,---,--9v9(2) 
+	if (stk-trans-type in { 'TO' 'TI' }			//If transfer &cost 
+	and sys-charge-for-inter-transfers != 'N' 	//held in price fld	
+	and i8costsecu-cost-security-ok)
+	or stk-trans-type not in { 'TO' 'TI' }		//NOT transfer		
+		display stk-trans-value @6,63 pic -,---,---,---,--9v9(2)
+		if stk-trans-qty <> 0
+			set i8stkmove-item-value = abs(stk-trans-value / stk-trans-qty)
+		else
+			set i8stkmove-item-value = abs(stk-trans-value)
+		endif
+		display i8stkmove-item-value @7,63 pic -,---,---,---,--9v99
+	endif															
+	if i8costsecu-cost-security-ok
+		display stk-trans-cost @8,63 pic -,---,---,---,--9v99
+		if stk-trans-qty <> 0
+			set i8stkmove-item-cost = abs(stk-trans-cost / stk-trans-qty)
+		else
+			set i8stkmove-item-cost = abs(stk-trans-cost)
+		endif
+		display i8stkmove-item-cost @9,63 pic -,---,---,---,--9v9(4)
+		clear @10,49 to @10,84 prompt
+		clear @11,49 to @11,84 prompt
+		clear @12,49 to @12,84 prompt	
+		if stk-trans-type = 'PO'
+			do i8stkmove-show-po-item-cost
+				parameter stock-movements.*	
+		endif
+	endif
+	if stk-trans-type = 'SA'
+		if stk-accountcode = 'SCRAP'								
+			get system-table										
+				on index sys-tbl-type sys-tbl-code
+				key is 'MD' stk-trans-reason-code
+			on error ENOREC
+				get system-table										
+					on index sys-tbl-type sys-tbl-code
+					key is 'MD' stk-trans-ref3							
+				on error ENOREC
+					set sys-description = spaces						
+				endon
+			endon													
+		else														
+			get system-table
+				on index sys-tbl-type sys-tbl-code
+				key is 'IR' stk-trans-reason-code
+			on error ENOREC
+				get system-table
+					on index sys-tbl-type sys-tbl-code
+					key is 'IR' stk-trans-ref3
+				on error ENOREC
+					set sys-description = spaces
+				endon
+			endon
+		endif														
+		display "Reason Desc.:" @15,6 background   					
+		display substring(sys-description,1,25) @15,20							
+	else
+		clear @15,6 to @15,45
+	endif
+	display "        Type:" @15,49 background
+	display stk-document-type @15,63
+	display "      Number:" @16,49 background
+	display stk-document-no @16,63
+	display "      Suffix:" @17,49 background
+	display stk-document-suffix @17,63
+	display "    Sequence:" @18,49 background
+	display stk-document-seq @18,63
+	if i8stkmove-found-order
+		display "   Reference:" @19,49 background
+		display so-cust-reference @19,63
+	else	
+		clear @19,49 to @19,84
+	endif	
+	display stk-batch-trans-no @4,63									
+	//
+	//display the full GL account where applicable
+	if stk-document-type in { I3DOCTYPE_GLISSUE I3DOCTYPE_GLRETURN
+		I3DOCTYPE_SERISSUE }
+		set lf-gl-accountcode = concat(stk-trans-ref2,stk-accountcode)
+		display "  GL Account:" @16,6 background
+		display lf-gl-accountcode @16,20
+	else
+		clear @16,1 to @16,46
+	endif
+	if stk-trans-date-time != ZERO 	
+		display date-from-date-time(stk-trans-date-time,1) @18,20
+		display '/' @18,32 prompt
+		display time-from-date-time(stk-trans-date-time,1) @18,33
+	else	
+		clear @18,20 to @18,46
+	endif 
+	do get-user-name
+		returning lf-user-name
+	if lf-user-name = spaces
+		clear @19,6 to @19,43 prompt
+	else
+		display "     User ID:" @19,6 background
+		display strconcat(lf-user-name) @19,20
+	endif
+	// 
+	if stk-trans-type != 'SA'
+		// RX approval officer detail
+		do i8stkmove-authorised-details
+			returning lf-user-unix-pos
+		if lf-user-unix-pos <> ZERO
+			if stk-document-type in {I3DOCTYPE_GLISSUE I3DOCTYPE_GLRETURN I3DOCTYPE_DEPTISSU }
+				set lf-user-unix-id-no =
+					substring(stk-trans-ref3, 
+						lf-user-unix-pos, sizeof(stk-trans-ref3))
+			else
+				set lf-user-unix-id-no =
+					substring(stk-trans-ref2, 
+						lf-user-unix-pos, sizeof(stk-trans-ref2))
+			endif
+			if valid-number(lf-user-unix-id-no)
+				save system-user-control
+				get system-user-control
+					on index user-unix-id-no
+					key is num(lf-user-unix-id-no)
+				on error
+					set lf-authorised-user = 'Unknown'
+				else
+					set lf-authorised-user = user-id
+				endon
+				restore system-user-control
+				display " Authorised By:" @15,4 background
+				display strconcat(lf-authorised-user) @15,20
+			else
+				clear @15,4 to @15,46
+			endif
+		else
+			clear @15,4 to @15,46
+		endif
+	endif
+	confirm auto
+	confirmed
+		switch screenmode()
+		case i8stkmove-md-continue
+			set stock-code = i8stkmove-saved-stock-code
+			exit
+		case i8stkmove-md-order
+			do i8stkmove-enquiry-on-order
+				parameter I8STKMOVE_ORDER_ENQUIRE
+		case i8stkmove-md-gl-batch									
+			set gl-trans-date = stk-trans-date
+			set gl-batch-ref = stk-batch-ref
+			do i8batchgle-enquire-on-gl-batch
+		endswitch
+	endconfirm
+after
+	set stock-code = i8stkmove-saved-stock-code
+endscreen //i8stkmove-trans-detail ----------------------------------------
+
+procedure get-user-name
+	returning
+		lr-user-name		like user-id
+	local field
+		lf-position			type numeric
+		lf-user-no			pic x(4)
+	if stk-trans-created-by = 0
+		set user-id = SPACES
+		set lr-user-name = SPACES
+		if pattern(stk-trans-ref2,'User:')
+			set lf-position = pattern(stk-trans-ref2,'User:')
+			set lf-user-no =
+				substring(stk-trans-ref2,lf-position + 6,lf-position + 9)
+			if valid-number(lf-user-no)
+				//for include programs that lookup system-user-control
+				//do a save and restore just in case the program requires
+				//the current user's id to be a user
+				save system-user-control
+				get system-user-control
+					on index user-unix-id-no
+					key is num(lf-user-no)
+				on error
+					set user-id = SPACES
+				endon
+				set lr-user-name = user-id
+				restore system-user-control
+			endif
+		elseif stk-trans-type != 'SO'
+			save system-user-control
+			get system-user-control
+				on index user-id
+				key is substring(stk-trans-ref2,1,8) 
+			on error
+				set lr-user-name = SPACES
+			else
+				set lr-user-name = user-id
+			endon
+			restore system-user-control
+		else
+			set lr-user-name = SPACES
+		endif 
+	else 
+		//for include programs that lookup system-user-control
+		//do a save and restore just in case the program requires
+		//the current user's id to be a user
+		save system-user-control
+		get system-user-control
+			on index user-unix-id-no
+			key is stk-trans-created-by 
+		on error
+			set user-id = SPACES
+		endon
+		set lr-user-name = user-id 
+		restore system-user-control
+	endif 
+endprocedure //get-user-name -------------------------------------------------
+
+procedure i8stkmove-authorised-details
+	returning 
+		lr-user-unix-pos		pic 99
+	//
+	if stk-document-type in {I3DOCTYPE_GLISSUE I3DOCTYPE_GLRETURN I3DOCTYPE_DEPTISSU }
+		set lr-user-unix-pos = pattern(stk-trans-ref3,"A:")
+		if lr-user-unix-pos <> ZERO
+			set lr-user-unix-pos += pattern(substring(stk-trans-ref3
+				,lr-user-unix-pos, sizeof(stk-trans-ref3)),":")
+		endif
+	else
+		set lr-user-unix-pos = pattern(stk-trans-ref2,"A:")
+		if lr-user-unix-pos <> ZERO
+			set lr-user-unix-pos += pattern(substring(stk-trans-ref2
+				,lr-user-unix-pos, sizeof(stk-trans-ref2)),":")
+		endif
+		if lr-user-unix-pos = ZERO
+			set lr-user-unix-pos = pattern(stk-trans-ref2,"Auth:")
+			if lr-user-unix-pos <> ZERO
+				set lr-user-unix-pos += pattern(substring(stk-trans-ref2
+					,lr-user-unix-pos, sizeof(stk-trans-ref2)),":")
+			endif
+		endif
+	endif
+endprocedure //i8stkmove-authorised-details ----------------------------------
+
+procedure i8stkmove-setup-order-no									
+	returning
+		lr-direct-transfer			type boolean
+		lr-sales-order-found		type boolean
+		lr-internal-so				type boolean				
+	//
+	set lr-direct-transfer = FALSE
+	set lr-sales-order-found = FALSE
+	set lr-internal-so = FALSE										
+	//
+	if stk-document-type = I3DOCTYPE_TRFMANUAL
+		set lr-direct-transfer = TRUE
+    elseif stk-trans-type = 'MU'							
+	and stk-document-type = I3DOCTYPE_WORKORDER
+		//Do not attempt to process this as a sales order as if it exists
+		//it will not be what we want to display
+		exit
+	else
+		set so-order-no = num(stk-document-no)
+		set so-bo-suffix = stk-document-suffix
+		get sales-order
+			on index so-order-no so-bo-suffix
+			key is so-order-no so-bo-suffix
+		on error ENOREC
+			get sales-order-archive
+				on index so-order-no so-bo-suffix
+				key is so-order-no so-bo-suffix
+			on error ENOREC
+				set lr-sales-order-found = FALSE
+			else
+				set lr-sales-order-found = TRUE
+				if stk-trans-type = 'MU'							
+				and so-price-code = 'I'								
+				and stk-document-type = I3DOCTYPE_SALESORDER
+					set lr-internal-so = TRUE						
+				endif												
+			endon
+		else
+			set lr-sales-order-found = TRUE
+			if stk-trans-type = 'MU'								
+			and so-price-code = 'I'									
+			and stk-document-type = I3DOCTYPE_SALESORDER
+				set lr-internal-so = TRUE							
+			endif													
+		endon
+	endif
+endprocedure //i8stkmove-setup-order-no --------------------------------------
+
+procedure i8stkmove-setup-qty-pic-format
+	local
+		lf-rounding					pic 99v9(5)
+		lf-decimals					like sys-default-no-of-decimals
+	//
+	if stk-conversion-factor = ZERO
+		set stk-conversion-factor = 1
+	endif
+	if i8stkmove-decimal-pic = SPACES
+		do clibstk-item-rounding
+			parameters
+				stk-unit-desc
+			returning
+				lf-rounding
+				lf-decimals
+		switch on integer(lf-decimals)
+		case 4
+			set i8stkmove-decimal-pic = "-(9).9999"
+		case 3
+			set i8stkmove-decimal-pic = "-(9)9.999"
+		case 2
+			set i8stkmove-decimal-pic = "-(10)9.99"
+		case 1
+			set i8stkmove-decimal-pic = "-(11)9.9"
+		else
+			set i8stkmove-decimal-pic = "-(13)9"
+		endswitch
+	endif
+endprocedure //i8stkmove-setup-qty-pic-format --------------------------------
+
+
+procedure i8stkmove-show-po-item-cost
+// The specific PO can be retrieved by document-no/seq on the movement record
+// from v650 and above. Prior to this, this info. is stored in reference 1
+// of the movement record.
+	parameter
+		lp-stock-movements.*		like stock-movements.*
+	local field
+		lf-po-line-stock-code-count	pic 9							
+		lf-converted-amt			like po-item-price				
+		lf-currency-rate			like po-final-currency-rate		
+	//
+	set lf-po-line-stock-code-count = zero					
+	get purchase-order
+		on index po-order-no po-backorder-flag
+		key is num(stk-document-no) stk-document-suffix
+	on error ENOREC
+		get purchase-order-archive
+			on index po-order-no po-backorder-flag
+			key is num(stk-document-no) stk-document-suffix
+		on error ENOREC
+			// cannot locate PO, nothing will be shown
+		endon
+	endon
+	get purchase-order-line
+		on index po-order-no po-backorder-flag po-l-seq
+		key is num(stk-document-no) stk-document-suffix stk-document-seq 
+	on error ENOREC
+		get purchase-order-line-archive
+			on index po-order-no po-backorder-flag po-l-seq
+			key is num(stk-document-no) stk-document-suffix stk-document-seq 
+		on error ENOREC
+			// old method of retrieving PO from stock-movements
+			get purchase-order-line
+				on index stock-code po-order-no po-backorder-flag
+				key is stock-code num(substring(stk-trans-ref1,1,8)) 
+						substring(stk-trans-ref1,9,10)
+			on error ENOREC
+				get purchase-order-line-archive
+					on index stock-code po-order-no po-backorder-flag
+					key is stock-code num(substring(stk-trans-ref1,1,8))
+							substring(stk-trans-ref1,9,10)
+				on error ENOREC
+					// cannot locate PO, nothing will be shown
+				else
+					extract purchase-order-line-archive
+						on index stock-code po-order-no 
+							po-backorder-flag
+						key is stock-code 
+							num(substring(stk-trans-ref1,1,8)) 
+							substring(stk-trans-ref1,9,10)
+						next same stock-code po-order-no 
+							po-backorder-flag
+					detail
+						set lf-po-line-stock-code-count += 1
+						if lf-po-line-stock-code-count > 1
+							break
+						endif
+					endextract
+				endon
+			else
+				extract purchase-order-line
+					on index stock-code po-order-no po-backorder-flag
+					key is stock-code 
+						num(substring(stk-trans-ref1,1,8)) 
+						substring(stk-trans-ref1,9,10)
+					next same stock-code po-order-no po-backorder-flag
+				detail
+					set lf-po-line-stock-code-count += 1
+					if lf-po-line-stock-code-count > 1
+						break
+					endif
+				endextract
+			endon
+		else
+			set lf-po-line-stock-code-count = 1
+		endon
+	else
+		set lf-po-line-stock-code-count = 1
+	endon
+	// found the specific link to PO line
+	if lf-po-line-stock-code-count = 1
+		display "PO Item Cost:" @10,49 background
+		display "per:" @12,58 background
+		display po-item-price @10,63 pic -,---,---,---,--9v9(4)
+		display po-supplier-unit-of-measure @12,63 pic z(4)9
+		if po-currency-code not in {spaces sys-local-currency-code}
+			set lf-currency-rate = ZERO
+			if po-final-currency-rate <> ZERO
+				set lf-currency-rate = po-final-currency-rate	
+			elseif po-initial-currency-rate <> ZERO
+				set lf-currency-rate = po-initial-currency-rate	
+			endif	
+			do clibcurrency-convert-foreign-to-local
+				parameters
+					po-currency-code
+					po-item-price
+					lf-currency-rate
+				returning
+					lf-converted-amt
+			display po-currency-code @10,87
+			display "PO Item Cost:" @11,49 background
+			display lf-converted-amt @11,63 pic -,---,---,---,--9v9(4)
+			display "Local" @ 11,87
+		endif
+	endif													
+endprocedure //i8stkmove-show-po-item-cost -----------------------------------

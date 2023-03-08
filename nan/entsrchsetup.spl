@@ -1,0 +1,132 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : 
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2018
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: nan/ensrchsetup.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 15Mar18  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+#include "../include/ientsrch.spl"
+ 
+field
+	ws-function-title						type string
+
+procedure main
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+//	do i8secabt-check-abort
+//		parameters are sys-consolidation-division login-id() "ZUSR" "R004"
+//		returning ws-function-title 
+	do i8proglog-write-log
+	do setup
+end-procedure
+
+procedure setup
+	do add-one-ssct parameters are IENTSRCH_C_SO "Sales Order"
+	do add-one-ssct parameters are IENTSRCH_C_PO "Purchase Order"
+	do add-one-ssct parameters are IENTSRCH_C_CR "Creditors Invoice"
+	do add-one-sssc parameters are IENTSRCH_SC_SO "SO"
+	do add-one-sssc parameters are IENTSRCH_SC_CUST_PO "Cust PO"
+	do add-one-sssc parameters are IENTSRCH_SC_INV "Inv"
+	do add-one-sssc parameters are IENTSRCH_SC_CN "CN"
+	do add-one-sssc parameters are IENTSRCH_SC_PARTNER "Partner"
+	do add-one-sssc parameters are IENTSRCH_SC_PO "PO"
+	do add-one-sssc parameters are IENTSRCH_SC_LINE "Line"
+	do add-one-sssc parameters are IENTSRCH_SC_SHP "Shipment"
+	do add-one-drilldown parameters are
+		IENTSRCH_C_SO 0
+		"so/m5ordenq" "SO" "E007" "Enquriy"
+		"-e" "%ORDER%" "%SUFFIX%"
+		spaces spaces spaces spaces spaces spaces spaces 
+	do add-one-drilldown parameters are
+		IENTSRCH_C_PO 0
+		"po/m6enquiry" "PO" "M006" "Enquiry"
+		"-q" "%ORDER%" "%SUFFIX%"
+		spaces spaces spaces spaces spaces spaces spaces 
+	do add-one-drilldown parameters are
+		IENTSRCH_C_CR 0
+		"cre/m20mast" "AP" "M001" "Enquiry"
+		"-drill" "%SUPPLIER_CODE%"
+		spaces spaces spaces spaces spaces spaces spaces spaces 
+end-procedure
+
+procedure add-one-drilldown
+parameters are 
+	lp-context-id						like scd-search-context-id
+	lp-seq								like scd-context-seq-no
+	lp-action-command 					like scd-action-command	
+	lp-module							like scd-module
+	lp-function							like scd-function
+	lp-desc								like scd-description
+	lp-param-1							like scd-drilldown-action-param1
+	lp-param-2							like scd-drilldown-action-param1
+	lp-param-3							like scd-drilldown-action-param1
+	lp-param-4							like scd-drilldown-action-param1
+	lp-param-5							like scd-drilldown-action-param1
+	lp-param-6							like scd-drilldown-action-param1
+	lp-param-7							like scd-drilldown-action-param1
+	lp-param-8							like scd-drilldown-action-param1
+	lp-param-9							like scd-drilldown-action-param1
+	lp-param-10							like scd-drilldown-action-param1
+	//
+	sql-delete search-central-drilldown
+		where scd-search-context-id = :lp-context-id
+		and scd-context-seq-no = :lp-seq
+	initialise search-central-drilldown
+	set scd-search-context-id = lp-context-id
+	set scd-context-seq-no = lp-seq
+	set scd-action-command = lp-action-command	
+	set scd-module = lp-module
+	set scd-function = lp-function
+	set scd-description = lp-desc
+	set scd-drilldown-action-param1 = lp-param-1
+	set scd-drilldown-action-param2 = lp-param-2
+	set scd-drilldown-action-param3 = lp-param-3
+	set scd-drilldown-action-param4 = lp-param-4
+	set scd-drilldown-action-param5 = lp-param-5
+	set scd-drilldown-action-param6 = lp-param-6
+	set scd-drilldown-action-param7 = lp-param-7
+	set scd-drilldown-action-param8 = lp-param-8
+	set scd-drilldown-action-param9 = lp-param-9
+	set scd-drilldown-action-param10 = lp-param-10
+	set scd-pronto-added = NO
+	set scd-enable = YES
+	insert search-central-drilldown
+end-procedure
+
+procedure add-one-ssct
+parameters
+	lp-context-id						like ssct-context-id
+	lp-desc								like ssct-context-desc
+	//
+	sql-delete search-central-context-desc where ssct-context-id  = :lp-context-id
+	initialise search-central-context-desc 
+	set ssct-context-id = lp-context-id
+	set ssct-context-desc = lp-desc
+	insert search-central-context-desc 
+end-procedure
+
+procedure add-one-sssc
+parameters
+	lp-context-id						like sssc-context-id
+	lp-desc								like sssc-context-desc
+	//
+	sql-delete search-central-subcontext-desc where sssc-context-id  = :lp-context-id
+	initialise search-central-subcontext-desc 
+	set sssc-context-id = lp-context-id
+	set sssc-context-desc = lp-desc
+	insert search-central-subcontext-desc 
+end-procedure

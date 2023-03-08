@@ -1,0 +1,1147 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : 
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2023
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: screens/vgldgchart.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 11Jan23  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+
+link 'clib/clibvchart'
+
+#define MAXROWS 10000
+#define MAXY 5  // max number of fields that can be selected in the y axis
+
+
+#define FLDCOLOUR if-then-else(mdf-axis = 'x', white  \
+						,if-then-else(mdf-axis != spaces , white  \
+						,if-then-else(mdf-type = 'numeric', BLUE \
+						,if-then-else(mdf-type = 'date', RGB(255,0,255) \
+						,0 \
+						)))) \
+				on \
+					if-then-else(mdf-axis = 'x', GREEN  \
+						,if-then-else(mdf-axis != spaces , BLUE \
+						,if-then-else(mdf-type = 'numeric', 0 \
+						,if-then-else(mdf-type = 'date', 0 \
+						,0 \
+						)))) 
+
+
+// TODO: For each series allow definition of chart type and colour
+
+// Debug will cause more detail to be shown on the field selection screen
+// and will also print the chart report each time the chart is displayed.
+//#define DEBUG
+
+field
+	// 
+	// Parameters
+	//
+	ws-function-title					type string
+	ws-filename							pic x(512) type string
+	ws-pgm-name							pic x(512) type string
+	ws-procedure						pic x(512) type string
+	ws-title							pic x(512) type string // screen title
+	ws-view								pic x(512) type string
+
+object mem-dg-fields
+	type memory
+	record is
+		mdf-seq							type number
+		mdf-fld-name					pic x(50) type string
+		mdf-col-name					pic x(50) type string
+		mdf-col-title					pic x(50) type string
+		mdf-axis						pic xx type string
+		mdf-type						pic x(20) type string
+		mdf-date-format					pic x(50) type string
+		mdf-time-series					type boolean
+		mdf-series-name					pic x(50) type string // override the series name
+	end-record
+	key is mdf-seq
+
+object saved-charts
+	type is memory
+	record is
+		sc-procedure					like ws-procedure
+		sc-view							like ws-view
+		sc-seq							pic 9(4)
+		sc-chart-type					pic x(20) type string
+		sc-x-col						like mdf-col-name
+		sc-date-format					like mdf-date-format
+		sc-time-series					type boolean
+		sc-y-col						like mdf-col-name occurs MAXY
+		sc-y-axis						pic xx occurs MAXY // y or y2
+		sc-y-series-name				like mdf-series-name occurs MAXY
+		sc-x-axis-rotate				type boolean
+		sc-chart-title					pic x(50) type string
+		sc-x-label						pic x(50) type string
+		sc-y-label						pic x(50) type string
+		sc-y2-label						pic x(50) type string
+		sc-allow-zoom					type boolean
+		sc-set-min						type boolean
+// *** Add new feature above this line
+	end-record
+	key is sc-procedure sc-view sc-seq unique
+
+object mem-series
+	//  This is just used when prompting the user to change the series
+	//  attributes.  It allows us to use a dg instead of fekking around with
+	//  arrays
+	type is memory
+	record is
+		ms-y-i							type number
+		ms-y-col						like sc-y-col occurs 1
+		ms-y-col-title					like mdf-col-title
+		ms-y-axis						like sc-y-col occurs 1
+		ms-y-series-name				like sc-y-series-name occurs 1
+	end-record
+	key is ms-y-col
+
+
+procedure main
+parameters
+	lp-filename							pic x(512) type string
+	lp-pgm-name							pic x(512) type string
+	lp-procedure						pic x(512) type string
+	lp-title							pic x(512) type string
+	lp-view								pic x(512) type string
+local
+	lf-count							type number
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8secabt-check-abort
+		parameters are sys-consolidation-division login-id() "EMS" "X000"
+		returning ws-function-title 
+	do i8proglog-write-log
+	set ws-filename = lp-filename
+	set ws-pgm-name = lp-pgm-name
+	set ws-procedure = lp-procedure
+	set ws-title = lp-title
+	set ws-view = lp-view
+	do load-saved-charts
+	do get-field-names 
+	select lf-count = count(*)
+		from saved-charts
+		where sc-procedure  = :ws-procedure
+		and sc-view = :ws-view
+	end-select
+	if lf-count = 0
+		do dg-prompt
+		if exit-status() = 1 // escaped
+			exit
+		endif
+	endif
+	do choose-and-display-chart
+	do save-charts-to-xml
+end-procedure
+
+screen choose-and-display-chart
+local
+	lf-ok-to-render						type boolean
+	lf-ole-1							type ole-interface
+	lf-blob								type blob
+local mode
+	lm-new-chart
+		prompt "New Chart"
+		help "Select fields to display on a new chart"
+	lm-properties
+		prompt "Properties"
+		help "Change various properties of the chart"
+	window
+	datagrid
+	title if-then-else(ws-view = spaces, "Saved Charts", concat("Saved Charts for view " ws-view))
+	select *
+		from saved-charts
+		where sc-procedure  = :ws-procedure
+		and sc-view = :ws-view
+	allowed search lm-properties lm-new-chart remove
+	responsive
+	no-prompt-for-search
+screen-section
+	title "Category"
+	help "Change Category (X axis) attributes"
+	do category-management correct parameters are sc-seq no-wait
+end-screen-section
+screen-section
+	title "Series"
+	help "Change Series Attributes"
+	do series-management parameters are sc-seq no-wait
+end-screen-section
+detail
+	screen-group // ---- Charts ----------------------------
+		title "Charts"  // The title is optional
+		width 3
+	if screenmode = lm-properties
+		do define-chart-properties correct once parameters are sc-seq
+//		do save-this-chart parameters sc-seq
+		reselect
+		refresh review
+	endif
+	if screenmode = lm-new-chart
+		do initialise-chart
+		do dg-prompt
+		reselect
+		refresh review
+	endif
+		accept sc-seq col 1 pic zz9
+			title "Seq"
+			when screenmode = search
+			show-value
+		accept sc-chart-title col 2 pic x(30)
+			title "Title"
+	end-screen-group // ---- Charts --------------------------------------
+	screen-group // ---- Chart ----------------------------
+		width 9
+		if screenmode in (next prev show)
+			set lf-ok-to-render = FALSE
+			do build-chart returning lf-blob
+			if exit-status > 0
+				message-box param-text("<<P1>><<BR>><<p2>>"
+					,"This chart could not be rendered"
+					,"You may want to check your settings")
+					title is sc-chart-title
+					message-buttons  MSG_BOX_CANCEL
+					icon MSG_BOX_INFORMATION
+			endif
+			if not lf-ole-1
+//				set lf-ole-1 = ole-create-control("Pronto.Chart",0,0,20,80)
+				set lf-ole-1 = ole-create-control("Pronto.Chart",0,0,20,0)
+			endif
+			if ole-put-property(lf-ole-1,'config',lf-blob)
+			endif
+			refresh sections
+		endif
+	end-screen-group // ---- Chart --------------------------------------
+end-screen
+
+procedure get-field-names
+local
+	lx-doc								type xml-handle
+	lx-root								type xml-handle
+	lx-node								type xml-handle
+	lf-seq								type number
+	//
+	close mem-dg-fields and remove
+	open mem-dg-fields temporary
+	set lx-doc = xml-parse-file(ws-filename)
+	if lx-doc = 0
+		message "Unable to parse export file"
+		exit 1
+	endif
+	set lx-root = xml-get-root-node(lx-doc)
+	// The first node is the field definitions
+	set lx-node = xml-get-first-child-node(xml-get-child-by-name(xml-get-root-node(lx-doc),"row",spaces))
+	while lx-node != 0 // for each field
+		set lf-seq += 1
+		initialise  mem-dg-fields
+		set mdf-seq = lf-seq
+		set mdf-fld-name = xml-get-node-attribute(lx-node,"name") // note that fldname is blank for proscreen added fields
+		set mdf-type = xml-get-node-attribute(lx-node,"type")
+		set mdf-col-title = xml-node-text(lx-node)
+		set mdf-col-name = xml-node-name(lx-node)
+		if mdf-type = "date"
+			string mdf-col-title appending concat(" (date)")
+		endif
+		insert mem-dg-fields
+		set lx-node = xml-get-next-node(lx-node)
+	end-while
+	// add a row count
+	set lf-seq += 1
+	initialise  mem-dg-fields
+	set mdf-seq = lf-seq
+	set mdf-fld-name = "Count"
+	set mdf-type = "numeric"
+	set mdf-col-title = "Row Count"
+	set mdf-col-name = "Count"
+	insert mem-dg-fields
+end-procedure
+
+screen dg-prompt
+local
+	lf-x-set						type boolean
+	lf-confirmed					type boolean
+	responsive
+#ifndef DEBUG
+	window-position 5
+#endif
+	datagrid
+	title "Select Axes for Graph"
+	select * from mem-dg-fields
+		order by mdf-seq
+	allowed search  
+local mode
+	lm-select-x
+		prompt "X Axis"
+		help "Press to select field as an X axis field"
+		process correct
+		when not lf-x-set or mdf-axis = 'x'
+		always-show
+	lm-select-y
+		prompt "Y Axis"
+		help "Press to select field as a Y axis Field"
+		process correct
+		when mdf-type = "numeric"
+		always-show
+	lm-select-y2
+		prompt "Y Axis &RHS"
+		help "Press to select field as a Y axis Field on the &RHS of the chart"
+		process correct
+		when mdf-type = "numeric"
+		always-show
+	lm-save
+		prompt "Save"
+		help "Press to save and show graph"
+before
+	set lf-x-set = FALSE
+detail
+	set lf-confirmed = FALSE
+	if screenmode = lm-save
+		do verify-chart
+		if exit-status <= 0
+			do save-this-chart parameters 0 // add new
+			exit
+		endif
+	endif
+	screen-group
+		accept mdf-seq col 1 pic z(3)
+			when screenmode = search 
+			show-value
+			title "Seq"
+			colour FLDCOLOUR
+		display mdf-col-title col 4
+			title "Column"
+			colour FLDCOLOUR
+#ifdef DEBUG
+		display mdf-fld-name col 2
+			title "Field"
+			colour FLDCOLOUR
+		display mdf-col-name col 3
+			title "Column"
+			colour FLDCOLOUR
+		display mdf-axis col 5
+			title "Axis"
+#endif
+	end-screen-group
+	confirm auto
+	before
+		if screen-mode = lm-select-x
+			if mdf-axis = spaces
+				set mdf-axis = "x"
+				set lf-x-set = TRUE
+				if mdf-type = "date"
+					do get-date-format entry once returning mdf-date-format mdf-time-series
+				endif
+			else
+				set mdf-axis = spaces
+				set mdf-date-format = spaces
+				set lf-x-set = FALSE
+			endif
+		endif
+		if screen-mode = lm-select-y
+			if mdf-axis = spaces
+				set mdf-axis = "y"
+			else
+				set mdf-axis = spaces
+			endif
+		endif
+		if screen-mode = lm-select-y2
+			if mdf-axis = spaces
+				set mdf-axis = "y2"
+			else
+				set mdf-axis = spaces
+			endif
+		endif
+	confirmed
+		set lf-confirmed = TRUE
+		refresh review
+	end-confirm
+after
+	//
+	// check for escape
+	//
+	if not lf-confirmed
+		exit 1
+	endif
+	// verify
+	do verify-chart
+	if exit-status = 1
+		back-to-detail
+	endif
+end-screen
+
+procedure verify-chart
+local
+	lf-y-count						type number
+	lf-sql-count					type boolean
+	// check the number of ys have not been exceeded
+	select lf-y-count = count(*) from mem-dg-fields
+		where mdf-axis in ( 'y' 'y2')
+	end-select
+	if lf-y-count > MAXY
+		message-box param-text("<<P1>><<BR>><<p2>>"
+			,"You have exceeded the number of series that can be selected for the y axis"
+			,concat("The maximum is " str(MAXY)))
+			title is ws-function-title
+			message-buttons  MSG_BOX_RETRY
+			icon MSG_BOX_STOP
+		exit 1
+	end-if
+	if lf-y-count = 0
+		message-box "You have not specified any y axis"
+			title is ws-function-title
+			message-buttons  MSG_BOX_RETRY
+			icon MSG_BOX_STOP
+		exit 1
+	endif
+	// check if essential chart elements have been defined
+	select lf-sql-count = count(*)
+		from mem-dg-fields
+		where mdf-axis = "x"
+	end-select
+	if lf-sql-count = 0
+		message-box "You have not specified an x axis"
+			title is ws-function-title
+			message-buttons  MSG_BOX_RETRY
+			icon MSG_BOX_STOP
+		exit 1
+	endif
+end-procedure
+
+screen get-date-format
+returning
+	lr-date-format					pic x(20) type string
+	lr-time-series					type boolean
+	window
+	window-position 5
+	title "Select Date Format"
+	responsive
+detail
+	screen-group // ---- Date Format ----------------------------
+		title "Date Format"  // The title is optional
+		field-group // ---- Date Format ----------------------------
+			horizontal
+			wrap
+		radio-button lr-date-format
+			// if you add another format string you will also need to update
+			// build-chart.  
+			"dd-mmm-yyyy" title  "dd-mmm-yyyy"
+			"mmm-yy" title  "mmm-yy"
+			"yy-mmm" title  "yy-mmm"
+			// fields from sctd will be handled in build-chart automatically
+			"sctd-period-start" title "Period Start"
+			"sctd-quarter-start" title "Quarter Start"
+			"sctd-week-start" title "Week Start"
+			"sctd-fortnight-start" title "Fortnight Start"
+			default lr-date-format
+			before-radio-button
+				if screenmode = form-entry-defaults
+					set lr-date-format = "mmm-yy"
+				endif
+			end-before-radio-button
+			on change
+				if  lr-date-format in ("mmm-yy" "yy-mmm")
+					set lr-time-series = FALSE
+				endif
+				refresh lr-time-series
+			endon
+		end-radio-button 
+		end-field-group // ---- Date Format --------------------------------------
+		check-box lr-time-series 
+			values True False
+			title "Time Series"
+			default is False
+			help "Select to make the time scale linear"
+			when lr-date-format not in ( "mmm-yy" "yy-mmm")
+			before-check-box
+				if screenmode = form-entry-defaults
+					set lr-time-series = false
+				endif
+			end-before-check-box
+		end-check-box 
+	end-screen-group // ---- Date Format --------------------------------------
+end-screen
+
+procedure initialise-chart
+	set sc-chart-type = "bar"
+	set sc-chart-title = ws-view
+	select * from mem-dg-fields
+		for update
+	detail
+		set mdf-axis = spaces
+		set mdf-date-format = spaces
+		set mdf-series-name = spaces
+		update mem-dg-fields
+	end-select
+// *** Add new feature above this line
+end-procedure
+
+screen define-chart-properties
+parameters
+	lp-seq							like sc-seq
+	window
+		window-position 107
+		title "Chart Properties"
+	responsive
+	select * from saved-charts
+		where sc-procedure = :ws-procedure
+		and sc-view = :ws-view
+		and sc-seq = :lp-seq
+	allowed correct
+detail
+	screen-group // ---- Chart Parameters ----------------------------
+		title "Chart Parameters"  // The title is optional
+		next row
+		field-group // ---- Chart Type ----------------------------
+			title "Chart Type"  // Title is optional
+//			wrap
+			radio-button sc-chart-type
+				"pie" title  "Pie"
+				"donut" title "Donut"
+				"gauge" title "Gauge"
+				"bar" title  "Bar"
+				"line" title  "Line"
+				"spline" title  "Spline"
+				"area" title  "Area"
+				"scatter" title  "Scatter"
+			end-radio-button 
+		end-field-group // ---- Chart Type --------------------------------------
+		accept sc-chart-title
+			title "Title"
+		accept sc-x-label
+			title "X Axis Label"
+			help "Eg, 'Warehouse', 'Period'"
+		accept sc-y-label
+			title "Y Axis Label"
+			help "Eg '$', 'Count'"
+		accept sc-y2-label
+			title "Y Axis RHS Label"
+			help "Eg '$', 'Count'"
+		field-group // ---- Group Title ----------------------------
+		check-box sc-x-axis-rotate
+			values True False
+			title "Rotate X Axis Labels"
+			help "Rotate the x axis labels to make them eaiser to read when there a re a log of x axis entries"
+		end-check-box 
+		check-box sc-set-min 
+			values True False
+			title "Start Y at lowest"
+			help "Start the y axis at the lowest value (rather than 0)"
+		end-check-box 
+		end-field-group // ---- Group Title --------------------------------------
+		check-box sc-allow-zoom 
+			values True False
+			title "Allow Zoom"
+			help "Zooming will display a sample below the graph that you can zoom on"
+		end-check-box 
+// *** Add new feature above this line
+	end-screen-group // ---- Chart Parameters --------------------------------------
+end-screen
+
+screen category-management
+parameters
+	lp-seq							like sc-seq
+	responsive
+	select * from saved-charts
+		where sc-procedure = :ws-procedure
+		and sc-view = :ws-view
+		and sc-seq = :lp-seq
+	allowed correct 
+detail
+	screen-group // ---- Date Format ----------------------------
+		title "Date Format"  // The title is optional
+		field-group // ---- Date Format ----------------------------
+			horizontal
+			wrap
+		radio-button sc-date-format
+			// if you add another format string you will also need to update
+			// build-chart.  
+			"dd-mmm-yyyy" title  "dd-mmm-yyyy"
+			"mmm-yy" title  "mmm-yy"
+			"yy-mmm" title  "yy-mmm"
+			// fields from sctd will be handled in build-chart automatically
+			"sctd-period-start" title "Period Start"
+			"sctd-quarter-start" title "Quarter Start"
+			"sctd-week-start" title "Week Start"
+			"sctd-fortnight-start" title "Fortnight Start"
+			default sc-date-format
+			when sc-date-format != spaces
+			before-radio-button
+				if screenmode = form-entry-defaults
+					set sc-date-format = "mmm-yy"
+				endif
+			end-before-radio-button
+			on change
+				if  sc-date-format in ("mmm-yy" "yy-mmm")
+					set sc-time-series = FALSE
+				endif
+				refresh sc-time-series
+			endon
+		end-radio-button 
+		end-field-group // ---- Date Format --------------------------------------
+		check-box sc-time-series 
+			values True False
+			title "Time Series"
+			help "Select to make the time scale linear"
+			when sc-date-format not in ( spaces "mmm-yy" "yy-mmm")
+		end-check-box 
+	end-screen-group // ---- Date Format --------------------------------------
+	confirm 
+		auto
+	confirmed
+		refresh sections
+	end-confirm 
+end-screen
+
+screen series-management
+parameters
+	lp-seq							like sc-seq
+local
+	i 								type number
+	responsive
+	datagrid
+	select * from mem-series
+	allowed correct search
+before
+	close mem-series
+	open mem-series temporary truncate
+	get saved-charts 
+		on index sc-procedure sc-view sc-seq
+		key is ws-procedure ws-view lp-seq
+	on error
+		message "Something horribly wrong"
+		exit
+	endon
+	for i = 1 to occurrence(sc-y-col)
+		if sc-y-col[i] != spaces
+			initialise mem-series
+			set ms-y-i = i
+			set ms-y-col = sc-y-col[i]
+			set ms-y-axis = sc-y-axis[i]
+			set ms-y-series-name = sc-y-series-name[i]
+			// get the col title
+			do get-col-title parameters are sc-y-col[i] returning ms-y-col-title
+			insert mem-series
+		endif
+	end-for
+detail
+	screen-group // ---- Series ----------------------------
+		title "Series"  // The title is optional
+		accept ms-y-col-title col 1
+			title "Title"
+			when screenmode = search
+			show-value
+		accept ms-y-series-name col 4
+			title "Override Name"
+#ifdef DEBUG
+		accept ms-y-i col 10
+			title "i"
+		accept ms-y-col col 11
+			title "fld"
+		accept ms-y-axis col 12
+			title "axis"
+#endif
+	end-screen-group // ---- Series --------------------------------------
+	confirm 
+		auto
+	confirmed
+		// update the arrays
+		get saved-charts 
+			on index sc-procedure sc-view sc-seq
+			key is ws-procedure ws-view lp-seq
+			lock
+		on error
+			message "Something horribly wrong"
+			exit
+		endon
+		set sc-y-series-name[ms-y-i] = ms-y-series-name
+		update saved-charts
+		on error
+			message "Something horribly wrong"
+			exit
+		endon
+		refresh review
+		refresh sections
+	end-confirm 
+end-screen
+
+procedure get-col-title
+parameters
+	lp-col-name					like mdf-col-name
+returning
+	lr-col-title				like mdf-col-title
+	//
+	// Row count is a special case
+	//
+	if lp-col-name = "Count"
+		set lr-col-title = "Row Count"
+	endif
+	//
+	// get the col title
+	//
+	select *
+		from mem-dg-fields
+		where mdf-col-name = :lp-col-name
+	detail
+		set lr-col-title = mdf-col-title
+	end-select
+end-procedure
+
+
+procedure build-chart
+//
+// Must be current on saved-charts
+//
+returning
+	lr-chart							type blob
+local
+	lx-doc								type xml-handle
+	lx-node								type xml-handle
+	lf-this-category					pic x(512) type string
+	lf-this-index						type number
+	lf-next-index						type number
+	lf-date								type date
+	lf-row-count						type number
+	lf-col-title						like mdf-col-title
+	i 									type number
+	//
+	set lx-doc = xml-parse-file(ws-filename)
+	if lx-doc = 0
+		message "Unable to parse export file"
+		exit 1
+	endif
+	report "audit"
+	set lx-node = xml-get-child-by-name(xml-get-root-node(lx-doc),"row",spaces)
+	// first one is field names so skip it
+	set lx-node = xml-get-next-node(lx-node)
+	do clibvchart-initialise-chart
+	do clibvchart-set-chart-type parameters sc-chart-type
+	if sc-chart-title = spaces
+		do clibvchart-set-title parameters ws-view
+	else
+		do clibvchart-set-title parameters sc-chart-title
+	endif
+	if sc-x-label != spaces
+		do clibvchart-set-axis-label parameters "x" sc-x-label
+	endif
+	if sc-y-label != spaces
+		do clibvchart-set-axis-label parameters "y" sc-y-label
+	endif
+	if sc-y2-label != spaces
+		do clibvchart-set-axis-label parameters "y2" sc-y2-label
+	endif
+	if sc-allow-zoom
+		do clibvchart-set-allow-zoom parameters are TRUE
+	endif
+	if sc-x-axis-rotate
+		do clibvchart-set-axis-tick-rotate parameters are 'x' 75
+	endif
+	for i = 1 to occurence(sc-y-axis)
+	// check if the y2 axis has been used)
+		if sc-y-axis[i] = "y2"
+			if sc-y-series-name[i] != spaces
+				set lf-col-title = sc-y-series-name[i]
+			else
+				do get-col-title parameters are sc-y-col[i] returning lf-col-title
+			endif
+			do clibvchart-set-series-axis parameters are lf-col-title "y2"
+			// TODO:  give user control over y2 chart type
+			do clibvchart-set-series-chart-type parameters are lf-col-title "line"
+		endif
+	end-for
+	if sc-time-series 
+		do clibvchart-set-axis-datatype parameters are "x" "timeseries"
+	endif
+	//
+	while lx-node != 0
+		set lf-row-count += 1
+		if lf-row-count > MAXROWS
+			do clibvchart-set-subtitle parameters "Max rows Exceeded!"
+			break
+		endif
+		//
+		// deal with the x axis
+		// 
+		do get-col-title parameters are sc-x-col returning lf-col-title
+		set lf-this-category = rtrim(xml-node-text( xml-get-child-by-name(lx-node,mdf-col-name,spaces)))
+		// check if it is a date and format accordingly
+		if sc-date-format != spaces
+			set lf-date = date-to-julian(lf-this-category)
+			if lf-date != 0
+				if sc-date-format = "timeseries"
+					set lf-this-category = format-picture(lf-date,"dd-mmm-yyyy")
+				elseif sc-date-format in ("mmm-yy", "yy-mmm", "dd-mmm-yyyy")
+					set lf-this-category = format-picture(lf-date,sc-date-format)
+				else // it a field from sctd
+					get system-control-time-dimension
+						on index sctd-type sctd-date
+						key is spaces lf-date
+					on error
+					else
+						// set all field reference otherwise
+						// get-field-value does not work:
+						if 1 = 0 insert system-control-time-dimension endif
+						set lf-this-category = get-field-value(sc-date-format)
+					endon
+				endif
+			endif
+		endif
+		// Check if added already
+		do clibvchart-get-index-from-category parameters lf-this-category returning lf-this-index
+		if lf-this-index = 0
+			set lf-next-index += 1
+			set lf-this-index = lf-next-index
+			do clibvchart-set-category-value parameters lf-this-index rtrim(lf-this-category)
+			if lf-next-index > 12
+				// Automatically rotate the x axis
+				do clibvchart-set-axis-tick-rotate parameters "x" 75
+			endif
+			if lf-next-index > 30
+				do clibvchart-set-axis-tick-culling parameters "x" TRUE
+			endif
+		endif
+		// 
+		// Add y axis data
+		// 
+		for i = 1 to occurence(sc-y-col)
+			if sc-y-col[i] != spaces
+				if sc-y-series-name[i] != spaces
+					set lf-col-title = sc-y-series-name[i]
+				else
+					do get-col-title parameters are sc-y-col[i] returning lf-col-title
+				endif
+				if sc-y-col[i] = "Count"
+					do clibvchart-add-data-point parameters are 
+//						if-then-else(mdf-series-name = spaces, lf-col-title, mdf-series-name)
+						lf-col-title
+						lf-this-index 1
+				else
+					do clibvchart-add-data-point parameters are 
+//						if-then-else(mdf-series-name = spaces, lf-col-title, mdf-series-name)
+						lf-col-title
+						lf-this-index num(xml-node-text( xml-get-child-by-name(lx-node,sc-y-col[i],spaces)))
+				endif
+				if sc-chart-type in ("pie" "donut")
+					// only display first series
+					break
+				endif
+			endif
+		end-for
+		// get next node
+		set lx-node = xml-get-next-node(lx-node)
+	end-while
+	if sc-set-min
+		do clibvchart-set-axis-min-non-zero parameters are "y"
+	endif
+	if sc-chart-type = "gauge"
+		// check the number of series
+		for i = 1 to occurence(sc-y-col)
+			if sc-y-col[i] = spaces
+				break
+			endif
+		end-for
+		// if we get to here with i = 2 then there is only one series
+		if i = 2
+			do clibvchart-swap-series-for-x-axis
+		endif
+		do clibvchart-set-gauge-percentage parameters are 0
+	endif
+	do clibvchart-get-chart returning lr-chart	
+	if exit-status != 0
+#ifdef DEBUG
+		do clibvchart-print-object parameters concat("Chart Audit:" sc-chart-title)
+#endif
+		exit 1
+	endif
+#ifdef DEBUG
+	do clibvchart-print-object parameters concat("Chart Audit:" sc-chart-title)
+#endif
+end-procedure
+
+screen set-chart-title
+parameters
+	lp-seq						like sc-seq
+	responsive
+	window-position 5
+	select * from saved-charts
+		where sc-procedure = :ws-procedure
+		and sc-view = :ws-view
+		and sc-seq = :lp-seq
+	allowed correct
+detail
+	screen-group // ---- Group Title ----------------------------
+		title "Chart Title"  // The title is optional
+		accept sc-chart-title
+			title "Title"
+		before-accept
+			if sc-chart-title = spaces
+				set sc-chart-title = ws-view
+			endif
+		end-before-accept
+	end-screen-group // ---- Group Title --------------------------------------
+after
+	if sc-chart-title = spaces
+		message-box 
+			,"Please give the chart a title"
+			title is ws-function-title
+			message-buttons  MSG_BOX_OK
+			icon MSG_BOX_STOP
+		back-to-detail
+	endif
+end-screen
+
+// 
+// --------  Loading and saving ---------------
+//
+procedure save-this-chart
+parameters
+	lp-seq								like sc-seq // 0 to add new
+returning
+	lr-seq								like sc-seq
+local
+	lf-next-seq							like sc-seq
+	lf-add-new-seq						type boolean
+	// First : if ws-selected-chart is non zero, then check it really is there
+	if lp-seq != 0
+		get saved-charts
+			on index sc-procedure sc-view sc-seq
+			key is ws-procedure ws-view lp-seq
+		on error ENOREC
+			set lf-add-new-seq = TRUE
+		endon
+		set lr-seq = lp-seq
+	else
+		set lf-add-new-seq = TRUE
+	endif
+	// Add or update the saved charts table with this chart
+	if lf-add-new-seq
+		// add a new chart
+		select lf-next-seq = max(sc-seq)
+			from saved-charts
+			where sc-procedure = :ws-procedure
+			and sc-view = :ws-view
+		end-select
+		set lf-next-seq += 1
+		initialise saved-charts
+		set sc-procedure = ws-procedure
+		set sc-view = ws-view
+		set sc-seq = lf-next-seq
+		if sc-chart-type = spaces
+			set sc-chart-type = "bar"
+		endif
+		do set-saved-chart-fields-from-mdf
+		insert saved-charts
+		do set-chart-title correct once parameters are sc-seq
+		set lr-seq = lf-next-seq
+	else
+		// update existing
+		get saved-charts
+			on index sc-procedure sc-view sc-seq
+			key is ws-procedure ws-view lp-seq
+			lock
+		on error ENOREC
+			exit 1
+		else
+			do set-saved-chart-fields-from-mdf
+			update saved-charts
+		endon
+	endif
+end-procedure
+
+procedure set-saved-chart-fields-from-mdf
+local
+	i 									type number
+	set i = 1
+	select * from mem-dg-fields
+	detail
+		if mdf-axis = 'x'
+			set sc-x-col = mdf-col-name
+			set sc-date-format = mdf-date-format
+			set sc-time-series = mdf-time-series
+		elseif  mdf-axis in ( 'y' 'y2')
+			if i <= occurence(sc-y-col)
+				set sc-y-col[i] = mdf-col-name
+				set sc-y-axis[i] = mdf-axis 
+				set sc-y-series-name[i] = mdf-series-name
+				set i += 1
+			endif
+		endif
+	end-select
+// *** Add new feature above this line
+end-procedure
+
+procedure load-saved-charts
+local
+	lf-filename							pic x(256) type string
+	close saved-charts and remove
+	open saved-charts temporary
+	do get-file-for-pgm returning lf-filename
+	if file-exists(lf-filename,FALSE)
+		do load-from-xml parameters are lf-filename
+	endif
+end-procedure
+
+procedure get-file-for-pgm
+returning 
+	lr-filename							pic x(256) type string
+local
+	lf-pgm-name							pic x(256) type string
+	lf-bms								pic x(256) type string
+	do swap-slash-for-underscore parameters are ws-pgm-name returning lf-pgm-name
+	// sometimes a program is called with full path and sometimes only  a
+	// partial path
+	// remove .op7:
+	if pattern(lf-pgm-name,".op7$")
+		string lf-pgm-name deleting str-len(lf-pgm-name) - 3 to strlen(lf-pgm-name)
+	endif
+	do swap-slash-for-underscore parameters are get-env("BMS") returning lf-bms
+	// if the string starts with bms then remvoe it
+	if substring(lf-pgm-name,1,str-len(lf-bms)) = lf-bms
+		string lf-pgm-name deleting 1 to str-len(lf-bms) + 1
+	endif
+	// remove any leading underscores
+	while substring(lf-pgm-name,1,1) = "_" and lf-pgm-name != spaces
+		string lf-pgm-name deleting 1 to 1
+	end-while
+	set lr-filename = concat(get-env("HOME"),"/cht_",lf-pgm-name,".xml")
+end-procedure
+
+procedure load-from-xml
+parameters
+	lp-filename							pic x(256) type string
+local
+	lx-doc								type xml-handle
+	lx-root								type xml-handle
+	lx-chart							type xml-handle
+	lx-y-series							type xml-handle
+	lx-y-fld							type xml-handle
+	i 									type number
+	//
+	set lx-doc = xml-parse-file(lp-filename)
+	set lx-root = xml-get-root-node(lx-doc)
+	//  Loop through the charts
+	set  lx-chart = xml-get-child-by-name(lx-root,"chart",spaces)
+	while lx-chart != 0
+		initialise saved-charts
+		set sc-procedure = xml-child-node-text(lx-chart,"procedure",spaces)
+		set sc-view = xml-child-node-text(lx-chart,"view",spaces)
+		set sc-seq = num(xml-child-node-text(lx-chart,"seq",spaces))
+		set sc-chart-type = xml-child-node-text(lx-chart,"charttype",spaces)
+		set sc-chart-title = xml-child-node-text(lx-chart,"charttitle",spaces)
+		set sc-x-col = xml-child-node-text(lx-chart,"xfld",spaces)
+		set sc-date-format = xml-child-node-text(lx-chart,"dateformat",spaces)
+		if xml-child-node-text(lx-chart,"timeseries",spaces) = "true"
+			set sc-time-series = true
+		endif
+		set sc-x-label = xml-child-node-text(lx-chart,"xlabel",spaces)
+		set sc-y-label = xml-child-node-text(lx-chart,"ylabel",spaces)
+		set sc-y2-label = xml-child-node-text(lx-chart,"y2label",spaces)
+		if xml-child-node-text(lx-chart,"xasisrotate",spaces)  = "true"
+			set sc-x-axis-rotate = true
+		endif
+		if xml-child-node-text(lx-chart,"allowzoom",spaces)  = "true"
+			set sc-allow-zoom = true
+		endif
+		if xml-child-node-text(lx-chart,"setmin",spaces) = "true"
+			set sc-set-min = true
+		endif
+		// Deal with y axis fields
+		set lx-y-series = xml-get-child-by-name(lx-chart,"yseries",spaces)
+		set lx-y-fld = xml-get-child-by-name(lx-y-series,"yfld",spaces)
+		set i = 1
+		while lx-y-fld != 0
+			if xml-node-name(lx-y-fld) = "yfld"
+				set sc-y-col[i] = xml-node-text(lx-y-fld)
+				set sc-y-axis[i] = xml-get-node-attribute(lx-y-fld,"axis")
+				set sc-y-series-name[i] = xml-get-node-attribute(lx-y-fld,"seriesname")
+				set i += 1
+			endif
+			set lx-y-fld = xml-get-next-node(lx-y-fld)
+		end-while
+		//
+// *** Add new feature above this line
+		insert saved-charts
+		//
+		set lx-chart = xml-get-next-node(lx-chart)
+	endwhile
+end-procedure
+
+procedure save-charts-to-xml
+local
+	lx-doc								type xml-handle
+	lx-root								type xml-handle
+	lx-chart							type xml-handle
+	lx-y-series							type xml-handle
+	lx-y-fld							type xml-handle
+	lf-next-seq							type number
+	lf-filename							pic x(256) type string 
+	i 									type number
+	set lx-doc = xml-new-document("1.0","charts")
+	set lx-root = xml-get-root-node(lx-doc)
+	select * from saved-charts
+		order by sc-procedure	sc-view
+	before sc-procedure sc-view
+		set lf-next-seq = 1
+	detail
+		set lx-chart = xml-add-child-node(lx-root,"chart",spaces)
+		if xml-add-child-node-text(lx-chart,"procedure",spaces,sc-procedure) endif
+		if xml-add-child-node-text(lx-chart,"view",spaces,sc-view) endif
+		if xml-add-child-node-text(lx-chart,"seq",spaces,str(lf-next-seq)) endif
+		if xml-add-child-node-text(lx-chart,"charttype",spaces,sc-chart-type) endif
+		if xml-add-child-node-text(lx-chart,"charttitle",spaces,sc-chart-title) endif
+		if xml-add-child-node-text(lx-chart,"xfld",spaces,sc-x-col) endif
+		if xml-add-child-node-text(lx-chart,"dateformat",spaces,sc-date-format) endif
+		if xml-add-child-node-text(lx-chart,"timeseries",spaces,if-then-else(sc-time-series,"true","false")) endif
+		if xml-add-child-node-text(lx-chart,"xlabel",spaces,sc-x-label) endif
+		if xml-add-child-node-text(lx-chart,"ylabel",spaces,sc-y-label) endif
+		if xml-add-child-node-text(lx-chart,"y2label",spaces,sc-y2-label) endif
+		set lx-y-series = xml-add-child-node(lx-chart,"yseries",spaces)
+		for i = 1 to occurence(sc-y-axis)
+			if sc-y-axis[i] != spaces
+				set lx-y-fld = xml-add-child-node(lx-y-series,"yfld",spaces)
+				if xml-modify-node-text(lx-y-fld,sc-y-col[i]) endif
+				if xml-add-node-attribute(lx-y-fld,"axis"
+					,spaces,sc-y-axis[i]) endif
+				if sc-y-series-name[i] != spaces
+					if xml-add-node-attribute(lx-y-fld,"seriesname",spaces,sc-y-series-name[i]) endif
+				endif
+			endif
+		end-for
+		if xml-add-child-node-text(lx-chart,"allowzoom",spaces,if-then-else(sc-allow-zoom,"true","false")) endif
+		if xml-add-child-node-text(lx-chart,"setmin",spaces,if-then-else(sc-set-min,"true","false")) endif
+		if xml-add-child-node-text(lx-chart,"xasisrotate",spaces,if-then-else(sc-x-axis-rotate,"true","false")) endif
+		set lf-next-seq += 1
+	after
+	end-select
+// *** Add new feature above this line
+	do get-file-for-pgm returning lf-filename
+	if xml-save-as-file(lx-doc,lf-filename,"utf-8",2) endif
+end-procedure
+
+procedure swap-slash-for-underscore
+parameters
+	lp-in								pic x(1024) type string
+returning
+	lr-out								pic x(1024) type string
+	while lp-in != spaces
+		if substring(lp-in,1,1) = "/"
+			string lr-out appending "_"
+		else
+			string lr-out appending substring(lp-in,1,1)
+		endif
+		string lp-in deleting 1 to 1
+	end-while
+end-procedure

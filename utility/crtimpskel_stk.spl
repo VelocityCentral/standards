@@ -1,0 +1,197 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : 
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2021
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: utility/crtimpskel.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 15Jul21  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+
+#define STATUSCOLOUR \
+	colour if-then-else(mi-mistatus = "E", red, \
+		if-then-else(mi-mistatus = "V", green, black))
+
+link 'utility/clibimport'
+ 
+field
+	ws-function-title						type string
+	ws-file-name							type string
+
+object mem-input
+	type is memory
+	record is
+		mi-miseq							type number
+		mi-mistatus							pic x // spaces - entered, V)alidate E)rror
+		mi-mimessage						pic x(128) type string
+// ** INPUT FIELDS
+		mi-stock-code						like stock-code
+		mi-stk-description					like stk-description
+		mi-stk-pack-weight					like stk-pack-weight
+		mi-stk-creation-date				like stk-creation-date
+// ** END
+	end-record 
+	key is mi-miseq
+
+mode md-validate
+	prompt "Validate"
+mode md-post
+	prompt "Post"
+
+procedure main
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8secabt-check-abort
+// ** SECURITY
+		parameters are sys-consolidation-division login-id() "ZUSR" "R004"
+// ** END
+		returning ws-function-title 
+// ** FILENAME
+	set ws-file-name = 'stock-master'
+// ** END
+	do i8proglog-write-log
+	do import-data-prompt entry once
+end-procedure
+
+screen import-data-prompt
+local
+	lf-method						pic x // D) Data grid  C)csv file
+	window
+	title ws-function-title
+	form-entry
+detail
+	radio-button lf-method
+		@1,1 "D" title  "Datagrid"
+		@1,30 "C" title  "CSV file"
+		default lf-method
+		before-radio-button
+			if screenmode = form-entry-defaults
+				set lf-method = "D"
+			endif
+		end-before-radio-button
+		validations
+			//
+		end-validations
+		on change
+			//
+		end-on
+	end-radio-button 
+	confirm
+	confirmed
+		if lf-method = "D"
+			do process-datagrid
+		else
+			do process-csv
+		endif
+	end-confirm
+end-screen
+
+screen process-datagrid
+local
+	lf-seq							like mi-miseq
+	window
+	datagrid occurs 22
+	title ws-function-title
+	select * from mem-input
+	allowed search entry remove correct  md-post md-validate
+before
+	close mem-input and remove
+	open mem-input temporary
+	set lf-seq = 1
+detail
+	if screenmode = entry
+		set mi-miseq = lf-seq
+	endif
+	accept mi-miseq @1,1 //pic z(8)
+		title "Sequence"
+		when screenmode = search
+		show-value
+		STATUSCOLOUR
+// ** DGFIELD
+	accept mi-stock-code @1,2
+		title "Stock Codes"
+		uppercase
+		STATUSCOLOUR
+	accept mi-stk-description @1,3
+		title "Description"
+		STATUSCOLOUR
+	accept mi-stk-pack-weight @1,4
+		title "weight"
+		STATUSCOLOUR
+	accept mi-stk-creation-date @1,5
+		title "creation date"
+		STATUSCOLOUR
+// ** END
+	confirm auto
+	before
+		set mi-miseq = lf-seq
+	confirmed
+		set lf-seq += 1
+	endconfirm
+end-screen
+
+procedure validate-datagrid
+	select * from mem-input
+		for update
+	detail
+// ** VALIDATESETUP
+		initialise stock-master
+		set stock-code = mi-stock-code
+		set stk-description = mi-stk-description
+		set stk-pack-weight = mi-stk-pack-weight
+		set stk-creation-date = mi-stk-creation-date
+		do clibimport-valiate-stock-master
+			parameters are stock-master.*
+			returning mi-mistatus mi-mimessage
+// ** END
+		update mem-input
+	end-select
+end-procedure
+
+procedure post-datagrid
+local
+	lf-commit							type boolean
+	set lf-commit = TRUE
+	select * from mem-input
+		where mi-mistatus = "V"
+		for update
+	detail
+// ** UPDATEDATAGRID
+		initialise stock-master
+		set stock-code = mi-stock-code
+		set stk-description = mi-stk-description
+		set stk-pack-weight = mi-stk-pack-weight
+		set stk-creation-date = mi-stk-creation-date
+		do clibimport-default-stock-master
+			parameters are stock-master.*
+			returning stock-master.*
+		insert stock-master
+// ** END
+		on error
+			set mi-mistatus = "E"
+			set mi-mimessage = error-description(file-status)
+		else
+			delete mem-input
+			on error
+			endon
+		endon
+	end-select
+end-procedure
+
+procedure process-csv
+	// do some stuff to prompt for a file.
+	// open and process.
+end-procedure
+

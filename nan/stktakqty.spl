@@ -1,0 +1,914 @@
+
+#define EXIT_OK exit-status <= 0
+// program to automatically set stock on hand to be min qty + 10 % in stock take file.
+
+object stv-copy like stock-take-variance
+
+link 'clib/clibwhse'
+link 'clib/clibvfile'
+
+#include '../include/bmsdef.spl'
+
+object qty-file 
+	type is external
+	record is 
+		qf-stock-code				like stock-code
+		qf-whse-code				like whse-code
+		qf-qty						type number
+		// primarily for advanced warehousing
+		qf-location					like stv-bin-location
+		qf-lot						like stv-lot-batch-no
+	end-record
+
+object qty-memory
+	type is memory
+	record is
+		qm-stock-code				like stock-code
+		qm-whse-code				like whse-code
+		qm-qty						type number
+		// primarily for advanced warehousing
+		qm-location					like stv-bin-location
+		qm-lot						like stv-lot-batch-no
+	end-record
+	key is qm-stock-code qm-whse-code unique
+
+field
+	ws-control-code					like stv-control-code
+	ws-only-input-file				type boolean
+	ws-remove-zeros					type boolean
+	// 
+	//  used for type 2
+	//
+	ws-last-a-loc					type number
+	ws-last-b-loc					type number
+	ws-max-locations				type number
+
+procedure main
+	do get-paras entry once
+end-procedure
+
+#if BMS_DICT_VER < 7600
+
+screen get-paras
+local
+	lf-qty-file							pic x(256) type string
+	lf-count							type number
+	lf-file-loaded						type boolean
+	lf-clear-all						type boolean
+	lf-folder							pic x(100) type string
+	lf-error							pic x(100) type string
+	window @1,1 to @24,80
+	form-entry
+before
+	display "The file should have stock-code,whse,qty in pipe-delimted-format" @6,5
+	display "Any stock code not on the file will have a random qty that is a function" @7,5
+	display "of the monthly-average-demand." @8,5
+	display "The program will create Serials, Lots and deal with adv Whse locations automatically" @10,5
+	display "ADVANCED WAREHOUSING" @12,5
+	display "When demoing adv whse, use the input file to control what gets put into stock" @13,5
+	display "Keep qtys relatively low becuase there are a small number of locations" @14,5
+	display "Avoid lot controlled items.  Review pgm if lots are required" @15,5
+	box @16,1 to @20,70
+		title "Beware Only Input"
+	display "Be very careful about the only input option.  Leave this UNCHECKED to have the input file to" @17,2
+	display "to be a set of OVERRIDES to the standard calculation.  Tick the option to make the input file" @18,2
+	display "to be the ONLY stock" @19,2
+	if get-env("STD") = spaces
+		set lf-qty-file = get-env("CUS")
+	else
+		set lf-qty-file = get-env("STD")
+	endif
+	set lf-folder = lf-qty-file
+	string lf-folder appending "/nan"
+	string lf-qty-file appending "/nan/stock.csv"
+	set lf-file-loaded = FALSE
+detail
+	accept ws-control-code @1,20
+		title "Stock Take Control"
+	validations
+		get stock-take-control
+			on index stc-control-code
+			key is ws-control-code
+		on error
+			message "Invalid Control"
+			re-enter
+		endon
+	end-validations
+	accept lf-qty-file pic x(60) @2,20
+		title "File name"
+		default lf-qty-file
+		help "full path to file of qtys"
+		when not lf-file-loaded
+		show-value
+		optional
+	on help-key
+		do clibvfile-chooser
+			parameters are "*.csv" lf-folder
+			returning lf-qty-file lf-folder
+		string lf-qty-file inserting str-concat(lf-folder,"/") at 1
+		re-enter optional
+	endon
+	validations
+		if lf-qty-file <> spaces
+			set lf-count = 0
+			if not file-exists(lf-qty-file,FALSE)
+				message "Invalid File"
+				reenter
+			endif
+			close qty-file
+			close qty-memory and remove
+			open qty-file file is lf-qty-file
+			on error
+				message "Can't open file:" error-description(file-status())
+				re-enter
+			endon
+			open qty-memory temporary truncate
+			set lf-error = spaces
+			select * from qty-file
+			detail
+				initialise qty-memory
+				set qm-stock-code = qf-stock-code
+				set qm-whse-code = qf-whse-code
+				set qm-qty = qf-qty
+				set qm-location = qf-location
+				set qm-lot = qf-lot
+				if qm-location != spaces
+					get system-table 
+						on index sys-tbl-type sys-tbl-code
+						key is  "WH" qm-whse-code
+					on error
+						set lf-error = "Invalid Warehouse"
+					else
+						if sys-tbl-sales-mtd = 3
+							// advanced warehouse
+							get warehouse-valid-locations
+								on index whse-code sl-location-code
+								key is qm-whse-code qm-location
+							on error
+								set lf-error = "Invalid Loc for Adv Whse"
+							endon
+						endif
+					endon
+				endif
+				insert qty-memory
+				on error
+					message-box param-text("<<P1>><<BR>><<p2>><<BR>><<p3>>"
+						concat( "Problem adding " qm-stock-code "/" qm-whse-code)
+						,error-description(file-status())
+						,"Press OK to Continue, cancel to reenter")
+						title is "Stk Take Post"
+						message-buttons MSG_BOX_OK_CANCEL
+						icon MSG_BOX_STOP
+						optional
+					if message-status() = MSG_BOX_CANCEL
+						break
+					endif
+				else
+					set lf-count += 1
+				endon
+				if lf-error != spaces
+					message-box param-text("<<P1>><<BR>><<p2>>"
+						,"Invalid location defined for stock in an advanced warehouse"
+						,"Fix file and try again")
+						title is "stk take post"
+						message-buttons MSG_BOX_CANCEL
+						icon MSG_BOX_STOP
+					exit
+				endif
+			end-select
+			if message-status() = MSG_BOX_CANCEL
+				re-enter
+			endif
+			message lf-count " records read and added"
+			set lf-file-loaded = TRUE
+		endif
+	end-validations
+	check-box ws-only-input-file @3,20
+		values TRUE FALSE
+		title "Only Input File"
+		help "Do Not update stocktake records for anything that is not on the input file"
+		right-coordinate
+		default is  FALSE
+	end-check-box 
+	check-box lf-clear-all	@4,20
+		values TRUE FALSE
+		title "Clear Qtys"
+		right-coordinate
+		default is TRUE
+	end-check-box 
+	accept ws-max-locations
+	check-box ws-remove-zeros		@5,20
+		values TRUE FALSE
+		title "Remove Zero Qty records"
+		right-coordinate
+		default is TRUE
+		help "Check for Advanced Warehouse"
+	end-check-box 
+	confirm
+	confirmed
+		if lf-clear-all
+			sql-update stock-take-variance
+				set stv-count-qty = 0, stv-lot-batch-no = spaces
+				where stv-control-code = :ws-control-code
+			sql-delete stock-serial-number
+				where serial-status = "06"
+		endif
+		do set-qty 
+	end-confirm
+end-screen
+
+#else
+
+screen get-paras
+local
+	lf-qty-file							pic x(256) type string
+	lf-count							type number
+	lf-file-loaded						type boolean
+	lf-clear-all						type boolean
+	lf-folder							pic x(100) type string
+	lf-error							pic x(100) type string
+	lf-desc								pic x(60) type string
+	window 
+		title "Set Stock Take Qtys"
+	responsive
+detail
+	screen-group // ---- Instructions ----------------------------
+		title "Instructions"
+		width 12
+	display param-text("<<P1>> <<p2>> <<p3>> <<p4>>",
+			"The file should have stock-code,whse,qty in pipe-delimted-format."
+			"Any stock code not on the file will have a random qty that is a function" 
+			"of the monthly-average-demand." 
+			"The program will create Serials, Lots and deal with adv Whse locations automatically" )
+		foreground prompts
+	display "ADVANCED WAREHOUSING"  colour blue
+		foreground prompts
+	display param-text("<<p1>> <<p2>> <<p3>>",
+		"When demoing adv whse, use the input file to control what gets put into stock. ",
+		"Keep qtys relatively low becuase there are a small number of locations" 
+		"Avoid lot controlled items.  Review pgm if lots are required" )
+		foreground prompts
+	end-screen-group // ---- Instructions --------------------------------------
+	screen-group // ---- Parameters ----------------------------
+		title "Parameters"
+		accept ws-control-code 
+			title "Stock Take Control"
+			drop-down
+				width 38
+				dynamic
+				concat-title
+				select stc-control-code, 
+						lf-desc = concat(stc-whse-from," - ",stc-whse-to, 
+							" created " format-picture(stc-freeze-date,"dd-mmm-yy")), 
+						0 , 
+						,if-then-else(stc-status != 'F',FALSE,TRUE)
+					from stock-take-control 
+					where stc-status in ('F')
+			end-drop-down
+		accept lf-qty-file pic x(60) 
+			title "File name"
+			default lf-qty-file
+			help "full path to file of qtys"
+			when not lf-file-loaded
+			show-value
+			optional
+		before-accept
+			if get-env("STD") = spaces
+				set lf-qty-file = get-env("CUS")
+			else
+				set lf-qty-file = get-env("STD")
+			endif
+			set lf-folder = lf-qty-file
+			string lf-folder appending "/nan"
+			string lf-qty-file appending "/nan/stock.csv"
+			set lf-file-loaded = FALSE
+		end-before-accept
+		on help-key
+			do clibvfile-chooser
+				parameters are "*.csv" lf-folder
+				returning lf-qty-file lf-folder
+			string lf-qty-file inserting str-concat(lf-folder,"/") at 1
+			re-enter optional
+		endon
+		validations
+			if lf-qty-file <> spaces
+				set lf-count = 0
+				if not file-exists(lf-qty-file,FALSE)
+					message "Invalid File"
+					reenter
+				endif
+				close qty-file
+				close qty-memory and remove
+				open qty-file file is lf-qty-file
+				on error
+					message "Can't open file:" error-description(file-status())
+					re-enter
+				endon
+				open qty-memory temporary truncate
+				set lf-error = spaces
+				select * from qty-file
+				detail
+					initialise qty-memory
+					set qm-stock-code = qf-stock-code
+					set qm-whse-code = qf-whse-code
+					set qm-qty = qf-qty
+					set qm-location = qf-location
+					set qm-lot = qf-lot
+					if qm-location != spaces
+						get system-table 
+							on index sys-tbl-type sys-tbl-code
+							key is  "WH" qm-whse-code
+						on error
+							set lf-error = "Invalid Warehouse"
+						else
+							if sys-tbl-sales-mtd = 3
+								// advanced warehouse
+								get warehouse-valid-locations
+									on index whse-code sl-location-code
+									key is qm-whse-code qm-location
+								on error
+									set lf-error = "Invalid Loc for Adv Whse"
+								endon
+							endif
+						endon
+					endif
+					insert qty-memory
+					on error
+						message-box param-text("<<P1>><<BR>><<p2>><<BR>><<p3>>"
+							concat( "Problem adding " qm-stock-code "/" qm-whse-code)
+							,error-description(file-status())
+							,"Press OK to Continue, cancel to reenter")
+							title is "Stk Take Post"
+							message-buttons MSG_BOX_OK_CANCEL
+							icon MSG_BOX_STOP
+							optional
+						if message-status() = MSG_BOX_CANCEL
+							break
+						endif
+					else
+						set lf-count += 1
+					endon
+					if lf-error != spaces
+						message-box param-text("<<P1>><<BR>><<p2>>"
+							,"Invalid location defined for stock in an advanced warehouse"
+							,"Fix file and try again")
+							title is "stk take post"
+							message-buttons MSG_BOX_CANCEL
+							icon MSG_BOX_STOP
+						exit
+					endif
+				end-select
+				if message-status() = MSG_BOX_CANCEL
+					re-enter
+				endif
+				message lf-count " records read and added"
+				set lf-file-loaded = TRUE
+			endif
+		end-validations
+		check-box ws-only-input-file 
+			values TRUE FALSE
+			title "Only Input File"
+			help "Do Not update stocktake records for anything that is not on the input file"
+			default is  FALSE
+		end-check-box 
+		check-box lf-clear-all	
+			values TRUE FALSE
+			title "Clear Qtys"
+			default is TRUE
+		end-check-box 
+		check-box ws-remove-zeros		
+			values TRUE FALSE
+			title "Remove Zero Qty records"
+			default is TRUE
+			help "Check for Advanced Warehouse"
+		end-check-box 
+		accept ws-max-locations pic s(4)
+			default 3
+			title "Maximum Number of Bulk Locations per Product"
+			help "For type 2 or 3"
+	end-screen-group // ---- Parameters --------------------------------------
+	screen-group // ---- BEWARE - Only Input file ----------------------------
+		title "BEWARE - Only Input file"
+		width 12
+	display param-text("<<p1>> <<p2>> <<p3>> ",
+		"Be very careful about the only input option.  Leave this UNCHECKED to have the input file to" 
+		"to be a set of OVERRIDES to the standard calculation.  Tick the option to make the input file" 
+		"to be the ONLY stock" )
+		foreground prompts
+	end-screen-group // ---- BEWARE - Only Input file --------------------------------------
+	confirm
+	confirmed
+		if lf-clear-all
+			sql-update stock-take-variance
+				set stv-count-qty = 0, stv-lot-batch-no = spaces
+				where stv-control-code = :ws-control-code
+			sql-delete stock-serial-number
+				where serial-status = "06"
+		endif
+		do set-qty 
+	end-confirm
+end-screen
+
+#endif
+
+procedure set-qty
+window no-hide
+local
+	l-random						type number
+	l-lotnumber						type number
+	l-serialno						type number
+	l-serial						like serial-no
+	l-max-serial					like serial-no
+	l-max-lot						like slm-lot-number
+	i								type number
+	lf-whse-type					type number
+	lf-remaining-qty				like stv-count-qty
+	lf-remaining-location			like stv-bin-location
+	lf-commit						type boolean
+	lf-required-locations			type number
+	lf-pallet-qty					type number
+	report "Set Stock-take Qtys"
+	select * from qty-memory
+	before
+		print "Products with override qtys"
+	detail
+		print qm-stock-code qm-whse-code qm-qty
+	end-select
+	page
+	set lf-commit = true
+	do clear-adv-whse-locations
+	do clear-wvl-confirm-check-code
+	do set-whse-avg-cost			
+	select * from stock-take-variance
+		where stv-count-qty = 0
+		and stv-control-code =  :ws-control-code
+		for update
+	detail
+		display whse-code @10,10 
+		display stock-code @10,20
+		get stock-master
+			on index stock-code
+			key is stock-code
+		on error
+		endon
+		if stk-stock-status in { "K" "L" "X" "Z"  "I" } // eq250 is serialised and indent/
+			continue
+		endif
+		print 132"-"
+		print whse-code stock-code stk-description
+		get system-table
+			on index sys-tbl-type sys-tbl-code
+			key is "WH" whse-code
+		on error
+		else
+			set lf-whse-type = sys-tbl-sales-mtd
+		endon
+		get stock-warehouse-detail
+			on index stock-code whse-code
+			key is stock-code whse-code
+		on error
+		else
+			// 
+			// Check if there is an override
+			//
+			get qty-memory
+				on index qm-stock-code qm-whse-code
+				key is stock-code whse-code
+			on error
+				if ws-only-input-file
+					continue // don't process it 
+				endif
+				do get-random parameters are 0.3 0.4 returning l-random		
+				set l-random += 0.1 // therefore numbers are between 0.4 and 0.5
+				if whse-avg-monthly-demand > 0
+					// set the SOH = 90-110% of min days cover.
+					set stv-count-qty = integer(whse-avg-monthly-demand / 30 * whse-min-days-cover * l-random)
+				else
+					// set soh = 90-110% of 500 units
+					set stv-count-qty = integer(500 * l-random)
+				endif
+				print "QTY" stv-count-qty "Determined using Random Calculation"
+			else
+				set stv-count-qty = qm-qty
+				set stv-bin-location = qm-location
+				set stv-sort-location = stv-bin-location
+				set stv-lot-batch-no = qm-lot
+				set stv-shelf-life-date = max-value(stv-shelf-life-date)
+				print "QTY" stv-count-qty "Determined from input" stv-bin-location
+			endon
+			// now check locations for type 2 and type 3
+			if lf-whse-type in ( 2 ,3)
+				do get-pallet-qty parameters
+					stock-code
+					returning lf-pallet-qty
+				print "Pallet Qty for this item is " lf-pallet-qty
+				if fraction(stv-count-qty) > 0
+					set lf-required-locations =  (stv-count-qty /
+						lf-pallet-qty) + 1
+				else
+					set lf-required-locations =  (stv-count-qty /
+						lf-pallet-qty) 
+				endif
+				print "Number of locations required is :" lf-required-locations
+			endif
+			if lf-required-locations > ws-max-locations
+				set stv-count-qty = lf-pallet-qty * ws-max-locations
+				print "Count Qty changed to relect max locations:" stv-count-qty
+			endif
+			//
+			//
+			if stk-serialized-flag = "L"
+				select l-max-lot = max(slm-lot-number)
+					from stock-lot-master
+					where stock-code = :stock-code
+				end-select
+				string l-max-lot deleting 1 to 2
+				set l-lotnumber = num(l-max-lot)
+				set l-lotnumber += 1
+				set stv-lot-batch-no = concat("LN" , str(l-lotnumber))
+			endif
+			if stk-serialized-flag = "Y"
+				select l-max-serial = max(serial-no)
+					from stock-serial-number
+					where stock-code = :stock-code
+				end-select
+				// find the alpha and the number
+				string l-max-serial deleting 1 to 2
+				set l-serialno = num(l-max-serial)
+				for i = 1 to stv-count-qty
+					set l-serialno += 1
+					set l-serial = concat("SN" format-picture(l-serialno,"999999"))
+					initialise stock-serial-number
+						leaving stock-code
+					set serial-no = l-serial
+					set contract-no = right-justify(str-concat(l-serial),size-of(contract-no))
+					set stock-code = stock-code
+					set serial-status = "06"
+					set serial-site-desc = "Found in Stock Take"
+					set serial-install-date = today()
+					set serial-stock-type = "S"
+					set serial-whse-code = whse-code
+					set serial-item-cost = whse-avg-cost
+					set serial-secondary-key = l-serial
+//					set serial-fast-access = l-serial
+					insert stock-serial-number
+					on error
+						print "***Error Occurred when insert stock serial number"
+						set lf-commit = FALSE
+					endon
+				end-for
+			endif
+			set stv-count-date = today()
+			set stv-count-date-time = sys-time()
+			if lf-whse-type = 3 and qm-location = spaces
+				// do we have more than a PF location ?
+				// wvl-confirm-check-code is zero going into this routine.  So we use it to determine
+				// that we have already used the location.
+				do split-among-locations-type-3 parameters are stock-take-variance.*
+				if not EXIT_OK
+					print "***Error Occurred when splitting locations(1)"
+					set lf-commit = FALSE
+				endif
+			elseif lf-whse-type = 2
+				do split-among-locations-type-2 parameters are stock-take-variance.*
+					returning lf-remaining-qty lf-remaining-location
+				if not EXIT_OK
+					print "***Error Occurred when splitting locations(2)"
+					set lf-commit = FALSE
+				endif
+				set stv-count-qty = lf-remaining-qty
+				set stv-bin-location = lf-remaining-location
+				update stock-take-variance
+				on error 
+					print "***Error Occurred when updating stv records(1)"
+					set lf-commit = FALSE
+				endon
+			else
+				update stock-take-variance
+				on error 
+					print "***Error Occurred when updating stv records(2)"
+					set lf-commit = FALSE
+				endon
+				print whse-code stock-code stv-bin-location stv-lot-batch-no stv-count-qty 
+			endif
+		endon
+	end-select
+	do clear-wvl-confirm-check-code
+	if not EXIT_OK
+		print "*** Error occurred in warehouse-valid-locations update"
+		set lf-commit = FALSE
+	endif
+	if ws-remove-zeros
+		sql-delete stock-take-variance
+			where stv-count-qty = 0
+		on error 
+			print "***Error Occurred when deleting stv records"
+			set lf-commit = FALSE
+		endon
+	endif
+	if lf-commit
+		transaction commit
+	else
+		transaction rollback
+		message-box param-text("<<P1>><<BR>><<p2>>"
+			,"An error occurred during the process"
+			,"The transaction was rolled back check report for *** lines")
+			title is "Stock Take Qty"
+			message-buttons MSG_BOX_CANCEL
+			icon MSG_BOX_STOP
+	endif
+end-procedure
+
+procedure get-random
+parameters are 
+	l-start							type number
+	l-end							type number
+returning
+	l-value							type number
+	if l-start < 0 
+		set l-start = 0
+	endif
+	if l-end > 1
+		set l-end = 1
+	endif
+	repeat
+		// random returns a number between 0 and 32767
+		set l-value = random(0)
+		// ensure the number is even spread between 0.0001 and +1
+		// 1. drop and amount > 10,000 ( to ensure we deal with an even range)
+		if l-value > 10000
+			set l-value = l-value - (integer(l-value / 10000) * 10000) + 1
+		endif
+		// now have a number between 0 and 9999
+		// divide by 10000 to get numbers between 0 and 0.9999
+		set l-value = l-value / 10000
+	until l-value between l-start and l-end
+	end-repeat
+end-procedure //
+
+
+procedure split-among-locations-type-2
+parameters
+	lp-stv.*						like stock-take-variance
+returning
+	lr-qty							like stv-count-qty
+	lr-loc							like stv-bin-location
+local
+	lf-a-loc-qty					type number
+	lf-b-loc-qty					type number
+	lf-a-loc						like stv-bin-location
+	lf-b-loc						like stv-bin-location
+//
+	// set the start qty from the existing stv record
+	print "location split" in col 20 lp-stv.stock-code lp-stv.whse-code lp-stv.stv-count-qty 
+		lp-stv.stv-lot-batch-no
+	set ws-last-a-loc += 1
+	set ws-last-b-loc += 1
+	//
+	set lf-a-loc = str-concat("P",format-picture(ws-last-a-loc,"99999"))
+	if lp-stv.stv-count-qty <= 10
+		set lr-qty = lp-stv.stv-count-qty
+		set lr-loc = lf-a-loc
+		exit
+	endif
+	set lf-b-loc = str-concat("B",format-picture(ws-last-b-loc,"99999"))
+	set lf-a-loc-qty = integer(lp-stv.stv-count-qty / 10 ) // 10 percent in A's
+	set lf-b-loc-qty = lp-stv.stv-count-qty - lf-a-loc-qty
+	//
+	// insert the B record.  The A record is just updated by the calling
+	// routine
+	//
+	set stv-count-qty = lf-b-loc-qty
+	set stv-bin-location = lf-b-loc
+	insert stv-copy
+		on error
+			exit 1
+		endon
+	//
+	// Set the remaining values to be updated by the calling routine
+	//
+	set lr-qty = lf-a-loc-qty
+	set lr-loc = lf-a-loc
+end-procedure
+
+procedure split-among-locations-type-3
+parameters
+	lp-stv.*						like stock-take-variance
+local
+	lf-start-qty					type number
+	lf-remaining					type number
+	lf-loc-capacity					type number
+	lf-counter						type number
+	lf-plt-qty						type number
+//
+	// set the start qty from the existing stv record
+	print "location split" in col 20 lp-stv.stock-code lp-stv.whse-code lp-stv.stv-count-qty 
+		lp-stv.stv-lot-batch-no
+	set lf-start-qty = lp-stv.stv-count-qty
+	// get the pallet qty
+	get stock-unit-conversion
+		on index stock-code suc-unit-desc
+		key is lp-stv.stock-code "PLT"
+	on error
+		exit
+	endon
+	// while there is remaing pallet qty - but them in bulk locations
+	set lf-plt-qty = suc-unit-conversion
+	set lf-remaining = lf-start-qty
+	set lf-counter = 0
+	print "Pallet Qty is " lf-plt-qty
+	while lf-remaining >= suc-unit-conversion
+		set lf-counter += 1
+		if lf-counter > 10
+			print "More than 10 attempts to create a location" in col 20
+			break
+		endif
+		do get-next-location 
+			parameters are "BS" lp-stv.whse-code 
+			returning stv-bin-location lf-loc-capacity
+		if not EXIT_OK
+			exit 1
+		endif
+		do clibwhse-determine-max-storage-for-item-location
+			parameters are lp-stv.whse-code lp-stv.stock-code stv-bin-location spaces
+			returning lf-loc-capacity
+		print "Trying " stv-bin-location " has capactity of " lf-loc-capacity
+		if lf-remaining >= lf-loc-capacity
+			set stv-count-qty =  lf-loc-capacity
+		else
+			set stv-count-qty = lf-remaining
+		endif
+		print "bin" in col 20 stv-bin-location 
+			"QTY:" str(stv-count-qty)  
+			"Capacity:" str(lf-loc-capacity)  
+			"Remaining:" str(lf-remaining )
+		if stv-bin-location <> spaces and lf-loc-capacity <> 0
+			insert stv-copy
+			on error
+				exit 1
+			endon
+			print whse-code stock-code stv-bin-location stv-lot-batch-no stv-count-qty 
+			set lf-remaining -= (lf-loc-capacity)
+		endif
+	end-while
+	// now the remainder needs to go into pick locations
+	get stock-unit-conversion
+		on index stock-code suc-unit-desc
+		key is lp-stv.stock-code "EACH"
+	on error
+		exit 1
+	else
+		set lf-start-qty = suc-unit-conversion
+	endon
+	set lf-counter = 0
+	while lf-remaining > 0
+		set lf-counter += 1
+		if lf-counter > 10
+			print "More than 10 attempts to create a location" in col 20
+			exit 1
+		endif
+		do get-next-location 
+			parameters are "PF" lp-stv.whse-code 
+			returning stv-bin-location lf-loc-capacity
+		if not EXIT_OK
+			exit 1
+		endif
+		do clibwhse-determine-max-storage-for-item-location
+			parameters are lp-stv.whse-code lp-stv.stock-code stv-bin-location spaces
+			returning lf-loc-capacity
+		if lf-remaining > (lf-loc-capacity)
+			set stv-count-qty = lf-loc-capacity
+		else
+			set stv-count-qty = lf-remaining
+		endif
+		print "bin" in col 20 stv-bin-location stv-count-qty lf-loc-capacity lf-remaining 
+		if stv-bin-location <> spaces and lf-loc-capacity <> 0
+			insert stv-copy
+			on error
+				exit 1
+			endon
+			print whse-code stock-code stv-bin-location stv-lot-batch-no stv-count-qty 
+			set lf-remaining -= ( lf-loc-capacity)
+		endif
+	end-while
+end-procedure
+
+procedure get-next-location
+parameters
+	lp-type								like location-type
+	lp-whse								like whse-code
+returning
+	lr-location							like sl-location-code
+	lr-capacity							type number
+	get warehouse-location-types
+		on index whse-code location-type
+		key is lp-whse lp-type
+	on error
+		print "Invalid location type - exiting" lp-type lp-whse in col 20
+		exit 1
+	endon
+	set lr-capacity = location-storage-maximum
+//
+//	Finished determining capacity requirements
+//
+	print "looking for location " in col 20
+	select * from warehouse-valid-locations
+		where location-type = lp-type
+		and wvl-confirm-check-code = 0
+		for update
+	detail
+		set lr-location = sl-location-code
+		set wvl-confirm-check-code = 1
+		update warehouse-valid-locations
+		on error
+			exit 1
+		endon
+		break  // just get the first one
+	end-select
+	if lr-location = spaces
+		display "Ran out of locations " @11,10
+	endif
+end-procedure
+
+procedure clear-wvl-confirm-check-code
+	select * from warehouse-valid-locations
+		for update
+	detail
+		set wvl-confirm-check-code = 0
+		update warehouse-valid-locations
+		on error 
+			print "*** Error occured updating warehouse-valid-locations"
+			print error-description(file-status()) col 5
+			exit 1
+		endon
+	end-select
+end-procedure
+
+procedure set-whse-avg-cost
+local
+	lf-last-buy							type number
+	lf-last-conv-factor					like sup-unit-conversion-factor
+	select * from stock-warehouse-detail
+		where whse-avg-cost = 0
+		for update
+	before stock-code
+		set lf-last-buy = 0
+		select * from stock-supplier
+			where stock-code = :stock-code
+			order by stock-code sup-priority
+		detail
+			set lf-last-buy = sup-last-buy-price
+			if sup-currency-code <> spaces
+				get system-table
+					on index sys-tbl-type sys-tbl-code
+					key is "CU" sup-currency-code
+				on error
+					initialise system-table leaving sys-tbl-type sys-tbl-code
+				endon
+				if sys-money-value <> 0
+					set lf-last-buy = lf-last-buy / sys-money-value
+				endif
+			endif
+			set lf-last-conv-factor = sup-unit-conversion-factor
+			if lf-last-conv-factor = 0
+				set lf-last-conv-factor = 1
+			endif
+		end-select
+	detail
+		set whse-avg-cost = lf-last-buy / lf-last-conv-factor
+		update stock-warehouse-detail
+		on error
+		endon
+	end-select
+end-procedure
+
+procedure clear-adv-whse-locations
+	select * from system-table
+		where sys-tbl-type = "WH"
+			and sys-money-value = 3 // adv whse
+		order by sys-tbl-type sys-tbl-code
+	detail
+		select * from stock-take-variance
+			for update
+		detail
+			set stv-bin-location = spaces
+			update stock-take-variance
+		end-select
+	end-select
+end-procedure
+
+procedure get-pallet-qty
+parameters are 
+	lp-stock-code				like stock-code
+returning
+	lr-pallet-qty				type number
+	//
+	get stock-unit-conversion
+		on index stock-code suc-unit-desc
+		key is lp-stock-code "PLT"
+	on error
+		exit // returning zero.
+	else
+		set lr-pallet-qty = suc-unit-conversion
+	endon
+end-procedure

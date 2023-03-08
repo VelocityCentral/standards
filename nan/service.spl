@@ -1,0 +1,672 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : 
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2019
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: nan/service.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 01Jun19  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+#include "../include/i5sostatii.spl"
+#include "../include/i8datenew.spl"
+
+link 'clib/clib403'
+link 'clib/clibstk'
+
+#define VANWHSE "VAN"
+#define SRCWHSE "W02"
+ 
+#define RANDOM_BETWEEN(A,B) \
+	(((RANDOM(0) / 32767) * (B - A)) + A)
+
+field
+	ws-function-title						type string
+	ws-van-whse								like whse-code
+	ws-src-whse								like whse-code
+
+procedure main
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+//	do i8secabt-check-abort
+//		parameters are sys-consolidation-division login-id() "ZUSR" "R004"
+//		returning ws-function-title 
+	do i8proglog-write-log
+	set ws-van-whse = VANWHSE
+	set ws-src-whse = SRCWHSE
+	if random(tod()) endif
+	do main-menu
+end-procedure
+
+menu main-menu
+	window
+	tree-menu
+detail
+	/*
+	Oct 22 - now done in setdates.spl
+	option "Set Contract Dates & PM Dates" @1,1
+		do set-contract-dates
+		message "Complete"
+	*/
+	option "Add EQSP products to all Vxxx Warehouses" @3,1
+		do add-warehouse-records	
+	option "Replenish Warehouse" @4,1
+		spl "po/m6replen"
+	/*
+	option "Add EQSP to van stock" @3,1
+		do van-stock
+		message "Complete"
+	option "Create xfer orders from W02 to VAN" @5,1
+		do create-transfer-orders
+	*/
+	option "Create Van Stock Take" @6,1
+		message-box param-text("<<P1>><<BR>><<p2>>"
+			,"Stock-take create is being opened next"
+			,"Create a stock take for warehouses V100 to V200")
+			title is ws-function-title
+			message-buttons  MSG_BOX_OK
+			icon MSG_BOX_INFORMATION
+		call 'stk/m48prepar' parameters are "-prepare" 
+	option "populate stock counts" @7,1
+		do update-counts
+		message "complete"
+	option "Post Stock Take" @8,1
+		spl "stk/m48update"
+end-menu
+
+procedure add-warehouse-records
+local 
+	lf-read-count				type number
+	lf-inserted-count			type number
+	lf-whse-record-created		type boolean
+	lf-cost						type number
+	select *
+		from stock-master
+		where stock-group = 'EQSP'
+	detail
+		get stock-warehouse-detail
+			on index stock-code whse-code
+			key is stock-code "W02"
+		on error
+			set lf-cost  = 0
+		else 
+			set lf-cost = whse-avg-cost
+		endon
+		// join to ensure we only get valid warehouses
+		select t0.engineer-warehouse
+			t1.sys-tbl-sales-mtd // warehouse type
+			t1.sys-tbl-code
+			t1.sys-tbl-type
+			from service-engineer-master as t0
+			inner join system-table as t1 on t1.sys-tbl-type = 'WH' and t1.sys-tbl-code = t0.engineer-warehouse
+			where t1.sys-tbl-sales-mtd =  0 // type 0 warehouses only.  Ignore type 9 (VAN)
+		detail
+			set lf-read-count += 1
+			initialise stock-warehouse-detail
+				leaving stock-code
+			set whse-code = engineer-warehouse
+			set whse-drp-replenish-multiple = 1
+			set whse-min-stock =  integer(RANDOM_BETWEEN(2,10))
+			set whse-avg-cost = lf-cost
+			do clibstk-create-stock-warehouse-detail
+				parameters stock-warehouse-detail.* 
+				returning stock-warehouse-detail.* lf-whse-record-created
+			if lf-whse-record-created
+				set lf-inserted-count += 1
+			endif
+		end-select
+	end-select
+	message-box param-text("<<P1>><<BR>><<p2>>"
+		,concat(str(lf-read-count) " records read")
+		,concat(str(lf-inserted-count) " records inserted"))
+		title is ws-function-title
+		message-buttons  MSG_BOX_OK
+		icon MSG_BOX_INFORMATION
+		// default MSG_BOX_OK
+		// optional 
+end-procedure
+
+/*
+Oct 22 - now done in setdates.spl
+procedure set-contract-dates
+	select * 
+		from contract-options
+		for update
+	detail
+		set co-invoiced-from-date = julian(1,1,year(today))
+		set co-invoiced-to-date = julian(1,1,year(today))
+		update contract-options
+	end-select
+	//
+	select *
+		from contract-equipment-pm-details
+		for update
+	detail
+		set cepd-next-service-date = addmonths((today() - day(today) + 1),1,TRUE)
+		update contract-equipment-pm-details
+	end-select
+	//
+	select *
+		from contract-equipment-summary
+		for update
+	detail
+		set ces-invoiced-from-date = julian(1,1,year(today()))
+		set ces-invoiced-to-date = julian(1,1,year(today()))
+		update contract-equipment-summary
+	end-select
+	//
+	select *
+		from contract-master
+		for update
+	detail
+		set contract-start-date = julian(1,1,year(today()))
+		set contract-end-date = add-months(contract-start-date,12,true) - 1
+		set contract-invoiced-from-date = julian(1,1,year(today()))
+		set contract-invoiced-to-date = julian(1,1,year(today()))
+		set contract-last-change = julian(1,1,year(today()))
+		set contract-review-date = add-months(contract-end-date,-1,true)
+		update contract-master
+		// Make one item not under warranty
+		select *
+			from stock-serial-number
+			where contract-no = :contract-no
+			and serial-no = '56487231' 
+			for-update
+		detail
+			set serial-warranty-date = add-months(today,-3,true)
+			update stock-serial-number
+		end-select
+		//
+		// Now deal with PM Routines
+		//
+		select *
+			from contract-equipment-pm-details
+			where contract-no = :contract-no
+			for update
+		detail
+			// contact-equipment-pm-details contains the stuff we want to update.
+			// there are two fields cepd-next-service-date and
+			// cepd-last-service-date.
+			set cepd-next-service-date = today() + 10  // make it yesterday so it gets selected
+			//
+			// we need the stock code and the comes from contract equiment
+			// summmary:
+			//
+			get contract-equipment-summary
+				on index  contract-no ces-sequence-no
+				key is contract-no cepd-sequence-no
+			on error ENOREC
+				continue
+			endon
+			// get the routines using the stock-code on the summary table
+			get service-stock-pm-routines
+				on index stock-code sspr-pm-routine-code
+				key is stock-code cepd-pm-routine-code
+			on error ENOREC
+			else
+				get system-table
+					on index sys-tbl-type sys-tbl-code
+					key is "S7" sspr-freq-code
+				on error ENOREC
+				else
+					switch sys-tbl-alpha-1 // Frequency Code
+					case "D"
+						set cepd-last-service-date = cepd-next-service-date - sys-tbl-sales-mtd
+					case "W"
+						set cepd-last-service-date = cepd-next-service-date - (sys-tbl-sales-mtd * 7)
+					case "M"
+						set cepd-last-service-date 
+							= addmonths(cepd-next-service-date, 0 - sys-tbl-sales-mtd, TRUE)
+					case "Y"
+						set cepd-last-service-date 
+							= addmonths(cepd-next-service-date, 0 - (sys-tbl-sales-mtd * 12), TRUE)
+					end-switch
+				endon
+			endon
+			update contract-equipment-pm-details
+		end-select
+	end-select
+	do set-dates  parameters are '56487231' 'EQ250'  // make the warranty expired
+		add-months(today(),-24,TRUE)
+		add-months(today(),-12,TRUE)
+		add-months(today(),-1,TRUE)
+	do set-dates  parameters are '65487321' 'EQ250'  // under warrancy
+		add-months(today(),-12,TRUE)
+		add-months(today(),3,TRUE)
+		add-months(today(),-1,TRUE)
+	//
+end-procedure
+
+procedure set-dates
+parameters
+	lp-serial-no			like serial-no
+	lp-stock-code			like stock-code
+	lp-serial-install-date	type date
+	lp-serial-warranty-date	type date
+	lp-serial-action-date	type date
+	//
+	get stock-serial-number
+		on index serial-no stock-code 
+		key is lp-serial-no lp-stock-code
+		lock
+	on error
+	else
+		set serial-install-date = lp-serial-install-date
+		set serial-warranty-date = lp-serial-warranty-date
+		set serial-action-date = lp-serial-action-date
+		update stock-serial-number
+	endon
+end-procedure
+*/
+
+
+/*
+
+See how to demo pronto.doc.  Van stock really does not work...
+
+
+
+procedure van-stock
+	//
+	// Set engineer van locations to the same as the engineer-code
+	sql-update service-engineer-master
+	set engineer-warehouse = :ws-van-whse
+		where engineer-warehouse = spaces
+	sql-update service-engineer-master
+		set engineer-van-id = engineer-no
+		where engineer-van-id = spaces
+	//
+	// Stock group eqsp are spare parts
+	//
+	select *
+		from stock-master
+		where stock-group = "EQSP"  
+	detail
+		select * 
+			from service-engineer-master
+		detail
+			get stock-location
+				on index whse-code stock-code sl-location-code sl-reference-lot
+				key is engineer-warehouse stock-code engineer-van-id spaces
+				lock
+			on error ENOREC
+				initialise stock-location
+					leaving whse-code stock-code sl-location-code sl-reference-lot
+				set sl-receipt-date = today()
+				set sl-carton-number = RANDOM_BETWEEN(2,10) // min van stock qty
+				insert stock-location
+			else
+				set sl-carton-number = RANDOM_BETWEEN(2,10) // min van stock qty
+				update stock-location
+			endon
+		end-select
+	end-select
+end-procedure
+
+object vans-to-process
+	type memory
+	record is
+		vtp-no							like engineer-no
+		vtp-name						like engineer-name
+		vtp-service-centre				like engineer-service-centre
+		vtp-whse						like engineer-warehouse
+		vtp-van							like engineer-van-id
+		vtp-status						pic 99  // 0 - nothing done 1-xfer created 2-status changed 3-despatched 4-receipted
+		vtp-order-no					like so-order-no
+		vtp-bo-suffix					like so-bo-suffix
+	end-record
+	key is vtp-no
+
+object xfer-orders						
+	type memory
+	record is
+		xo-order-no						like so-order-no
+		xo-bo-suffix					like so-bo-suffix
+	end-record
+	key is xo-order-no xo-bo-suffix
+
+mode md-create-transfer
+	prompt "Create Xfer"
+	help "Create a transfer order ready for picking"
+	when vtp-status = 0
+	always-show
+mode md-print-slip
+	prompt "Print"
+	help "Print Picking slip ready for despatch"
+	when vtp-status = 1
+	always-show
+mode md-despatch
+	prompt "Despatch"
+	help "Despatch the transfer Order"
+	when vtp-status = 2
+	always-show
+mode md-receipt
+	prompt "Receipt"
+	help "Receive the transfer into the van"
+	when vtp-status = 3
+	always-show
+mode md-orders
+	prompt "Orders"
+	help "Review all orders"
+mode md-replen
+	prompt "Replen"
+	help "Review all Replenishment Records"
+mode md-review-stock
+	prompt "Review"
+	help "Review stock in Van"
+	
+
+screen create-transfer-orders
+local
+	lf-entered-run-date					type date
+	lf-gl-batch-ref						like so-batch-ref
+	lf-deb-period-status				pic s99
+	lf-gl-period-status					pic s99		
+	lf-batch-date-ok					pic 9
+	lf-order-no							like so-order-no
+	lf-bo-suffix						like so-bo-suffix
+	lf-current-no						like vtp-no
+	window
+	datagrid
+	select * from vans-to-process
+	allowed search md-review-stock md-create-transfer md-print-slip md-despatch md-orders md-replen 
+before
+	close vans-to-process and remove
+	open vans-to-process temporary
+	close xfer-orders and remove
+	open xfer-orders temporary
+	//
+	// remember all the xfers so we know what's been added
+	//
+	select *
+		from sales-order
+		where so-order-status = I5SO_RDY_TO_PICK_TRANSFER
+	detail
+		initialise xfer-orders
+		set xo-order-no = so-order-no
+		set xo-bo-suffix = so-bo-suffix
+		insert xfer-orders
+	end-select
+	//
+	// build the van file
+	//
+	select *
+		from service-engineer-master
+		where engineer-van-id != spaces
+	detail
+		initialise vans-to-process 
+		set vtp-no = engineer-no
+		set vtp-name = engineer-name
+		set vtp-service-centre = engineer-service-centre
+		set vtp-whse = engineer-warehouse
+		set vtp-van = engineer-van-id
+		insert vans-to-process
+	end-select
+	//
+detail
+	accept vtp-no col 1
+		title "Code"
+		when screenmode = search
+		show-value
+	display vtp-name col 2
+		title "Name"
+	display vtp-service-centre col 3
+		title "Service Centre"
+	display vtp-whse col 4
+		title "Warehouse"
+	display vtp-van col 5
+		title "Van id"
+	display vtp-order-no col 6
+		title "Order"
+	display vtp-bo-suffix col 7
+		title "Suffix"
+	confirm auto
+	before
+		set lf-current-no = vtp-no
+		switch screenmode
+		case md-create-transfer
+			do xfer-one-location parameters are vtp-whse vtp-van
+				returning lf-order-no lf-bo-suffix
+			do update-status parameters are lf-current-no 1 
+			do update-so parameters are lf-current-no lf-order-no lf-bo-suffix
+		case md-print-slip
+			spl 'so/m54custom' parameters are "-pick" "-maint-by-param"
+				lf-order-no lf-bo-suffix
+			do update-status parameters are lf-current-no 2 
+		case md-despatch
+			spl 'so/m5delfifo' parameters are '-single' 
+				vtp-order-no vtp-bo-suffix
+			I8DATENEW_DO_GET_DATE_AND_BATCH("D",lf-entered-run-date,lf-gl-batch-ref,
+				lf-deb-period-status,lf-gl-period-status,I8BGRPTYPE_DR_IN,"B"," ",lf-batch-date-ok)
+			if lf-batch-date-ok
+				spl "so/m5invoice" 
+					parameters 
+						"-one"
+						so-order-no 
+						so-bo-suffix
+						str(lf-entered-run-date) 
+						lf-gl-batch-ref
+						str(lf-deb-period-status)
+						str(lf-gl-period-status)
+						'-silent'
+			endif
+			do update-status parameters are lf-current-no 3 
+//		case md-receipt
+//			spl 'so/m5rectfr' parameters are spaces '-maint-by-param' vtp-order-no vtp-bo-suffix
+//			do update-status parameters are lf-current-no 4
+		case md-orders
+			spl 'so/m5ordenq' parameters are "-maint-by-param"
+		case md-replen
+			spl 'po/m6reorder' parameters are "-reorder"
+		case md-review-stock
+			do review-stock parameters are vtp-no
+		end-switch
+	confirmed
+	end-confirm
+end-screen
+
+screen review-stock
+parameters
+	lp-no								like vtp-no
+	window
+	datagrid
+	SELECT 
+		t0.whse-code,
+		t0.sl-location-code,
+		t1.engineer-service-centre,
+		t1.engineer-name,
+		t0.stock-code,
+		t2.stk-description,
+		t0.sl-qty-on-hand,
+		t0.sl-carton-number ,
+		t3.whse-qty-on-hand,
+		t3.whse-current-orders
+	FROM stock-location as t0
+	inner JOIN service-engineer-master as t1 
+		ON t0.whse-code = t1.engineer-warehouse AND t0.sl-location-code = t1.engineer-van-id
+		and t1.engineer-no = :lp-no
+	inner JOIN stock-master as t2 
+		ON t2.stock-code = t0.stock-code
+	inner JOIN stock-warehouse-detail as t3 
+		ON t3.stock-code = t0.stock-code AND t3.whse-code = :ws-src-whse
+	order by t0.stock-code
+	allowed search
+detail
+	accept stock-code col 1
+		title "Code"
+		when screenmode = search
+		show-value
+	display stk-description col 2
+		title "Description"
+	display sl-qty-on-hand col 3
+		title "Van Qty"
+	display sl-carton-number col 4
+		title "Van level"
+	display whse-qty-on-hand col 5
+		title "Source QOH"
+end-screen
+
+
+
+procedure update-status
+parameters are 
+	lp-vtp-no							like vtp-no
+	lp-status							like vtp-status
+	get vans-to-process
+		on index vtp-no
+		key is lp-vtp-no
+		lock
+	set vtp-status = lp-status
+	update vans-to-process
+end-procedure
+
+procedure update-so
+parameters are 
+	lp-vtp-no							like vtp-no
+	lp-order-no							like so-order-no
+	lp-bo-suffix						like so-bo-suffix
+	get vans-to-process
+		on index vtp-no
+		key is lp-vtp-no
+		lock
+	set vtp-order-no = lp-order-no
+	set vtp-bo-suffix = lp-bo-suffix
+	update vans-to-process
+end-procedure
+
+
+procedure xfer-one-location
+parameters are 
+	lp-whse								like whse-code
+	lp-van								like engineer-van-id
+returning 
+	lr-order-no							like so-order-no
+	lr-bo-suffix						like so-bo-suffix
+local 
+	lf-avail							type number
+//
+//   Delete any existing transfer orders
+//
+	sql-delete purchase-reorder-file
+		where reorder-type = 'T' and reorder-review = spaces
+//
+// Create new suggestions
+//
+	select * 
+		from stock-location
+		where whse-code = :lp-whse
+		and sl-location-code = :lp-van
+		order by whse-code sl-location-code stock-code
+	detail
+		initialise purchase-reorder-file
+			leaving stock-code
+		set reorder-type = 'T'
+		set reorder-review = spaces
+		set po-suggested-supplier = ws-src-whse
+		set reorder-whse-code = ws-van-whse
+		do clib403-calculate-available parameters are stock-code ws-src-whse
+			returning lf-avail
+		if lf-avail > 0
+			set reorder-qty = sl-carton-number  - sl-qty-on-hand
+			if reorder-qty > lf-avail
+				set reorder-qty = lf-avail
+			endif
+//		set reorder-demand = sl-carton-number   -- anything in demand will be
+//		issued!!!
+			set reorder-reference = sl-location-code
+			if reorder-qty > 0
+				insert purchase-reorder-file
+			endif
+		endif
+	after whse-code sl-location-code
+		spl 'po/m6replen'
+			parameters '-vanreplen'
+				whse-code ws-src-whse sl-location-code '-service'
+	end-select
+	// find the order no and update the vtp table
+	select *
+		from sales-order 
+		where so-order-status = I5SO_RDY_TO_PICK_TRANSFER
+		order by so-order-no desc // likely to be the last one
+	detail
+		get xfer-orders
+			on index xo-order-no xo-bo-suffix
+			key is so-order-no so-bo-suffix
+		on error ENOREC
+			// this must be the one that was added.
+			set lr-order-no = so-order-no
+			set lr-bo-suffix = so-bo-suffix
+			break
+		endon
+	end-select
+end-procedure
+
+
+/*
+
+I  tried to do this with a stock take for type 9 but I could not make it work.  
+
+Eventually I found a post on the forum from Steven Hafey dated Sept 2018:
+
+Due to a recent SMR, I have been investigating the operation of type 9 van warehouses
+What I have found is a lot of code that reduces the ability to perform functions because it is a van warehouse, and very little benefit
+A type 9 warehouse (Van) has functionality for multiple locations, and expects each of those locations to be a separate van
+E.g. Whse SJHV might have vans ORH427, BPV959 and NEW887
+These vans become locations under the warehouse, and there are some screens to control this (INV M362, INV M192, etc.)
+However,the fit out of this functionality seems more than a little bit incomplete, for example, stocktake will make the total adjustment against a single van even though the counts are van specific, therefore destroying the van specific quantities which are its only benefit
+Additionally, there are complications when trying to use van warehouses when negative on hand is required (apparently a common situation)
+After discussing this with consultants I found that the usual recommendation is to avoid type 9 van warehouses and set up each van as a separate type 0 warehouse
+Consequently, I would recommend we retire this warehouse type 
+This will have the advantage of simplifying the 4GL of several key programs that have code that specifically restricts van warehouses
+
+
+It does work for type 0
+
+*/
+
+
+
+
+procedure update-counts
+	report "Setting counts"
+		no-xml
+	select t0.engineer-warehouse
+		t1.sys-tbl-sales-mtd // warehouse type
+		t1.sys-tbl-code
+		t1.sys-tbl-type
+		from service-engineer-master as t0
+		inner join system-table as t1 on t1.sys-tbl-type = 'WH' and t1.sys-tbl-code = t0.engineer-warehouse
+		where t1.sys-tbl-sales-mtd =  0 // type 0 warehouses only.  Ignore type 9 (VAN)
+	detail
+		select *
+			from stock-take-variance
+			where whse-code = :engineer-warehouse
+			for update
+		detail
+			get stock-warehouse-detail
+				on index stock-code whse-code
+				key is stock-code whse-code
+			on error
+			else
+				set stv-count-qty = integer(RANDOM_BETWEEN(1,whse-min-stock * 1.5))
+				set stv-count-date = today()
+				update stock-take-variance
+				print stock-code whse-code stv-bin-location stv-count-qty
+			endon
+		end-select
+	end-select
+	report finished
+end-procedure
+
+

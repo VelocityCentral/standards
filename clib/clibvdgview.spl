@@ -1,0 +1,377 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : clib to add dg views to screen
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2014
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: clib/clibvdgview.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 20Mar14  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+//
+/*
+
+	This documentation is in RST format.  To view this as a nice pdf goto
+	https://overbits.herokuapp.com/rsteditor/ or rst.ninjs.org and paste this content.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|           |           |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+
+===========
+clibvdgview
+===========
+
+
+	this clib adds filters to datagrids on the fly.
+	You can run the code at any time.  It will add filters to the users registry.
+	There are two routines clibvdgview-add-filter and clibvdgview-add-condition
+
+	Errors are reported via a non-zero exit status.  Use get-last-error to get last
+	error message.
+
+clibvdgview-add-filter
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+		Call this once to setup a new filter on a screen.  If the fitler already exists 
+		it will be deleted and re-created.  Call -add-condition to add the conditions
+		as many times as necessary
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|    In     |String 256 |The name of the screen as it appears in your program    |
+	|           |           |i.e. the name you use in a do statement                 |
+	+-----------+-----------+--------------------------------------------------------+
+	|    In     |String 128 |The name you want to appear at the top of the datagrid  |
+	+-----------+-----------+--------------------------------------------------------+
+	|    In     |String 20  |The Highligh code must be one of:                       |
+	|           |           |                                                        |
+	|           |           | - "False" or spaces : discard rows that don't match    |
+	|           |           | - "passed" : apply highlighting to rows that pass      |
+	|           |           | - "failed" : apply highlighting to rows that do not    |
+	|           |           |   pass                                                 |
+	+-----------+-----------+--------------------------------------------------------+
+	|    In     |string 40  |this is the colour code that will be applied to the     |
+	|           |           |datagrid rows if the passed or failed was used for      |
+	|           |           |the previous parameter                                  |
+	|           |           |                                                        |
+	|           |           |There are some predefined ones                          |
+	|           |           |                                                        |
+	|           |           |- BLACKONLIGHTYELLOW                                    |
+	|           |           |- WHITEONBLACK                                          |
+	|           |           |- GREENONBLACK                                          |
+	|           |           |- REDONBLACK                                            |
+	|           |           |- BLUEONBLACK                                           |
+	|           |           |                                                        |
+	|           |           |otherwise you can pass your own                         |
+	+-----------+-----------+--------------------------------------------------------+
+
+
+clibvdgview-add-condition
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+		Call this as many times as you want to add conditions.  i.e. if you have two
+		conditions you can call it twice 
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|    In     |string 256 |Screen name as above                                    |
+	+-----------+-----------+--------------------------------------------------------+
+	|    In     |String 128 |Filter name as above                                    |
+	+-----------+-----------+--------------------------------------------------------+
+	|    In     | int       |The column number on the screen                         |
+	+-----------+-----------+--------------------------------------------------------+
+	|    In     |String 20  |The condition code                                      |
+	|           |           |                                                        |
+	|           |           |must be in                                              |
+	|           |           |"=" "<>" ">" ">=" "<" "<="                              |
+	|           |           |"IN" "NOT IN" "BETWEEN" "NOT BETWEEN" "LIKE" "NOT LIKE" |
+	|           |           |"CONTAINS" "NOT CONTAINS"                               |
+	+-----------+-----------+--------------------------------------------------------+
+	|    In     |String 128 |Exactly the same as you enter on the screen             |
+	+-----------+-----------+--------------------------------------------------------+
+	|    In     |Boolean    |True to match case, False to ignore case                |
+	+-----------+-----------+--------------------------------------------------------+
+
+Sample Code
+~~~~~~~~~~~
+
+::
+
+	screen review-retired-items
+	local
+		lf-ok				type boolean
+		lf-message			pic x(1024) type string
+		window
+		title "Items"
+		select *
+			from system-modules-functions
+		datagrid occurs 20
+		allowed search md-unretire
+	before
+		do clibvdgview-add-filter parameters are
+			"review-retired-items"
+			"retired"
+			"FALSE" spaces
+		do clibvdgview-add-condition parameters are
+			"review-retired-items"
+			"retired"
+			7 "<>" ' ' FALSE
+		do clibvdgview-add-filter parameters are
+			"review-retired-items"
+			"ZUSR"
+			"passed" spaces
+		do clibvdgview-add-condition parameters are
+			"review-retired-items"
+			"ZUSR"
+			1 "=" 'ZUSR' FALSE
+		do clibvdgview-add-condition parameters are
+			"review-retired-items"
+			"ZUSR"
+			2 "contains" 'M' FALSE
+		do clibvdgview-add-filter parameters are
+			"review-retired-items"
+			"jobs"
+			"FALSE" spaces
+		do clibvdgview-add-condition parameters are
+			"review-retired-items"
+			"jobs"
+			3 "contains" 'job' FALSE
+	detail
+		..... rest of screen
+
+
+*/
+
+#define VIEWSTART "HKEY_CURRENT_USER/Software/Pronto/ScreenSettings/"
+
+// some highlighting standards
+#define BLACKONLIGHTYELLOW "0/8454143"
+#define WHITEONBLACK "16777215/0"
+#define GREENONWHITE "65280/16777215"
+#define REDONWHITE "255/16777215"
+#define BLUEONWHITE "16711680/16777215"
+
+#include "../include/i8proglogparam.spl"
+
+field
+	ws-last-error						pic x(1024) type string
+
+procedure library-init
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8proglogparam-write-log parameters are "clibvdgview"
+end-procedure
+
+procedure clibvdgview-get-last-error export
+returning
+	lr-message							like ws-last-error
+	set lr-message = ws-last-error
+end-procedure
+
+procedure clibvdgview-add-filter export
+parameters are
+	lp-screen-name						pic x(256) type string	
+	lp-filter-name						pic x(128) type string
+	lp-highlight						pic x(20) type string // passed failed false
+	lp-colour-string					type string
+local 
+	lf-folder							pic x(256) type string
+	lf-program							pic x(256) type string
+	lf-key								pic x(1024) type string
+//
+//	get screen and folder name
+//
+	do trim-from-last-slash parameters are get-param(0) 
+		returning lf-program lf-folder
+	if pattern(lf-program,".")
+		string lf-program deleting pattern(lf-program,".") to str-len(lf-program)
+	endif
+	do trim-from-last-slash parameters are lf-folder
+		returning lf-folder
+//
+// Validations
+//
+	if uppercase(lp-highlight) not in { "PASSED" "FAILED" "FALSE" spaces }
+		set ws-last-error = str-concat("Invalid highlight(" lp-highlight ")")
+		exit 1
+	endif
+//
+	set lf-key = str-concat(VIEWSTART,lf-folder,"/",lf-program,"/",lp-screen-name)
+//
+// delete if existing
+//
+	if delete-registry-value(str-concat(lf-key,"/",lp-filter-name))
+	endif
+//
+// build key
+//
+	string lf-key appending concat("/",lp-filter-name)
+//
+//  Add highlight
+//
+	if lp-highlight = spaces
+		set lp-highlight = "false"
+	endif
+	if not set-registry-value(str-concat(lf-key,"/FilterHighlight"),lowercase(lp-highlight))
+		set ws-last-error = "Unable to set registry values"
+		exit 1
+	endif
+//
+//  Add colour if appropriate
+//
+	if uppercase(lp-highlight) <> "FALSE"
+		if lp-colour-string = spaces
+			set lp-colour-string = BLACKONLIGHTYELLOW
+		endif
+		switch uppercase(lp-colour-string)
+		case "BLACKONLIGHTYELLOW"
+			set lp-colour-string = "0/8454143"
+		case "WHITEONBLACK"
+			set lp-colour-string = "16777215/0"
+		case "GREENONWHITE"
+			set lp-colour-string = "65280/16777215"
+		case "REDONWHITE"
+			set lp-colour-string = "255/16777215"
+		case "BLUEONWHITE"
+			set lp-colour-string = "16711680/16777215"
+		end-switch
+		if not set-registry-value(str-concat(lf-key,"/FilterHighlightColor"),lp-colour-string)
+			set ws-last-error = "Unable to set registry values"
+			exit 1
+		endif
+	endif
+end-procedure
+
+procedure clibvdgview-add-condition export
+parameters are
+	lp-screen-name						pic x(256) type string	
+	lp-filter-name						pic x(128) type string
+	lp-column							type number
+	lp-condition						pic x(20) type string  // > >= < <= = <> contains like
+	lp-value							pic x(128) type string
+	lp-match-case						type boolean
+local 
+	lf-column							type number
+	lf-condition						type number
+	lf-folder							pic x(256) type string
+	lf-program							pic x(256) type string
+	lf-key								pic x(1024) type string
+//
+//	get screen and folder name
+//
+	do trim-from-last-slash parameters are get-param(0) 
+		returning lf-program lf-folder
+	if pattern(lf-program,".")
+		string lf-program deleting pattern(lf-program,".") to str-len(lf-program)
+	endif
+	do trim-from-last-slash parameters are lf-folder
+		returning lf-folder
+//
+// validations
+//
+	switch uppercase(lp-condition)
+	case  "="
+		set lf-condition = 1
+	case "<>" 
+		set lf-condition = 1 + 16
+	case ">"
+		set lf-condition = 3
+	case ">="
+		set lf-condition = 2 + 16 // equiv to not <
+	case "<"
+		set lf-condition = 2
+	case "<="
+		set lf-condition = 3 + 16   // equivalent to not >
+	case "IN"
+		set lf-condition = 4
+	case "NOT IN"
+		set lf-condition  = 4 + 16
+	case "BETWEEN"
+		set lf-condition = 5
+	case "NOT BETWEEN"
+		set lf-condition = 5 + 16
+	case "LIKE"
+		set lf-condition = 6
+	case "NOT LIKE"
+		set lf-condition = 6 + 16
+	case "CONTAINS"
+		set lf-condition = 7
+	case "NOT CONTAINS"
+		set lf-condition = 7 + 16
+	else
+		set ws-last-error = str-concat("Invalid Condition (" lp-condition  ")")
+		exit 1
+	end-switch 
+	if not lp-match-case 
+		set lf-condition += 32
+	endif
+	set lf-column = lp-column - 1 // zero based
+	if lf-column < 0
+		set ws-last-error = "Column number less than one"
+		exit 1
+	endif
+//
+// build key
+// 
+	set lf-key = str-concat(VIEWSTART,lf-folder,"/",lf-program,"/",lp-screen-name,"/",lp-filter-name)
+//
+//  Add Condition Code
+//
+	if not set-registry-value(str-concat(lf-key,"/FilterOp_",str(lf-column)),str(lf-condition))
+		set ws-last-error = str-concat("Cannot add condition (" lf-key  ")")
+		exit 1
+	endif
+//
+//  Add Values
+//
+	if lp-value = spaces
+		set lp-value = "''"
+	endif
+	if not set-registry-value(str-concat(lf-key,"/FilterValues_",str(lf-column)),lp-value)
+		set ws-last-error = str-concat("Cannot add values (" lf-key  ")")
+		exit 1
+	endif
+end-procedure
+
+
+procedure trim-from-last-slash
+parameters
+	lp-in						pic x(1024) type string
+returning 
+	lr-trailing					pic x(1024) type string
+	lr-leading					pic x(1024) type string
+local
+	i							type number
+	lf-work						pic x(1024) type string
+	set lf-work = lp-in
+	set lr-trailing = lp-in
+	set lr-leading = lp-in
+	// remove trailing slash
+	if pattern(lf-work,"[\\/]") = str-len(lf-work)
+		string lf-work deleting str-len(lf-work)
+	endif
+	//check there is one
+	if not pattern(lf-work,"[\\/]") 
+		exit
+	endif
+	for i = str-len(lf-work) down to 1
+		if substring(lf-work,i,i) in { "/" "\" }
+			break
+		endif
+	end-for
+	// remove the leading part
+	string lr-trailing deleting 1 to i 
+	string lr-leading deleting i  to str-len(lr-leading)
+end-procedure
+

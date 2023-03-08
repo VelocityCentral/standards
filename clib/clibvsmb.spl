@@ -1,0 +1,321 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : 
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2017
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: clib/clibvsmb.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 07Oct17  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+/*
+
+	This documentation is in RST format.  To view this as a nice pdf goto
+	https://overbits.herokuapp.com/rsteditor/ or rst.ninjs.org and paste this content.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|           |           |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+
+	Alternatively
+
+	 =========== =========== ======================================================== 
+	  Direction   Data Type   Description                                             
+	 =========== =========== ======================================================== 
+	 =========== =========== ======================================================== 
+
+========
+clibvsmb
+========
+
+Routines that read the smb.conf file to determine paths to files.
+
+Note that these two exported routines are essentially GUESSES.
+This is because there could be multiple samba shares to the same path in the samba
+file.   (e.g. you could have /pro/data/winfiles/quicklinks AND a separate share
+for /pro/data/winfiles/quicklinks/statements )
+We look at a particular path and attempt to work out what the
+best samba match is for the path.  The longest path wins because
+this is the one MOST likely to be the desired one.
+
+
+.. Note:: The user must have read access to the smb.conf.  
+
+clibvsmb-set-unc-name  
+~~~~~~~~~~~~~~~~~~~~~
+
+Set the UNC name for the windows path.  Note that this should be done before
+making calls to other routines.
+
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|  In       |String 100 |UNC Name to use                                         |
+	|           |           |                                                        |
+	|           |           |Note that there are two special values                  |
+	|           |           | - %HOSTNAME% will set the unc name to the SHORT        |
+	|           |           |   hostname (i.e. without the domain name)              |
+	|           |           | - %IPADDRESS% will set the unc name to the ip address  |
+	|           |           |   of the host.                                         |
+	+-----------+-----------+--------------------------------------------------------+
+
+
+clibvsmb-smb-path 
+~~~~~~~~~~~~~~~~~
+
+Pass a unix path, get the windows path back.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 256 |Unix path to Share                                      |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |String 256 |Windows (smb) path to share                             |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvsmb-unix-path 
+~~~~~~~~~~~~~~~~~~
+
+Pass a smb path, get the unix path back.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 256 |Windows (smb) path to share                             |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |String 256 |Unix path to Share                                      |
+	+-----------+-----------+--------------------------------------------------------+
+*/
+
+ 
+#include "../include/i8proglogparam.spl"
+
+link 'clib/clibvostool'
+
+#define MAXSHARE 100
+#define MAXPATH 256
+#define DEBUG(A) print A ":" get-fld-value(A)
+#define SECTION_PATTERN  "^\[?*\]"
+#define PATH_PATTERN  "^path"
+ 
+field
+	ws-unix-path							pic x(MAXPATH) type string occurs MAXSHARE
+	ws-windows-path							pic x(MAXPATH) type string occurs MAXSHARE
+	ws-unc-name								pic x(MAXPATH) type string
+	ws-load-ok								type boolean
+
+object smb-conf
+	type is external
+	file is "/etc/samba/smb.conf"
+	record
+		smb-text							pic x(1024) type string
+	end-record
+
+
+procedure library-init
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8proglogparam-write-log parameters are "clibvsmb"
+	do load-data
+#ifdef DEBUG
+	do print-load
+#endif
+end-procedure
+
+
+procedure load-data
+local
+	lf-next-pattern							pic x(256) type string
+	lf-array-offset							type number
+	set ws-load-ok = FALSE
+	open smb-conf
+		read-only
+	on error
+		abort "Could not load smb definitions" error-description(file-status())
+	endon
+	set lf-next-pattern = SECTION_PATTERN
+	set lf-array-offset = 1
+	select *
+		from smb-conf
+	detail
+		// remove leading spaces 
+		set smb-text = ltrim(smb-text)
+		//
+		if pattern(smb-text ,  lf-next-pattern) = 0
+			continue
+		endif
+		// 
+		switch lf-next-pattern
+		case SECTION_PATTERN
+			if smb-text in ("[globals]","[homes]","[printers]")
+				continue
+			endif
+			//
+			//We have a section name
+			//
+			set ws-windows-path[lf-array-offset] = smb-text
+			string ws-windows-path[lf-array-offset] deleting 1
+			string ws-windows-path[lf-array-offset] deleting str-len(ws-windows-path[lf-array-offset])
+			set lf-next-pattern = PATH_PATTERN
+		case PATH_PATTERN
+			string smb-text deleting 1 to pattern(smb-text, "=") 
+			set ws-unix-path[lf-array-offset] = ltrim(smb-text)
+			set lf-next-pattern = SECTION_PATTERN
+			set lf-array-offset += 1
+		end-switch
+		// 
+	end-select
+	do clibvostool-hostname returning ws-unc-name
+	set ws-load-ok = TRUE
+end-procedure
+
+#ifdef DEBUG
+procedure print-load 
+local
+	i									type number
+	report "SMB Definitions"
+	set i =  1
+	while ws-windows-path[i] != spaces
+		print ws-windows-path[i]
+			ws-unix-path[i] in col 50
+			set i += 1
+	end-while
+	report finished
+end-procedure
+#endif
+
+procedure clibvsmb-set-unc-name  export
+parameters
+	lp-unc-name							pic x(100) type string
+	//
+	switch lp-unc-name
+	case  '%HOSTNAME%'
+		do clibvostool-hostname returning ws-unc-name
+	case '%IPADDRESS%'
+		do clibvostool-ip-address returning ws-unc-name
+	else
+		set ws-unc-name = lp-unc-name
+	end-switch
+	if substring(ws-unc-name,1,2) != "\\"
+	and substring(ws-unc-name,1,2) != "//" 
+		string ws-unc-name inserting "\\" at 1
+	endif
+	if substring(ws-unc-name,str-len(ws-unc-name),str-len(ws-unc-name)) in ( "/" "\" )
+		string ws-unc-name deleting str-len(ws-unc-name)
+	endif
+end-procedure
+
+// Note that these two exported routines are essentially GUESSES.
+// we look at a particular path and attempt to work out what the
+// best samba match is for the path.  The longest path wins because
+// this is the one MOST likely to be the desired one.
+
+procedure clibvsmb-smb-path export
+parameters
+	lp-full-unix-path-to-file			pic x(MAXPATH) type string
+returning
+	lr-smb-path-to-file					pic x(MAXPATH) type string
+local
+	i									type number
+	lf-matched-path-length				type number
+	//
+	// We look through all the unix paths and match them to the file name
+	// passed in.  The one we select is the one with the longest path lenght.
+	// This is the MOST LIKELY one the user wants.
+	// A more specific path is always preferred to a more generic one.
+	//
+	set i = 1
+	while ws-unix-path[i] != spaces
+	and i <= MAXSHARE
+		if pattern(lp-full-unix-path-to-file ,  ws-unix-path[i]) = 1
+			if str-len(ws-unix-path[i]) > lf-matched-path-length
+				set lf-matched-path-length = str-len(ws-unix-path[i])
+				// now apply the match
+				set lr-smb-path-to-file = lp-full-unix-path-to-file
+				string lr-smb-path-to-file deleting 1 to str-len(ws-unix-path[i])
+				if substring(lr-smb-path-to-file,1,1) in ( "/" "\" )
+					string lr-smb-path-to-file	deleting 1
+				endif
+				string lr-smb-path-to-file inserting concat(ws-windows-path[i],"\") at 1
+			endif
+		endif
+		set i += 1
+	end-while
+	do set-slash parameters are lr-smb-path-to-file "\" returning lr-smb-path-to-file
+	string lr-smb-path-to-file inserting str-concat("\\" ws-unc-name "\") at 1
+end-procedure
+
+
+procedure clibvsmb-unix-path export
+parameters
+	lp-smb-path-to-file						pic x(MAXPATH) type string
+returning
+	lr-full-unix-path-to-file				pic x(MAXPATH) type string
+local 
+	i										type number
+	lf-smb-share							pic x(MAXPATH) type string
+	//
+	// Trim the unc name from the path
+	//
+	if substring(lp-smb-path-to-file,1,2) in ( "//" "\\")
+		string lp-smb-path-to-file deleting 1 to 2
+		for i = 1 to str-len(lp-smb-path-to-file)
+			if substring(lp-smb-path-to-file,1,1) not in ( "\" "/")
+				string lp-smb-path-to-file deleting 1
+			else
+				break
+			endif
+		end-for
+	endif
+	if substring(lp-smb-path-to-file,1,1) in ( "\" "/")
+		string lp-smb-path-to-file deleting 1
+	endif
+	// The first directory should now match a windows path so go look for it.
+	while substring(lp-smb-path-to-file,1,1) not in ( "/" "\")
+		string lf-smb-share appending substring(lp-smb-path-to-file,1,1)
+		string lp-smb-path-to-file deleting 1
+	end-while
+	// now remove the slash
+	if substring(lp-smb-path-to-file,1,1) in ( "\" "/")
+		string lp-smb-path-to-file deleting 1
+	endif
+	// find the sahre in the array
+	set i = 1
+	while i < MAXSHARE and ws-windows-path[i] != lf-smb-share
+		set i += 1
+	end-while
+	if ws-windows-path[i] = spaces
+		exit 1
+	endif
+	set lr-full-unix-path-to-file = ws-unix-path[i]
+	string lr-full-unix-path-to-file appending "/"
+	string lr-full-unix-path-to-file appending lp-smb-path-to-file
+	do set-slash parameters are lr-full-unix-path-to-file "/" returning lr-full-unix-path-to-file
+end-procedure
+
+procedure set-slash
+parameters are 
+	lp-in									pic x(MAXPATH) type string
+	lp-slash								pic x
+returning
+	lr-out									pic x(MAXPATH) type string
+local
+	i										type number
+	for i = 1 to str-len(lp-in)
+		if substring(lp-in,i,i) in ( "/" "\" )
+			string lp-in replacing lp-slash at i
+		endif
+	endfor
+	set lr-out = lp-in
+end-procedure

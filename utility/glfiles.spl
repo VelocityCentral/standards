@@ -1,0 +1,136 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : List Informix Code Sets
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2018
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: utility/glfiles.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 20Feb18  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+ 
+field
+	ws-function-title						type string
+
+/*
+ You probably need to run this as informix - but I'm not sure
+*/
+
+object glfiles-txt
+	type is text 
+	record is 
+		gt-line								pic x(1024) type string
+	end-record
+
+object glfiles-mem
+	type is memory
+	record is
+		gm-seq							type number
+		gm-filename						pic x(256) type string
+		gm-language						pic x(256) type string
+		gm-territory					pic x(256) type string
+		gm-modifier						pic x(256) type string
+		gm-codeset						pic x(256) type string
+		gm-locale-name					pic x(256) type string
+	end-record
+	key is gm-seq
+
+
+procedure main
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+//	do i8secabt-check-abort
+//		parameters are sys-consolidation-division login-id() "ZUSR" "R004"
+//		returning ws-function-title 
+	do i8proglog-write-log
+	do doit
+end-procedure
+
+screen doit
+local
+	lf-record-started					type boolean
+	lf-keyword							type string
+	lf-value							type string
+	lf-seq								type number
+	window @1,1 to @24,90
+	datagrid occurs 22
+	select * from glfiles-mem
+		allowed search
+before
+	report 'debug'
+	command "sh" parameters are "-c" "glfiles -lc"
+	on error
+		message "Could not run glfiles -lc"
+		exit
+	endon
+	open glfiles-txt
+		file is "lc11.txt"
+	on error
+		message "cannot find file lc11.txt"
+		exit
+	endon
+	open glfiles-mem
+		temporary
+	on error
+		message "Cannnot create mem file"
+		exit
+	endon
+	set lf-record-started = FALSE
+	set lf-seq = 0
+	select * from glfiles-txt
+		where gt-line != spaces
+	detail
+		print gt-line
+		set lf-keyword = substring(gt-line,1,pattern(gt-line ,  ":") - 1)
+		set lf-value = rtrim(substring(gt-line,pattern(gt-line ,  ":") + 1,str-len(gt-line)))
+		print lf-keyword "----:-----" lf-value
+		switch lf-keyword
+		case "Filename"
+			if lf-record-started
+				insert glfiles-mem
+			endif
+			initialise glfiles-mem
+			set lf-seq += 1
+			set gm-seq = lf-seq
+			set gm-filename = lf-value
+			set lf-record-started = TRUE
+		case "Language"
+			set gm-language = lf-value
+		case "Territory"
+			set gm-territory = lf-value
+		case "Modifier"
+			set gm-modifier = lf-value
+		case "Code Set"
+			set gm-codeset = lf-value
+		case "Locale Name"
+			set gm-locale-name = lf-value
+		endswitch
+	end-select
+detail
+	accept gm-seq @1,1 pic s(6)
+		title "sequence"
+		when screenmode = search
+		showvalue
+	display gm-language @1,2 pic x(15)
+		title "Language"
+	display gm-territory @1,3 pic x(15)
+		title "Territory"
+	display gm-modifier @1,4 pic x(15)
+		title "Modifier"
+	display gm-codeset @1,5 pic x(15)
+		title "Code Set"
+	display gm-locale-name @1,6 pic x(15)
+		title "Locale"
+end-screen
+

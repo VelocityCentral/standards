@@ -1,0 +1,55 @@
+
+
+link "vglrf/vglrfclib"
+#define SCREENSIZE @ws-max-rows,ws-max-cols
+
+field
+	ws-max-cols							type number
+	ws-max-rows							type number
+	
+
+
+procedure main
+	do vglrfclib-screen-size 
+		returning ws-max-cols ws-max-rows
+	if get-env("PROTIMEOUT") = spaces
+		if set-env("PROTIMEOUT","60") endif
+	endif
+	do some-screen entry
+end-procedure
+
+screen some-screen
+local 
+	lf-field				pic x(10) type string
+	i						type number
+	window @1,1 to SCREENSIZE
+before
+	message "normal message"
+	message get-env("PROTIMEOUT")
+	do vglrfclib-display-message parameters are  
+		str-concat("big message\nThe value of protimeout is: \n ",get-env("PROTIMEOUT")) 0
+	display "         1         2         3         4" @1,1
+	display "1234567890123456789012345678901234567890" @2,1
+	for i = 3 to 15
+		display i pic 99 @i,1
+	endfor
+	display  ws-max-cols @4,15 pic 99999.99
+	display ws-max-rows @5,15 pic 99999.99
+detail
+	accept lf-field @7,8
+		title "Field"
+		help "Help line - Q)Quit"
+		optional
+	validations
+		if  uppercase(lf-field) = "Q"
+		or lf-field = spaces
+		or lf-field = "9"
+			exit
+		endif
+		if lf-field = "1"
+			for i = 1 to 10
+			display " " @1,1 bell
+			end-for
+		endif
+	end-validations
+end-screen

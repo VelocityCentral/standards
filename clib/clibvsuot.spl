@@ -1,0 +1,641 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : Miscellaneus clibs
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2014
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: clib/clibjjmisc.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 24Mar14  rjb log 91  written 
+////////////////////////////////////////////////////////////////////////////////
+/*
+
+
+
+	This documentation is in RST format.  To view this as a nice pdf goto
+	https://overbits.herokuapp.com/rsteditor/ or rst.ninjs.org and paste this content.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|           |           |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+
+	Alternatively
+
+	 =========== =========== ======================================================== 
+	  Direction   Data Type   Description                                             
+	 =========== =========== ======================================================== 
+	 =========== =========== ======================================================== 
+
+=========
+clibvsuot
+=========
+
+	This is a generalised routine to access the system-user-only-table.  
+	Putting everything in a separate clib segments memory and ensures no overlap of global fields.
+
+	Check the exit status of routines and use get-last-error for message.
+
+clibvsuot-get-sys-description 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	This routine is NOT the system-user-only-table.  It is system-table. 
+
+	It exists in this routine to have one place to store a VERY often used function.  viz.  Getting
+	the description from a system-table entry
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|  In       |String 2   |System-table "type" (like sys-tbl-type)                 |
+	+-----------+-----------+--------------------------------------------------------+
+	|  In       |String 10  |System-table "code" (like sys-tbl-code)                 |
+	+-----------+-----------+--------------------------------------------------------+
+	|  Out      |String 30  |Description (like sys-description)                      |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvsuot-get-user-description 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	Essentially the same as -get-sys-description, but from system-user-only-table.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|  In       |String 10  |suot "type" (like suot-tbl-type)                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|  In       |String 20  |suot "code" (like suot-tbl-code)                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|  Out      |String 60  |Description (like suot-description)                     |
+	+-----------+-----------+--------------------------------------------------------+
+
+
+clibvsuot-help-and-select 
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	This is a simple "select from list" screen.   You pass the SUOT type entry,
+	A datagrid of the code and description is displayed to the user and the user can select
+	one.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|  In       |String 10  |suot "type" (like suot-tbl-type)                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|  Out      |String 20  |User selected suot "code" (like suot-tbl-code)          |
+	+-----------+-----------+--------------------------------------------------------+
+
+
+clibvsuot-setup-key 
+~~~~~~~~~~~~~~~~~~~~
+	Use this routine to check and auotmatically setup new record types in suot.
+	It will add or maintain records in system-user-only-table-types
+
+	Usually followed by one or more calls to -set-heading
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 10  |Suot "type"                                             |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |String 60  |Description of this TYPE of record                      |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |Number     |As per suott-maint-option.  must be 1 or 2              |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |Number     |Minimum Code Size                                       |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |Number     |Maximum Code Size                                       |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |String 1   |Must be either "A" or "N"                               |
+	|           |           |                                                        |
+	|           |           | - A) Alphanumeric                                      |
+	|           |           | - N) Numeric Only                                      |
+	|           |           |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvsuot-set-heading 
+~~~~~~~~~~~~~~~~~~~~~
+
+	Call this routine to set the field titles of the field values stored in the 
+	system-user-only-table.   This routine updates system-user-only-table-type records.
+
+	Usually preceded by calls to -setup-key
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|  In       |String 10  |SUOT ("type")                                           |
+	+-----------+-----------+--------------------------------------------------------+
+	|  In       |String 4   |See table below for options                             |
+	+-----------+-----------+--------------------------------------------------------+
+	|  In       |String 20  |The field title                                         |
+	+-----------+-----------+--------------------------------------------------------+
+
+	Table of valid values for the field code (second parameter)
+
+	=========== ==================================================================== 
+	 Code           Description                                             
+	=========== ==================================================================== 
+	 D1             suott-title-date1
+	 D2             suott-title-date2
+	 D3             suott-title-date3
+	 D4             suott-title-date4
+	 D5             suott-title-date5
+	 DT1            suott-title-datetime1
+	 DT2            suott-title-datetime2
+	 DT3            suott-title-datetime3
+	 DT4            suott-title-datetime4
+	 DT1            suott-title-datetime5
+	 N1             suott-title-numeric1
+	 N2             suott-title-numeric2
+	 N3             suott-title-numeric3
+	 N4             suott-title-numeric4
+	 N5             suott-title-numeric5
+	 A41            suott-title-alpha41
+	 A42            suott-title-alpha42
+	 A43            suott-title-alpha43
+	 A44            suott-title-alpha44
+	 A45            suott-title-alpha45
+	 A201           suott-title-alpha201
+	 A202           suott-title-alpha202
+	 A203           suott-title-alpha203
+	 A204           suott-title-alpha204
+	 A205           suott-title-alpha205
+	 DESC           The description field (used in set-value only)
+	=========== ==================================================================== 
+
+clibvsuot-set-value 
+~~~~~~~~~~~~~~~~~~~
+
+	Use this routine to set the VALUES in the system-user-only-table.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	| In        |String 10  |SUOT "TYPE"                                             |
+	+-----------+-----------+--------------------------------------------------------+
+	| In        |Strign 20  |SUOT "Code"                                             |
+	+-----------+-----------+--------------------------------------------------------+
+	| In        |String 4   |A code for the value you want to update.  see           |
+	|           |           |Set heading for a table containing the list of valid    |
+	|           |           |Values                                                  |
+	+-----------+-----------+--------------------------------------------------------+
+	| In        |String 40  |The value you want placed on the record                 |
+	|           |           |                                                        |
+	|           |           |Note that all values are passed as a string and         |
+	|           |           |converted in the clib.  Therefore numerics and dates    |
+	|           |           |Must be able to be converted to the native data types.  |
+	|           |           |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+
+*/
+ 
+#include "../include/i8proglogparam.spl"
+
+#define ADDR_ARRAY_SIZE 7
+
+field
+	ws-last-error							pic x(1024) type string
+
+mode md-select
+	prompt "Select"
+
+procedure library-init
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8proglogparam-write-log parameters are "clibvsuot"
+end-procedure
+
+procedure clibvsuot-get-sys-description export
+parameters
+	lp-type							like sys-tbl-type
+	lp-code							like sys-tbl-code
+returning
+	lr-description					like sys-description
+//
+	get system-table
+		on index sys-tbl-type sys-tbl-code
+		key is lp-type lp-code
+	on error ENOREC
+		set ws-last-error = "No record of specified key"
+		set lr-description = "** Unknown **"
+		exit 1
+	else
+		set lr-description = sys-description
+	endon
+end-procedure
+
+procedure clibvsuot-get-last-error export
+returning
+	lr-message							like ws-last-error
+	set lr-message = ws-last-error
+end-procedure
+
+procedure clibvsuot-get-user-description export
+parameters
+	lp-type							like suot-tbl-type
+	lp-code							like suot-tbl-code
+returning
+	lr-description					like suot-description
+//
+	get system-user-only-table
+		on index suot-tbl-type suot-tbl-code
+		key is lp-type lp-code
+	on error ENOREC
+		set ws-last-error = "No record of specified key"
+		set lr-description = "** Unknown **"
+		exit 1
+	else
+		set lr-description = suot-description
+	endon
+end-procedure
+
+screen clibvsuot-help-and-select export
+parameters
+	lp-tbl-type						like suot-tbl-type
+returning
+	lr-tbl-code						like suot-tbl-code
+//
+	window @1,1 to @10,40
+		window-position 5
+	datagrid occurs 8
+	select *
+		from system-user-only-table
+		where suot-tbl-type = :lp-tbl-type
+	allowed md-select search 
+detail
+	if screenmode = md-select
+		set lr-tbl-code = suot-tbl-code
+		exit
+	endif
+	accept suot-tbl-code @1,1 pic x(10)
+		title "Code"
+		when screenmode = search
+		show-value
+	display suot-description @1,2 pic x(30)
+		title "Description"
+end-screen
+
+procedure clibvsuot-setup-key export
+// Use this routine to check and auotmatically setup keys
+parameters
+	lp-key-type							like suot-tbl-type
+	lp-desc								like suott-description
+	lp-maint-option						like suott-maint-option
+	lp-min-code-size					like suott-min-code-size
+	lp-max-code-size					like suott-max-code-size
+	lp-code-format						like suott-code-format
+	//
+	set lp-key-type = uppercase(lp-key-type)
+	//
+	// Validate
+	//
+	if lp-maint-option not in (1,2)
+		set ws-last-error = "Maint Option neither 1 nor 2"
+		exit 1
+	endif
+	if lp-min-code-size < 1 or lp-min-code-size > 20
+		set ws-last-error = "Min Code size invalid"
+		exit 1
+	endif
+	if lp-max-code-size < 1 or lp-max-code-size > 20
+		set ws-last-error = "Max Code size invalid"
+		exit 1
+	endif
+	if lp-code-format not in ("A" "N")
+		set ws-last-error = "Code format neither A nor N"
+		exit 1
+	endif
+	get system-user-only-table-types
+		on index suot-tbl-type
+		key is lp-key-type
+		lock
+	on error ENOREC
+		initialise system-user-only-table-types
+		set suot-tbl-type = lp-key-type
+		set suott-description = lp-desc
+		set suott-maint-option = lp-maint-option
+		set suott-min-code-size = lp-min-code-size
+		set suott-max-code-size = lp-max-code-size
+		set suott-code-format = lp-code-format
+		insert system-user-only-table-types
+		on error
+			set ws-last-error = error-description(file-status())
+			exit 1
+		endon
+	else
+		set suott-description = lp-desc
+		set suott-maint-option = lp-maint-option
+		set suott-min-code-size = lp-min-code-size
+		set suott-max-code-size = lp-max-code-size
+		set suott-code-format = lp-code-format
+		update system-user-only-table-types
+		on error
+			set ws-last-error = error-description(file-status())
+			exit 1
+		endon
+	endon
+end-procedure
+
+procedure clibvsuot-set-heading export
+parameters
+	lp-key-type							like suot-tbl-type
+	lp-heading-type						pic xxxx  // see code for available types
+	lp-heading							like suott-title-date1 // doesn't matter - all titles are the same
+	//
+	set lp-key-type = uppercase(lp-key-type)
+//	
+	get system-user-only-table-types
+		on index suot-tbl-type
+		key is lp-key-type
+		lock
+	on error
+		set ws-last-error = "Invalid Type"
+		exit 1
+	endon
+	switch uppercase(lp-heading-type)
+	case "D1"
+		set suott-title-date1 = lp-heading
+	case "D2"
+		set suott-title-date2 = lp-heading
+	case "D3"
+		set suott-title-date3 = lp-heading
+	case "D4"
+		set suott-title-date4 = lp-heading
+	case "D5"
+		set suott-title-date5 = lp-heading
+	case "DT1"
+		set suott-title-datetime1 = lp-heading
+	case "DT2"
+		set suott-title-datetime2 = lp-heading
+	case "DT3"
+		set suott-title-datetime3 = lp-heading
+	case "DT4"
+		set suott-title-datetime4 = lp-heading
+	case "DT1"
+		set suott-title-datetime5 = lp-heading
+	case "N1"
+		set suott-title-numeric1 = lp-heading
+	case "N2"
+		set suott-title-numeric2 = lp-heading
+	case "N3"
+		set suott-title-numeric3 = lp-heading
+	case "N4"
+		set suott-title-numeric4 = lp-heading
+	case "N5"
+		set suott-title-numeric5 = lp-heading
+	case "A41"
+		set suott-title-alpha41 = lp-heading
+	case "A42"
+		set suott-title-alpha42 = lp-heading
+	case "A43"
+		set suott-title-alpha43 = lp-heading
+	case "A44"
+		set suott-title-alpha44 = lp-heading
+	case "A45"
+		set suott-title-alpha45 = lp-heading
+	case "A201"
+		set suott-title-alpha201 = lp-heading
+	case "A202"
+		set suott-title-alpha202 = lp-heading
+	case "A203"
+		set suott-title-alpha203 = lp-heading
+	case "A204"
+		set suott-title-alpha204 = lp-heading
+	case "A205"
+		set suott-title-alpha205 = lp-heading
+	else
+		unlock system-user-only-table-types
+		set ws-last-error = "invalid title type"
+		exit 1
+	end-switch
+	update system-user-only-table-types
+	on error
+		set ws-last-error = error-description(file-status())
+		exit 1
+	endon
+end-procedure
+
+procedure clibvsuot-set-value export
+parameters
+	lp-key-type							like suot-tbl-type
+	lp-key-value						like suot-tbl-code
+	lp-value-type						pic xxxx  // see code for available types
+	// all values are string must be able to be converted to their appropriate types
+	lp-value							type string 
+	//
+	set lp-key-type = uppercase(lp-key-type)
+	//
+	get system-user-only-table-types
+		on index suot-tbl-type
+		key is lp-key-type
+	on error ENOREC
+		set ws-last-error = "Key type invalid"
+		exit 1
+	endon
+	if suott-code-format = "N"
+		if not valid-number(lp-key-value)
+			set ws-last-error = "Key value not a valid numeric"
+			exit 1
+		endif
+	endif
+	get system-user-only-table
+		on index suot-tbl-type suot-tbl-code
+		key is lp-key-type lp-key-value
+		lock
+	on error ENOREC
+		initialise system-user-only-table
+		set suot-tbl-type = lp-key-type
+		set suot-tbl-code = lp-key-value
+		do set-suot-values parameters are lp-value-type lp-value
+		if exit-status != EXIT_NORMAL
+			exit 1
+		endif
+		insert system-user-only-table
+		on error
+			set ws-last-error = error-description(file-status())
+			exit 1
+		endon
+	else
+		do set-suot-values parameters are lp-value-type lp-value
+		if exit-status != EXIT_NORMAL
+			exit 1
+		endif
+		update system-user-only-table
+		on error
+			set ws-last-error = error-description(file-status())
+			exit 1
+		endon
+	endon
+end-procedure
+
+procedure set-suot-values
+parameters
+	lp-value-type						pic xxxx  // see code for available types
+	// all values are string must be able to be converted to their appropriate types
+	lp-value							type string 
+local
+	lf-date								like suot-date1
+	lf-datetime							like suot-datetime1
+	lf-num								like suot-numeric1
+	lf-work1							type string pic x(256)
+	lf-time								type time
+	//
+	//     ************************************************************
+	//     *  Assumes currency on system-user-only-table              *
+	//     ************************************************************
+	//
+	// verify and conver
+	switch uppercase(lp-value-type)
+	case  'D1' 'D2' 'D3' 'D4' 'D5'
+		set lf-date = date2julian(lp-value)
+		if lf-date = 0
+			set ws-last-error = "Invalid date"
+			exit 1
+		endif
+	case  'DT1' 'DT2' 'DT3' 'DT4' 'DT5'
+		// must be two words with date and time
+		set lp-value = ltrim(lp-value)
+		set lf-work1 = spaces
+		while lp-value != spaces and substring(lp-value,1,1) != spaces
+			string lf-work1 appending substring(lp-value,1,1)
+			string lp-value deleting 1
+		end-while
+		// should now have a date
+		if lf-work1 = spaces
+			set ws-last-error = "Date is spaces after removing from input string"
+			exit 1
+		endif
+		// try to convert
+		set lf-date = date2julian(lf-work1)
+		// if not valid exit
+		if lf-date = 0
+			set ws-last-error = str-concat("Extracted Date is not valid (" lf-work1 ")")
+			exit 1
+		endif
+		// now deal with the time
+		set lp-value = ltrim(lp-value)
+		set lf-work1 = spaces
+		while lp-value != spaces and substring(lp-value,1,1) != spaces
+			string lf-work1 appending substring(lp-value,1,1)
+			string lp-value deleting 1
+		end-while
+		// should now have a time
+		if lf-work1 = spaces
+			set ws-last-error  = concat("Extracted value is empty(" lf-work1 ")")
+			exit 1
+		endif
+		// try to convert
+		set lf-time = num(substring(lf-work1,1,2)) * 3600
+		set lf-time += num(substring(lf-work1,4,5)) * 60
+		set lf-time += num(substring(lf-work1,7,8)) 
+		// if not valid exit
+		if format-picture(lf-time, "HH:MM:SS") != lf-work1
+			set ws-last-error = concat("Extracted time is not the same as input")
+			exit 1
+		endif
+		// put it all together
+		set lf-datetime = datetime(lf-date,lf-time,FALSE)
+		if lf-datetime = 0
+			set ws-last-error = str-concat("Extracted datetime is zero :"
+							format-picture(lf-date,"dd-mmm-yyyy")
+							"-"
+							format-picture(lf-time,"HH:MM:SS")
+							"-"
+							str(lf-datetime))
+			exit 1
+		endif
+	case  'N1' 'N2' 'N3' 'N4' 'N5'
+		if not valid-number(lp-value)
+			set ws-last-error = "Numeric value is not a number"
+			exit 1
+		endif
+		set lf-num = num(lp-value)
+	case  'A41' 'A42' 'A43' 'A44' 'A45'
+		if str-len(lp-value) > 4
+			set ws-last-error = "Alpha 4 value too long"
+			exit 1
+		endif
+	case  'A201' 'A202' 'A203' 'A204' 'A205'
+		if str-len(lp-value) > 20
+			set ws-last-error = "Alpha 20 value too long"
+			exit 1
+		endif
+	case "DESC"
+		if str-len(lp-value) > size-of(suot-description)
+			set ws-last-error = "Description value too long"
+			exit 1
+		endif
+	else
+		set ws-last-error = "Unknown Field Code"
+		exit 1
+	end-switch
+	// now set
+	switch uppercase(lp-value-type)
+	case "DESC"
+		set suot-description = lp-value
+	case "D1"
+		set suot-date1 = lf-date
+	case "D2"
+		set suot-date2 = lf-date
+	case "D3"
+		set suot-date3 = lf-date
+	case "D4"
+		set suot-date4 = lf-date
+	case "D5"
+		set suot-date5 = lf-date
+	case "DT1"
+		set suot-datetime1 = lf-datetime
+	case "DT2"
+		set suot-datetime2 = lf-datetime
+	case "DT3"
+		set suot-datetime3 = lf-datetime
+	case "DT4"
+		set suot-datetime4 = lf-datetime
+	case "DT1"
+		set suot-datetime5 = lf-datetime
+	case "N1"
+		set suot-numeric1 = lf-num
+	case "N2"
+		set suot-numeric2 = lf-num
+	case "N3"
+		set suot-numeric3 = lf-num
+	case "N4"
+		set suot-numeric4 = lf-num
+	case "N5"
+		set suot-numeric5 = lf-num
+	case "A41"
+		set suot-alpha-4-1 = lp-value
+	case "A42"
+		set suot-alpha-4-2 = lp-value
+	case "A43"
+		set suot-alpha-4-3 = lp-value
+	case "A44"
+		set suot-alpha-4-4 = lp-value
+	case "A45"
+		set suot-alpha-4-5 = lp-value
+	case "A201"
+		set suot-alpha-20-1 = lp-value
+	case "A202"
+		set suot-alpha-20-2 = lp-value
+	case "A203"
+		set suot-alpha-20-3 = lp-value
+	case "A204"
+		set suot-alpha-20-4 = lp-value
+	case "A205"
+		set suot-alpha-20-5 = lp-value
+	else
+		set ws-last-error = "Unknown field code"
+		exit 1
+	end-switch
+end-procedure
+

@@ -1,0 +1,380 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : Clib for db analysis
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2014
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: clib/clibvgqrya.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 10Nov14  rjb         written 
+//
+// Usage -
+/*
+
+/*
+
+	This documentation is in RST format.  To view this as a nice pdf goto
+	https://overbits.herokuapp.com/rsteditor/ or rst.ninjs.org and paste this content.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|           |           |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+
+	Alternatively
+
+	 =========== =========== ======================================================== 
+	  Direction   Data Type   Description                                             
+	 =========== =========== ======================================================== 
+	 =========== =========== ======================================================== 
+
+========
+clibvdba
+========
+
+Database Base Analysis Report
+
+This clib is useful for debugging pronto sql calls.  IT will set the session
+into explain mode (i.e. tracking of the query plan).
+
+When you turn off tracking, iy will print the query plan in a standard pronto
+xml report.
+
+.. Note:: You must have DBA authority in the pronto user profile for this to work.
+
+There are two ways to use it.  Either you can wrap your query in clibvgdba-on
+and clibvgdba-off pairs.  Alternative you make a single call to
+
+	do clibvgdba-set-single-spool-file
+
+to get a single spool file with all analysis rather than one spool file per
+on/off combination.
+
+Sample Code
+-----------
+
+::
+
+	procedure print-test1
+		do clibvgdba-on parameters "Simple Select"
+		select 
+			*
+			from stock-master
+			where stock-code = 'EQ100'
+			order by stock-code
+		detail
+			print stock-code
+				stk-description
+		end-select
+		do clibvgdba-off
+	end-procedure
+
+.. Warning:: BIG    WARNING.
+	  The output of the set explain is in two parts.  The first is the      
+	  qery that will be executed and the second is the query statistics.    
+	                                                                        
+	  I cannot explain why but often the query statistics lags behind the   
+	  query so if you run 3 queries in sequence you may get the first two   
+	  queries followed by the statistics for q1 AFTER q2 and the statistics 
+	  for Q2 after the stats for Q1 and then Q3.                            
+	                                                                        
+	  If you use different where clauses in each qry then you might be able 
+	  to work out which is which.                                           
+
+clibvgdba-on 
+~~~~~~~~~~~~
+
+	Start the analysis (turn set explain on)
+
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 80  |The report Title                                        |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvgdba-off
+~~~~~~~~~~~~~
+
+	Turn set explain off and print the analysis
+
+	No Parameters
+
+clibvgdba-set-single-spool-file 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	Set a Single Spool file.
+
+	No Parameters
+
+clibvgdba-insert-comment 
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+	Simply write a comment into the output stream
+
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 132 |The text of the comment                                 |
+	+-----------+-----------+--------------------------------------------------------+
+
+*/
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/i8proglogparam.spl"
+
+#define ADDTEXT(A)\
+	set tf-line = A \
+	insert text-file \
+	on error \
+	endon 
+
+#define REPORT_WIDTH 132
+
+field
+	ws-query-plan-file					pic x(1024) type string
+	ws-title							pic x(80) type string
+	ws-single-spool-file				type boolean
+	ws-report-started					type boolean
+	ws-session-id						type number
+	ws-counter							type number
+
+object text-file
+	type is text
+	record is 
+		tf-line							pic x(16000) type varchar
+	end-record
+
+object dbs-syssessions
+	type is db-sequential
+	file is "/sysmaster/informix.syssessions"
+	record is
+		dss_sid							type number db-column-name "sid" //
+		dss_username					pic x(32) db-column-name "username" //
+		dss_uid							type number db-column-name "uid" //
+		dss_pid							type number db-column-name "pid" //
+		dss_hostname					pic x(256) db-column-name "hostname" //
+		dss_tty							pic x(16) db-column-name "tty" //
+		dss_connected					type number db-column-name "connected" //
+		dss_feprogram					pic x(256) db-column-name "feprogram" //
+		dss_pooladdr					type number db-column-name "pooladdr" //
+		dss_is_wlatch					type number db-column-name "is_wlatch" //
+		dss_is_wlock					type number db-column-name "is_wlock" //
+		dss_is_wbuff					type number db-column-name "is_wbuff" //
+		dss_is_wckpt					type number db-column-name "is_wckpt" //
+		dss_is_wlogbuf					type number db-column-name "is_wlogbuf" //
+		dss_is_wtrans					type number db-column-name "is_wtrans" //
+		dss_is_monitor					type number db-column-name "is_monitor" //
+		dss_is_incrit					type number db-column-name "is_incrit" //
+		dss_state						type number db-column-name "state" //
+	end-record
+	no-rowid
+
+object dbs-syssqexplain
+	type is db-sequential
+	file is "/sysmaster/informix.syssqexplain"
+	record is
+		sqx_sessionid					type number db-column-name "sqx_sessionid"
+		sqx_sdbno						type number db-column-name "sqx_sdbno"
+		sqx_iscurrent					pic x(1) db-column-name "sqx_iscurrent"
+		sqx_executions					type number db-column-name "sqx_executions"
+		sqx_cumtime						type number db-column-name "sqx_cumtime"
+		sqx_bufreads					type number db-column-name "sqx_bufreads"
+		sqx_pagereads					type number db-column-name "sqx_pagereads"
+		sqx_bufwrites					type number db-column-name "sqx_bufwrites"
+		sqx_pagewrites					type number db-column-name "sqx_pagewrites"
+		sqx_totsorts					type number db-column-name "sqx_totsorts"
+		sqx_dsksorts					type number db-column-name "sqx_dsksorts"
+		sqx_sortspmax					type number db-column-name "sqx_sortspmax"
+		sqx_conbno						type number db-column-name "sqx_conbno"
+		sqx_ismain						pic x(1) db-column-name "sqx_ismain"
+		sqx_selflag						pic x(200) type varchar db-column-name "sqx_selflag"
+		sqx_estcost						type number db-column-name "sqx_estcost"
+		sqx_estrows						type number db-column-name "sqx_estrows"
+		sqx_seqscan						type number db-column-name "sqx_seqscan"
+		sqx_srtscan						type number db-column-name "sqx_srtscan"
+		sqx_autoindex					type number db-column-name "sqx_autoindex"
+		sqx_index						type number db-column-name "sqx_index"
+		sqx_remsql						type number db-column-name "sqx_remsql"
+		sqx_mrgjoin						type number db-column-name "sqx_mrgjoin"
+		sqx_dynhashjoin					type number db-column-name "sqx_dynhashjoin"
+		sqx_keyonly						type number db-column-name "sqx_keyonly"
+		sqx_tempfile					type number db-column-name "sqx_tempfile"
+		sqx_tempview					type number db-column-name "sqx_tempview"
+		sqx_secthreads					type number db-column-name "sqx_secthreads"
+		sqx_sqlstatement				pic x(15960) type varchar db-column-name "sqx_sqlstatement" 
+	end-record
+	no-rowid
+
+procedure library-init
+	do i8proglogparam-write-log parameters are "clibvgdba"
+	set ws-query-plan-file = concat('/tmp/qrya',str(pid()),".txt")
+	get system-control first
+	set ws-single-spool-file = FALSE
+	set ws-report-started = FALSE
+	set ws-counter = 0
+end-procedure
+
+procedure main
+	set ws-query-plan-file = concat('/tmp/qrya',str(pid()),".txt")
+	get system-control first
+	set ws-single-spool-file = FALSE
+	set ws-report-started = FALSE
+	set ws-counter = 0
+	do testcases
+end-procedure
+
+procedure report-header
+	print company-name in col 1
+		ws-title in col (REPORT_WIDTH / 2) - (str-len(ws-title) / 2)
+		sys-time in col REPORT_WIDTH - 30
+		"Page " in col REPORT_WIDTH - 10
+		pageno pic z(4) in col REPORT_WIDTH - 5
+	skip
+end-procedure
+
+procedure print-error
+parameters are
+	lp-text								pic x(REPORT_WIDTH) type string
+local
+	lf-lhs								type number
+	lf-stars							pic x(REPORT_WIDTH) type string
+	skip
+	set lf-stars = REPORT_WIDTH"*"
+	set lf-lhs = (REPORT_WIDTH / 2) - ((str-len(lp-text) + 4) / 2)
+	print substring(lf-stars,1,(str-len(lp-text) + 4)) in col lf-lhs
+	print "*" in col lf-lhs
+		lp-text
+		"*" in col lf-lhs + str-len(lp-text) + 3
+	print substring(lf-stars,1,(str-len(lp-text) + 4)) in col lf-lhs
+	skip
+end-procedure
+
+procedure print-sessions
+	open dbs-syssessions
+	select * from dbs-syssessions
+		where dss_pid = pid()
+	detail
+		print "Session ID:" dss_sid
+			print dss_username in col 10
+			print dss_hostname in col 10
+			print dss_feprogram in col 10
+	end-select
+	set ws-session-id = dss_sid
+end-procedure
+
+procedure clibvgdba-set-single-spool-file export
+	do start-report parameters are "Analysis of Database Calls"
+	set ws-single-spool-file = true
+	do print-sessions
+end-procedure
+
+procedure start-report
+parameters	
+	lp-name								pic x(80) type string
+	if not ws-single-spool-file
+		report lp-name
+			header report-header
+			width is REPORT_WIDTH
+//			no-xml
+	endif
+	if ws-title <> spaces
+		page
+	endif
+	set ws-report-started = TRUE
+end-procedure
+
+procedure clibvgdba-insert-comment export
+parameters
+	lp-text								pic x(REPORT_WIDTH) type string
+local
+	lf-stars							pic x(REPORT_WIDTH) type string
+	set lf-stars = REPORT_WIDTH"*"
+	string lf-stars replacing lp-text at
+		( (REPORT_WIDTH / 2) - str-len(lp-text) / 2 )
+	ADDTEXT(lf-stars)
+end-procedure
+
+procedure clibvgdba-on export
+parameters are 
+	lf-title							pic x(80) type string
+	set ws-title = lf-title // so you can use it on the heading
+	set ws-counter += 1
+	set ws-query-plan-file = concat('/tmp/qrya',str(pid()),"_",str(ws-counter),".txt")
+	do start-report parameters are concat("Analysis of " lf-title)
+	open text-file
+		file is ws-query-plan-file
+		create truncate permanent
+	on error
+		do print-error parameters concat("Could not initialise " file-name(text-file) error-description(file-status))
+	endon
+	if  db-command(strconcat("set explain file to '" ws-query-plan-file "'" ))
+		do print-error parameters "Could not set explain - do you have dba permissions?"
+	endif
+end-procedure
+
+procedure clibvgdba-off export
+local
+	i									type number
+	if db-command("set explain off")
+		do print-error parameters "Could not turn set explain off"
+	endif
+	open text-file
+		file is ws-query-plan-file
+	on error
+		do print-error parameters concat("Cannot open query plan:" file-name(text-file) error-description(file-status()))
+		exit
+	endon
+	/*
+	open dbs-syssqexplain
+	select * from dbs-syssqexplain
+		where sqx_sessionid = :ws-session-id
+	detail
+		print sqx_sqlstatement
+	end-select
+	*/
+	select * from text-file
+	detail
+		while str-len(tf-line) > 132
+			for i = 132 down to 1
+				if substring(tf-line,i,i) in (space, ",", ";",chr(9))
+					print substring(tf-line,1,i)
+					string tf-line deleting 1 to i
+					break
+				endif
+			end-for
+		end-while
+		print tf-line
+	end-select
+	if not ws-single-spool-file
+		report finished
+	endif
+	close text-file //and remove
+end-procedure
+
+//--------------------------------------------------------------------------------
+//                 Test cases
+//--------------------------------------------------------------------------------
+//
+procedure testcases
+	do clibvgdba-on parameters "Simple Select"
+	select 
+		*
+		from stock-master
+		where stock-code = 'EQ100'
+		order by stock-code
+	detail
+		print stock-code
+			stk-description
+	end-select
+	do clibvgdba-off
+	message "Complete - press f5 to see report"
+end-procedure

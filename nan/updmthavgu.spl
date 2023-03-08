@@ -1,0 +1,556 @@
+////////////////////////////////////////////////////////////////////////////////
+//updmthavgu.spl -Update Monthly Average Usage
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2010
+//
+// PRONTO is a registered trademark of Prometheus Software Developments P/L.
+//
+// All Rights Reserved. Unauthorised copying is prohibited.
+//=========================================================================//
+//
+// Modification History
+// Date		Who	SDR		What
+////////////////////////////////////////////////////////////////////////////////
+
+#define NO_OF_SELECTION_PARAMETERS '9'
+#define REPORT_NAME 'Update Monthly Average Usage'
+
+#include "../include/i8proglog.spl"
+#include "../include/i8secabt.spl"
+#include "../include/rbtchproc.spl"
+
+
+field
+	ws-function-title					pic x(80) type string
+	ws-excel-flag						pic x
+	ws-start-whse						pic x(4)
+	ws-end-whse							pic x(4)
+	ws-start-group						pic x(4)
+	ws-end-group						pic x(4)
+	ws-start-stock-code					pic x(16)
+	ws-end-stock-code					pic x(16)
+	ws-start-brand						pic x(10)
+	ws-end-brand						pic x(10)
+	ws-update-mode						type boolean
+	ws-start-time						type date-time
+	ws-end-time							type date-time
+	ws-last-stock-code					like stock-code
+	ws-last-stock-desc					like stk-description
+	ws-include-usage					type boolean
+
+procedure main
+	get system-control first
+	get system-user-control	
+		on index user-id											
+		key is login-id()
+	on error														
+	endon															
+//	do i8secabt-check-abort parameters
+//		sys-consolidation-division login-id() "ZVG" "T005"
+//			returning ws-function-title
+	set ws-report-started = FALSE
+	do i8proglog-write-log
+	RBTCHPROC_RUN_PROGRAM(REPORT_NAME)
+endprocedure //main ------------------------------------------------------------
+
+screen rbtchproc-report-parameters
+	allow entry
+	window @1,1 to @24,80
+	title "Update Monthly Average Usage"
+	responsive
+before
+	set ws-start-whse = min-value(ws-start-whse)
+	set ws-end-whse = max-value(ws-end-whse)
+	set ws-start-group = min-value(ws-start-group)
+	set ws-end-group = max-value(ws-end-group)
+	set ws-start-stock-code = min-value(ws-start-stock-code)
+	set ws-end-stock-code = max-value(ws-end-stock-code)
+	set ws-start-brand = min-value(ws-start-brand)
+	set ws-end-brand = max-value(ws-end-brand)
+	set ws-update-mode = max-value(ws-update-mode)
+	set ws-include-usage = TRUE
+detail
+	screen-group // ---- Parameters ----------------------------
+		title "Parameters"  // The title is optional
+		field-group // ---- Whse ----------------------------
+			title "Whse Range"  // Title is optional
+			accept ws-start-whse 
+				// add remove following lines as necessary
+				title 'From'
+				optional
+				help "Warehouse Range"
+				uppercase
+				default ws-start-whse
+			before-accept
+			end-before-accept
+			accept ws-end-whse 
+				// add remove following lines as necessary
+				title 'To'
+				optional
+				help "To"
+				uppercase
+				fill with trailing '~'
+				default ws-end-whse
+			before-accept
+				set ws-end-whse = max-value(ws-end-whse)
+				string ws-end-whse replacing str-concat(ws-start-whse) at 1
+			end-before-accept
+		end-field-group // ---- Whse --------------------------------------
+		field-group // ---- Stock Group Range ----------------------------
+			title "Stock Group Range"  // Title is optional
+			accept ws-start-group 
+				// add remove following lines as necessary
+				title 'From'
+				optional
+				help "Group Range"
+				uppercase
+				default ws-start-group
+			before-accept
+			end-before-accept
+			accept ws-end-group 
+				// add remove following lines as necessary
+				title 'To'
+				optional
+				help "To"
+				uppercase
+				fill with trailing '~'
+				default ws-end-group
+			before-accept
+				set ws-end-group = max-value(ws-end-group)
+				string ws-end-group replacing str-concat(ws-start-group) at 1
+			end-before-accept
+		end-field-group // ---- Stock Group Range --------------------------------------
+		field-group // ---- Stock Code ----------------------------
+			title "Stock Code"  // Title is optional
+			accept ws-start-stock-code 
+				// add remove following lines as necessary
+				title 'From'
+				optional
+				help "Stock Code Range"
+				uppercase
+				default ws-start-stock-code
+			before-accept
+			end-before-accept
+			accept ws-end-stock-code 
+				// add remove following lines as necessary
+				title 'To :'
+				optional
+				help "To"
+				uppercase
+				fill with trailing '~'
+				default ws-end-stock-code
+			before-accept
+				set ws-end-stock-code = max-value(ws-end-stock-code)
+				string ws-end-stock-code replacing str-concat(ws-start-stock-code) at 1
+			end-before-accept
+		end-field-group // ---- Stock Code --------------------------------------
+		field-group // ---- Brand Range ----------------------------
+			title "Brand Range"  // Title is optional
+			accept ws-start-brand 
+				title 'From'
+				optional
+				help "Brand Range"
+				uppercase
+				default ws-start-brand
+			before-accept
+			end-before-accept
+			accept ws-end-brand 
+				// add remove following lines as necessary
+				title 'To'
+				optional
+				help "To"
+				uppercase
+				fill with trailing '~'
+				default ws-end-brand
+			before-accept
+				set ws-end-brand = max-value(ws-end-brand)
+				string ws-end-brand replacing str-concat(ws-start-brand) at 1
+			end-before-accept
+		end-field-group // ---- Brand Range --------------------------------------
+		check-box ws-include-usage		
+			values true false
+			title "Include Usage"
+			right-coordinate
+			default is ws-include-usage
+		end-check-box 
+		check-box ws-update-mode
+			values TRUE FALSE
+			title "Update Mode"
+			right-coordinate
+			default is  FALSE
+			when ws-excel-flag <> "D"
+		end-check-box 
+	end-screen-group // ---- Parameters --------------------------------------
+	screen-group // ---- options ----------------------------
+		title "options"  // The title is optional
+		field-group // ---- Output ----------------------------
+			title "Output"  // Title is optional
+			radio-button ws-excel-flag
+				NO title "No Export"
+				"D" title "View Datagrid"
+				default "NO"
+				help "N)o export D)isplay data as a datagrid"
+			on change
+				if ws-excel-flag = "D"
+					set ws-update-mode = false
+					refresh ws-update-mode
+				endif
+			endon
+		end-field-group // ---- Output --------------------------------------
+	end-screen-group // ---- options --------------------------------------
+	confirm auto
+	confirmed
+		if ws-excel-flag = "D"
+			do display-datagrid
+		else
+			RBTCHPROC_EXECUTION
+		endif
+	endconfirm
+endscreen //rbtchproc-report-parameters --------------------------------------
+
+procedure rbtchproc-set-parameters
+	RBTCHPROC_LOAD_SET_ALPHA(ws-start-whse)
+	RBTCHPROC_LOAD_SET_ALPHA(ws-end-whse)
+	RBTCHPROC_LOAD_SET_ALPHA(ws-start-group)
+	RBTCHPROC_LOAD_SET_ALPHA(ws-end-group)
+	RBTCHPROC_LOAD_SET_ALPHA(ws-start-stock-code)
+	RBTCHPROC_LOAD_SET_ALPHA(ws-end-stock-code)
+	RBTCHPROC_LOAD_SET_ALPHA(ws-start-brand)
+	RBTCHPROC_LOAD_SET_ALPHA(ws-end-brand)
+	RBTCHPROC_LOAD_SET_NUM(ws-update-mode)
+	RBTCHPROC_LOAD_SET_NUM(ws-include-usage)
+endprocedure //rbtchproc-set-parameters --------------------------------------
+
+procedure start-report
+	set rbtchproc-report-name = REPORT_NAME
+	report rbtchproc-report-name		
+		header is skeleton-report-header
+		no-message
+		width 132
+		full-xml
+	set ws-report-started = TRUE
+	if rbtchproc-in-background
+		RBTCHPROC_MESSAGE_REPORT_STARTED
+	else
+		display 'Report :' @20,59 background right bold
+		display spool-file-name() @20,68 pic x(12) foreground prompts
+	endif
+	set ws-start-time = sys-time()
+endprocedure //start-report ----------------------------------------------------
+
+procedure skeleton-report-header
+	if report-is-xml()
+		report section "headings_section"
+	endif
+	print company-name col 1
+		rbtchproc-report-name col 51 bold
+		"Date:" col 85
+		tod() col 110
+		today() col 91
+		"Time:" col 104
+		'Page:' col 120
+		left-justify(str(page-no)) col 126 pic x(4)
+	skip
+	print
+		"Item" in col    1
+		"Whse" in col   19
+		"Item" in col   25
+		"ABC" in col   57
+		right-justify("Avg",15) in col   64 pic x(15) right
+		right-justify("Avg",15) in col   79 pic x(15) right
+		right-justify("Active",6) in col   100 pic x(6) right
+	set ws-last-stock-code = max-value(ws-last-stock-code)
+	set ws-last-stock-desc = max-value(ws-last-stock-desc)
+	print
+		"Code" in col    1
+		"Description" in col   25
+		"Class" in col   57
+		right-justify("Mth",15) in col   64 pic x(15) right
+		right-justify("Mth",15) in col   79 pic x(15) right
+		right-justify("mths",6) in col   100 pic x(6) right
+	print
+		right-justify("Demand",15) in col   64 pic x(15) right
+		right-justify("Demand",15) in col   79 pic x(15) right
+	print
+		right-justify("Old",15) in col   64 pic x(15) right
+		right-justify("New",15) in col   79 pic x(15) right
+	if report-is-xml()
+		report section finished
+	endif
+endprocedure //skeleton-report-header ------------------------------------------
+
+// Your main processing routine must be named as follows
+procedure rbtchproc-report-detail
+local
+	lf-rec-counter						type number
+	lf-old-usage						like whse-avg-monthly-demand
+	lf-new-usage						like whse-avg-monthly-demand
+	window @19,44 to @24,80
+	    title is "Report Progress"
+	    color white
+	    no-hide
+	if not rbtchproc-in-background
+		display bitmap concat(getenv('BMS')'/images/repedge.gif') @19,44
+		display spool-file-name() @20,68 pic x(12) foreground prompts
+		display "Now at :" @23,45 background prompts left
+	endif
+	//
+	do start-report
+	page
+	// SQL Generated from DI Project:150521072409:Update Monthly Average Usage
+	select
+		stock-master.stk-abc-class
+		stock-master.stk-brand
+		stock-master.stk-description
+		stock-master.stk-movement-code
+		stock-master.stk-stock-status
+		stock-master.stock-group
+		stock-warehouse-detail.stock-code
+		stock-warehouse-detail.whse-active-mths
+		stock-warehouse-detail.whse-avg-monthly-demand
+		stock-warehouse-detail.whse-code
+	from
+		stock-warehouse-detail
+		INNER JOIN stock-master
+			ON
+				stock-master.stock-code = stock-warehouse-detail.stock-code
+	WHERE stock-warehouse-detail.whse-code >= :ws-start-whse
+		AND stock-warehouse-detail.whse-code <= :ws-end-whse
+		AND stock-master.stock-group >= :ws-start-group
+		AND stock-master.stock-group <= :ws-end-group
+		AND stock-warehouse-detail.stock-code >= :ws-start-stock-code
+		AND stock-warehouse-detail.stock-code <= :ws-end-stock-code
+		AND stock-master.stk-brand >= :ws-start-brand
+		AND stock-master.stk-brand <= :ws-end-brand
+	ORDER BY
+		stock-master.stock-group,
+		stock-warehouse-detail.stock-code,
+		stock-warehouse-detail.whse-code
+	detail
+	BEFORE stock-master.stock-group
+// put the sub headings here
+		report section 'sub_head_1'
+		need 2
+		print
+			'Group:' in col 1
+			stock-group  in col   9 pic x(4)
+				tag is 'stock_group'
+		skip
+		report section finished
+	BEFORE stock-master.stock-group stock-warehouse-detail.stock-code
+	BEFORE stock-master.stock-group stock-warehouse-detail.stock-code stock-warehouse-detail.whse-code
+	detail
+		do reset parameters are stock-code whse-code
+			returning lf-old-usage lf-new-usage
+		report section 'detail_line'
+		print
+			if-then-else(ws-last-stock-code = stock-code ,spaces,stock-code) in col   1 pic x(16)
+				tag is 'stock_code'
+			whse-code  in col  19 pic x(4)
+				tag is 'whse_code'
+			if-then-else(ws-last-stock-desc = stk-description ,spaces,stk-description) in col   25 pic x(30)
+//			stk-description  in col  25 pic x(30)
+				tag is 'stk_description'
+			stk-abc-class  in col  57 pic x(1)
+				tag is 'stk_abc_class'
+			lf-old-usage  in col  64 pic -s(9).9999
+				tag is 'whse_avg_monthly_demand_old'
+			lf-new-usage  in col  79 pic -s(9).9999
+				tag is 'whse_avg_monthly_demand_new'
+			whse-active-mths  in col  100 pic z(2)
+				tag is 'whse_active_mths'
+		report section finished
+		set ws-last-stock-code = stock-code
+		set ws-last-stock-desc = stk-description
+		set lf-rec-counter += 1
+		if not rbtchproc-in-background
+			display "Printing Report" @20,59 background left bold
+			display stock-group @23,54 foreground prompts
+		endif
+	end-select
+	report section 'grand_total'
+	print 'GRAND TOTAL' nonewline
+		tag 'grand_total_prompt'
+	report section finished
+	do finish-report
+endprocedure //rbtchproc-report-detail ---------------------------------------
+
+procedure reset
+parameters
+	lp-stock-code						like stock-code
+	lp-whse-code						like whse-code
+returning
+	lr-old-usage						like whse-avg-monthly-demand
+	lr-new-usage						like whse-avg-monthly-demand
+local
+	lf-start-date						type date
+	lf-sales							type number
+	lf-sum								type number
+	lf-earliest-date					type date
+	//set the number of active months 
+	get stock-warehouse-detail lock
+		on index stock-code whse-code
+		key is lp-stock-code lp-whse-code
+	on error
+		exit
+	endon
+	set lr-old-usage = whse-avg-monthly-demand
+	select lf-earliest-date = min(stk-trans-date)
+		from stock-movements
+		where stock-code = :lp-stock-code
+		and stk-trans-whse = :lp-whse-code
+	end-select
+	if lf-earliest-date = 0
+		set whse-active-mths = 0
+	else
+		if lf-earliest-date < add-months(today(),-12,true)
+			set whse-active-mths = 12
+		else
+			set whse-active-mths = integer((today() - lf-earliest-date) / 30)
+		endif
+	endif
+	set lf-start-date = add-months(today(),(0 - whse-active-mths),true)
+	//calculate whse-avg-monthly-demand
+	if whse-active-mths != 0
+		set lf-sales = 0
+		select 
+			lf-sales = sum(0 - stk-trans-qty)
+			from stock-movements
+			where stk-trans-type = "SO" 
+				and stock-code = :stock-code
+				and stk-trans-date >= :lf-start-date
+				and stk-trans-whse = :whse-code
+		end
+		if ws-include-usage
+			select 
+			lf-sum = sum(0 - stk-trans-qty)
+			from stock-movements
+			where stk-trans-type = "MU" 
+				and stock-code = :stock-code
+				and stk-trans-date >= :lf-start-date
+				and stk-trans-whse = :whse-code
+			end
+		endif
+		set whse-avg-monthly-demand = (lf-sales + lf-sum) / whse-active-mths
+	endif
+	set lr-new-usage = whse-avg-monthly-demand
+	if ws-update-mode
+		update stock-warehouse-detail
+		on error
+			print "Could not update stock-warehouse-detail for stock code " 
+				stock-code
+		endon
+	endif
+end-procedure
+
+procedure finish-report
+	set ws-end-time = sys-time()
+	if report-is-xml()
+		page
+		report section "options_page"
+	endif
+	if ws-report-started
+		skip 2
+		print 'Options selected : ' col 2 no-newline
+			tag  'options_print'
+		print 'Warehouse Range               >= : ' in col 22
+			 tag is 'prompt_ws_start_whse'
+			ws-start-whse                  tag is 'ws_start_whse'
+		print 'To                            <= : ' in col 22
+			 tag is 'prompt_ws_end_whse'
+			ws-end-whse                    tag is 'ws_end_whse'
+		print 'Group Range                   >= : ' in col 22
+			 tag is 'prompt_ws_start_group'
+			ws-start-group                 tag is 'ws_start_group'
+		print 'To                            <= : ' in col 22
+			 tag is 'prompt_ws_end_group'
+			ws-end-group                   tag is 'ws_end_group'
+		print 'Stock Code Range              >= : ' in col 22
+			 tag is 'prompt_ws_start_stock_code'
+			ws-start-stock-code            tag is 'ws_start_stock_code'
+		print 'To                            <= : ' in col 22
+			 tag is 'prompt_ws_end_stock_code'
+			ws-end-stock-code              tag is 'ws_end_stock_code'
+		print 'Brand Range                   >= : ' in col 22
+			 tag is 'prompt_ws_start_brand'
+			ws-start-brand                 tag is 'ws_start_brand'
+		print 'To                            <= : ' in col 22
+			 tag is 'prompt_ws_end_brand'
+			ws-end-brand                   tag is 'ws_end_brand'
+		print 'Update Mode                   =  : ' in col 22
+			 tag is 'prompt_ws_update_mode'
+			if-then-else(ws-update-mode,"Update Mode Selected","Report only Mode")   tag is 'ws_update_mode'
+			tag  'options_print'
+		print 'Execution Time Start          >= : ' in col 22
+			 tag is 'prompt_ws_start_time'
+			ws-start-time                 tag is 'ws_start_time'
+		print 'Execution Time End            <= : ' in col 22
+			 tag is 'prompt_ws_end_time'
+			ws-end-time                   tag is 'ws_end_time'
+		skip
+	endif
+	if report-is-xml()
+		report section finished
+	endif
+	RBTCHPROC_SCREEN_FINISH_MESSAGE(ws-report-started,23,45)
+endprocedure //finish-report ---------------------------------------------------
+
+screen display-datagrid
+	window @1,1 to @24,80
+	title REPORT_NAME
+	datagrid occurs 22
+	// SQL Generated from DI Project:150521072409:Update Monthly Average Usage
+	select
+		stock-master.stk-abc-class
+		stock-master.stk-brand
+		stock-master.stk-description
+		stock-master.stk-movement-code
+		stock-master.stk-stock-status
+		stock-master.stock-group
+		stock-warehouse-detail.stock-code
+		stock-warehouse-detail.whse-active-mths
+		stock-warehouse-detail.whse-avg-monthly-demand
+		stock-warehouse-detail.whse-code
+	from
+		stock-warehouse-detail
+		INNER JOIN stock-master
+			ON
+				stock-master.stock-code = stock-warehouse-detail.stock-code
+	WHERE stock-warehouse-detail.whse-code >= :ws-start-whse
+		AND stock-warehouse-detail.whse-code <= :ws-end-whse
+		AND stock-master.stock-group >= :ws-start-group
+		AND stock-master.stock-group <= :ws-end-group
+		AND stock-warehouse-detail.stock-code >= :ws-start-stock-code
+		AND stock-warehouse-detail.stock-code <= :ws-end-stock-code
+		AND stock-master.stk-brand >= :ws-start-brand
+		AND stock-master.stk-brand <= :ws-end-brand
+	ORDER BY
+		stock-master.stock-group,
+		stock-warehouse-detail.stock-code,
+		stock-warehouse-detail.whse-code
+	allowed search
+detail
+	display stock-code  @1,1
+		Title "Item Code "
+	display whse-code  @1,2
+		Title "Whse  "
+	display stk-description  @1,3
+		Title "Item Description "
+	display stk-abc-class  @1,4
+		Title "ABC Class "
+	display whse-avg-monthly-demand  @1,5
+		Title "Avg Mth Demand"
+	display whse-active-mths  @1,6
+		Title "Active mths "
+	display stock-group  @1,7
+		Title "Group  "
+	display stk-stock-status  @1,8
+		Title "Status  "
+	display stk-brand  @1,9
+		Title "Brand  "
+	display stk-movement-code  @1,10
+		Title "Movement Code "
+end-screen
+
+
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                

@@ -1,0 +1,272 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : EDI Receiver Program
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2012
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: edi/edim10receiver.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 23Feb12  mdr         written 
+//=========================================================================//
+// M10 Import File Structure
+//
+// Header
+//
+// imp-field-01 = Code 'H'
+// imp-field-02 = Store Code
+// imp-field-03 = PO Reference
+// imp-field-04 = PO Date 
+// imp-field-05 = Delivery Date
+// imp-field-06 = User Reference
+// imp-field-07 = Instructions (60 Characters)
+// imp-field-08 = Delivery Name
+// imp-field-09 = Delivery Address 1
+// imp-field-10 = Delivery Address 2
+// imp-field-11 = Delivery Address 3
+//
+// Lines
+//
+// imp-field-01 = Code 'L'
+// imp-field-02 = M10 Item Code
+// imp-field-03 = Rutters Item Code
+// imp-field-04 = Item Description 
+// imp-field-05 = Quantity Ordered
+// imp-field-06 = Unit Description
+// imp-field-07 = Price
+// imp-field-08 = Barcode
+// imp-field-09 = Intructions (60 Characters)
+// imp-field-10 = N/A
+// imp-field-11 = N/A
+//=========================================================================//
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include '../include/i8secabt.spl'
+#include '../include/i8proglog.spl'
+// Re-Implement When Version 670 or Higher
+//link 'clib/clibserial'
+link 'clib/clibvedi.spl'
+ 
+field
+	ws-function-title					type string
+	ws-data-area						like ql-data-area
+	ws-data-directory					pic x(512) type string
+	ws-datadir-in						type string pic x(100)
+	ws-datadir-in-save					type string pic x(100)
+	ws-ql-description					like ql-description
+	ws-ql-path							like ql-path
+	ws-ql-path-parameter				like ql-path
+	x									type number
+
+object edi-import
+	type is external
+	separator is '|'
+	record is
+		imp-field-01					pic x
+		imp-field-02					pic x(60) type string
+		imp-field-03					pic x(60) type string
+		imp-field-04					pic x(60) type string
+		imp-field-05					pic x(60) type string
+		imp-field-06					pic x(60) type string
+		imp-field-07					pic x(60) type string
+		imp-field-08					pic x(60) type string
+		imp-field-09					pic x(60) type string
+		imp-field-10					pic x(60) type string
+		imp-field-11					pic x(60) type string
+	endrecord
+
+procedure main
+	get system-control first
+	on error
+		abort 'No Control Record'
+	endon
+	do i8secabt-check-abort
+		parameters are sys-consolidation-division login-id() 'ZEDI' 'T050'
+		returning ws-function-title 
+	do i8proglog-write-log
+	// Set Working Directories
+	set ws-datadir-in = str-concat(get-env('PROEDI'),'/in/m10')
+	set ws-datadir-in-save = str-concat(get-env('PROEDI'),'/in_save/m10')
+	// Determine Data Area
+	set ws-data-directory = dir()
+	for x = str-len(ws-data-directory) down to 1
+		if sub-string(ws-data-directory,x,x) in ( '/' '\' )
+			break
+		endif
+	end-for
+	set ws-data-area = sub-string(ws-data-directory,x + 1,str-len(ws-data-directory))
+	// Set Quick Links Path
+	set ws-ql-path = str-concat('\\192.168.101.20\pronto\data\',ws-data-area,'\edi\in_save\m10\')
+	set ws-ql-path = str-concat('\\192.168.101.20\edi\in_save\m10\')
+	if dir() = 'gdt'
+		set ws-ql-path = str-concat('\\192.168.101.20\editest\in_save\m10\')
+	endif
+	// Pickup Any Orders Received
+	do process-edi-orders
+end-procedure
+
+procedure process-edi-orders
+	local field
+		lf-directory-valid				type boolean
+		lf-file-name					pic x(100)
+		lf-loaded						type boolean
+		lf-search-pattern				pic x(10)
+	// Set File Search Pattern If Required, SPACES Equals All
+	set lf-search-pattern = '.csv$'
+	// Search Incoming Directory For Orders Received
+	if START-DIR-SEARCH(ws-datadir-in,lf-search-pattern)
+		set lf-directory-valid = TRUE
+	else
+		set lf-directory-valid = FALSE
+	endif
+	// Read Thru In Directory And Load Orders For Pre Processing
+	while lf-directory-valid
+		set lf-file-name = NEXT-DIR-ENTRY()
+		if lf-file-name = SPACES
+			set lf-directory-valid = FALSE
+		else
+			// Load File Selected
+			set lf-loaded = FALSE
+			do load-edi-order
+				parameters are lf-file-name
+				returning lf-loaded
+			// Pre Process
+			if lf-loaded
+				// Validate
+				do clibvedi-validate-receipt
+					parameters are v-edi-receipt-number
+				// If Error Free Continue And Load Into Pronto
+				get edi-order-headers
+					on index v-edi-receipt-number
+					key is v-edi-receipt-number
+				on error
+				else
+					if v-edi-h-warning-count = ZERO and v-edi-h-error-count = ZERO
+						do clibvedi-load-order
+							parameters are v-edi-receipt-number
+					endif
+				end-on
+			endif
+		endif
+	end-while
+end-procedure
+
+procedure load-edi-order
+	parameters are
+		lp-file-name					pic x(100)
+	returning
+		lr-loaded						type boolean
+	local field
+		lf-receipt-number				like v-edi-receipt-number
+		lf-line-number					like v-edi-receipt-line
+// rjb log 115-start-------------------------------------------------------------
+		lf-last-imp-field-09			like imp-field-09
+// rjb log 115-end---------------------------------------------------------------
+	// Initialise
+	set lf-line-number = ZERO
+	// Open Incoming Order File
+	open edi-import
+		file is str-concat(ws-datadir-in,'/',lp-file-name)
+		read-only
+	on error
+	end-on
+	// Assign Next Receipt Number
+	set lf-receipt-number = ZERO
+	//do clibserial-next-serial-number
+	//	parameters are
+	//		'ZEDI'
+	//	returning
+	//		lf-receipt-number
+	serial system-table sys-money-value	
+		on index sys-tbl-type sys-tbl-code
+		key is 'YY' 'ZEDI'	  	
+	set lf-receipt-number = sys-money-value
+	// Create EDI Pre Process Order From Import
+	select * from edi-import
+	detail
+		switch on imp-field-01
+			case 'H'
+				initialise edi-order-headers
+				set v-edi-receipt-number = lf-receipt-number
+				//set v-edi-h-std-addr1 = sub-string(imp-field-08,1,30)
+				//set v-edi-h-std-addr2 = sub-string(imp-field-09,1,30)
+				//set v-edi-h-std-addr3 = sub-string(imp-field-10,1,30)
+				//set v-edi-h-std-addr4 = sub-string(imp-field-11,1,30)
+				//set v-edi-h-order-date = julian(num(sub-string(imp-field-04,1,2)),
+				//	num(sub-string(imp-field-04,4,5)),num(sub-string(imp-field-04,7,8)))
+				set v-edi-h-order-date = date-to-julian(imp-field-04)
+				set v-edi-h-delivery-date = date-to-julian(imp-field-05)
+				set v-edi-h-cust-reference = imp-field-03
+				//set v-edi-h-delivery-date = julian(num(sub-string(imp-field-05,1,2)),
+				//	num(sub-string(imp-field-05,4,5)),num(sub-string(imp-field-05,7,8)))
+				set v-edi-h-std-instr1 = sub-string(imp-field-07,1,30)
+				set v-edi-h-std-instr2 = sub-string(imp-field-07,31,60)
+				set v-edi-h-bill-to = 'MITREHEAD'
+				set v-edi-h-address-id = sub-string(imp-field-02,1,10)
+				set v-edi-h-status = SPACES
+				set v-edi-h-date-received = gmt()
+				if v-edi-h-std-addr1 = SPACES and v-edi-h-std-addr2 = SPACES and v-edi-h-std-addr3 = SPACES
+					and v-edi-h-std-addr4 = SPACES and v-edi-h-std-addr5 = SPACES
+					set v-edi-h-addr-supplied = 'N'
+				else
+					set v-edi-h-addr-supplied = 'Y'
+				endif
+				insert edi-order-headers
+				on error
+				end-on
+			case 'L'
+				set lf-line-number += 1
+				initialise edi-order-lines
+				set v-edi-receipt-number = lf-receipt-number
+				set v-edi-receipt-line = lf-line-number
+				set v-edi-l-line-type = SPACES
+				set v-edi-l-stock-code = sub-string(imp-field-03,1,16)
+				set v-edi-l-gtin = sub-string(imp-field-08,1,15)
+				set v-edi-l-cust-item = sub-string(imp-field-02,1,16)
+				set v-edi-l-description = sub-string(imp-field-04,1,60)
+				//set v-edi-l-qty-ordered = num(sub-string(imp-field-05,1,13))
+				set v-edi-l-qty-ordered = num(imp-field-05)
+				set v-edi-l-uom = sub-string(imp-field-06,1,4)
+				//set v-edi-l-price = num(sub-string(imp-field-07,1,13))
+				set v-edi-l-price = num(imp-field-07)
+				set v-edi-l-accept-price = 'N'
+				set v-edi-l-trigger-flag = '01'
+				insert edi-order-lines
+				on error
+				end-on
+				if imp-field-09 <> SPACES
+// rjb log 115-start-------------------------------------------------------------
+// Mitre 10 appear to duplicate the comments on every line!!!
+				and imp-field-09 != lf-last-imp-field-09
+					set lf-last-imp-field-09 = imp-field-09	
+// rjb log 115-end---------------------------------------------------------------
+					set lf-line-number += 1
+					initialise edi-order-lines
+					set v-edi-receipt-number = lf-receipt-number
+					set v-edi-receipt-line = lf-line-number
+					set v-edi-l-line-type = 'N'
+					set v-edi-l-description = sub-string(imp-field-09,1,60)
+					set v-edi-l-accept-price = 'N'
+					insert edi-order-lines
+					on error
+					end-on
+				endif
+		end-switch
+	end-select
+	// Move File To Save Folder
+	command 'sh'
+		parameters are '-c' concat('mv ',str-concat(ws-datadir-in,'/',lp-file-name),' ',
+			str-concat(ws-datadir-in-save,'/',lp-file-name))
+	// Add Quick Link
+	set ws-ql-description = concat('Customer Order File ',lp-file-name)
+	set ws-ql-path-parameter = str-concat(ws-ql-path,lp-file-name)
+	do clibvedi-add-quick-link
+		parameters are v-edi-receipt-number ws-data-area ws-ql-path-parameter ws-ql-description
+	// Loaded
+	set lr-loaded = TRUE
+end-procedure

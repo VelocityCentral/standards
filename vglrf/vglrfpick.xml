@@ -1,0 +1,11 @@
+<paras>
+<fld-name>ws-scan-courier-detail</fld-name><fld-value>Y</fld-value>
+<fld-name>ws-can-always-override-qty</fld-name><fld-value>Y</fld-value>
+<fld-name>ws-shipped-or-ordered-qty</fld-name><fld-value>O</fld-value>
+<fld-name>ws-use-alphas-for-control</fld-name><fld-value>N</fld-value>
+<fld-name>ws-add-trace-as-memo</fld-name><fld-value>Y</fld-value>
+<fld-name>ws-completion-status</fld-name><fld-value>40</fld-value>
+<fld-name>ws-print-invoice</fld-name><fld-value>N</fld-value>
+<fld-name>ws-print-despatch</fld-name><fld-value>N</fld-value>
+<fld-name>ws-print-label</fld-name><fld-value>N</fld-value>
+</paras>

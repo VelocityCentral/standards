@@ -1,0 +1,289 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : 
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2015
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: c:\usr\pronto\cus\sample\clib\clibnzhols.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 6Aug15	rayb		written
+////////////////////////////////////////////////////////////////////////////////
+//
+
+	** Retired :  Do No use.  Use clibdate instead **
+/*
+
+	This documentation is in RST format.  To view this as a nice pdf goto
+	https://overbits.herokuapp.com/rsteditor/ and paste this content.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|           |           |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+
+	Alternatively
+
+	 =========== =========== ======================================================== 
+	  Direction   Data Type   Description                                             
+	 =========== =========== ======================================================== 
+	 =========== =========== ======================================================== 
+
+==========
+clibnzhols
+==========
+
+	** Retired :  Do No use.  Use clibvdate instead **
+
+*/
+
+
+#define INSERTHOL(A,B,C) \
+	initialise year-hols \
+	set yh-seq = A \
+	set yh-observed = B \
+	set yh-desc = C \
+	insert year-hols	
+
+object year-hols
+	type memory
+	record
+		yh-seq				type number
+		yh-observed			type date
+		yh-desc				pic x(100) type string
+	end-record
+	key is yh-seq unique
+
+field
+	ws-year					pic 9999 // current year
+ 
+procedure library-init 
+	get system-control first 
+	on error
+		abort "No Control Record"
+	endon
+end-procedure
+
+procedure clibnzhols-chk-date export
+parameters 
+	lp-date					pic 9999
+returning
+	lr-hol					type boolean
+	lr-desc					pic x(60)
+	//
+	set lr-hol = false
+	do build-year parameters are year(lp-date)
+	select * from year-hols
+		where yh-observed = lp-date
+	detail
+		set lr-hol = true
+		set lr-desc = yh-desc
+		exit
+	end-select
+end-procedure
+
+procedure clibnzhols-all-hols export
+parameters
+	lp-year					pic 9999
+returning
+	lr-date					type date occurs 100
+	lr-desc					pic x(60) occurs 100
+local
+	i						type number
+	set i = 1
+	do build-year parameters are lp-year
+	select * from year-hols
+	detail
+		set lr-date[i] = yh-observed
+		set lr-desc[i] = yh-desc
+		set i += 1
+	end-select
+end-procedure
+
+procedure build-year
+// because a holiday may not be observed on a specific date
+// you need to start with a year and determine all the 
+// holidays in that year
+parameters are
+	lp-year								pic 9999
+local
+	l-date								type date
+	if ws-year = lp-year
+		exit
+	endif
+	set ws-year = lp-year
+	open year-hols temporary truncate
+	set yh-seq = 1
+	// new year - working day following 1/1/1
+	do nearest-working-day parameters are julian(1,1,ws-year) returning l-date
+	INSERTHOL(1,l-date,"New Year")
+	// 2/1- workding day following 1/1/1
+	do nearest-working-day parameters are l-date + 1 returning l-date
+	INSERTHOL(2,l-date,"Day after New Year")
+	// Aniversay nearest monday to 29/1
+	do nearest-monday parameters are julian(29,1,ws-year) returning l-date
+	INSERTHOL(3,l-date,"Auckland Anniversary")
+	// Waitangi 6/2 if a working day
+	do nearest-working-day parameters are julian(6,2,ws-year) returning l-date
+	INSERTHOL(4,l-date,"Waitangi Day")
+	// easter
+	do easter-sunday parameters are julian(1,1,ws-year) returning l-date
+	INSERTHOL(5,l-date - 2,"Good Friday")
+	INSERTHOL(6,l-date + 1,"Easter Monday")
+	// anzac 25/4 if a working day
+	do nearest-working-day parameters are julian(25,4,ws-year) returning l-date
+	INSERTHOL(7,l-date,"ANZAC Day")
+	// queeens bday 1st mon in june
+	do nth-monday parameters are julian(1,6,ws-year) 1 returning l-date
+	INSERTHOL(8,l-date,"Queens Birthday")
+	// labout day 4th mon in october
+	do nth-monday parameters are julian(1,10,ws-year) 4 returning l-date
+	INSERTHOL(9,l-date,"Labour Day")
+	// christmas & boxing day
+	do nearest-working-day parameters are julian(25,12,ws-year) returning l-date
+	INSERTHOL(10,l-date,"Christmas Day")
+	do nearest-working-day parameters are l-date + 1 returning l-date
+	INSERTHOL(11,l-date,"Boxing Day")
+	// Daylight Saving
+//	do next-sunday parameters are julian(1,10,l-year) returning l-date
+//	do next-sunday parameters are julian(16,3,l-year) returning l-date // 16th is earliest possible
+end-procedure
+
+procedure nearest-working-day
+parameters are l-date type date
+returning lr-date type date
+local x type number
+	for x = 0 to 7
+		if dow(l-date + x) between 2 and 6
+			set lr-date = l-date + x
+			exit
+		endif
+	endfor
+end-procedure
+
+procedure only-a-working-day
+parameters are l-date type date
+returning lr-date type date
+	if dow(l-date) between 2 and 6
+		set lr-date = l-date
+	endif
+end-procedure
+
+procedure easter-sunday
+parameters are l-date type date
+returning lr-date type date
+	do gimme-easter parameters are year(l-date)
+		returning lr-date
+end-procedure
+
+procedure nearest-monday
+parameters are l-date type date
+returning lr-date type date
+	if dow(l-date) <= 5
+		set lr-date = l-date - dow(l-date) + 2
+	else
+		set lr-date = l-date - dow(l-date) + 9
+	endif
+end-procedure
+
+procedure nth-monday
+parameters are l-date type date
+	n type number
+returning lr-date type date
+	set lr-date = l-date - dow(l-date) +  2
+	if dow(l-date) <= 2
+		set lr-date = lr-date + ( (n - 1) * 7 )
+	else
+		set lr-date = lr-date + ( n * 7 )
+	endif
+end-procedure
+
+procedure next-sunday
+parameters are l-date type date
+returning lr-date type date
+	set lr-date = l-date
+	repeat
+	until dow(lr-date) = 1
+		set lr-date += 1
+	end-repeat
+end-procedure
+
+procedure gimme-easter
+parameters are lp-year pic 9999
+returning lr-easter type date
+local
+	l-firstdig				type number
+	l-remain19				type number
+	l-temp					type number
+	l-ta					type number
+	l-tb					type number
+	l-tc					type number
+	l-td					type number
+	l-te					type number
+	l-easter-day			type number
+	l-easter-month			type number
+//
+	set l-firstdig = integer(lp-year / 100)
+	set l-remain19 = lp-year % 19
+//
+	// calculate PFM (Pascal full Moon) date
+	set l-temp = integer((l-firstdig - 15) / 2) + 202 - (11 * l-remain19)
+	if l-firstdig > 26 
+		set l-temp = l-temp - 1
+	endif
+	if l-firstdig > 38
+		set l-temp = l-temp - 1
+	endif
+//
+	//this next line uses underscore (_) line continuation characters
+	//in older versions of VB you may need to revert to one long line
+	if ((l-firstdig = 21) Or (l-firstdig = 24) Or (l-firstdig = 25) 
+		Or (l-firstdig = 33) Or (l-firstdig = 36) Or (l-firstdig = 37)) 
+		set l-temp = l-temp - 1
+	endif
+//
+	set l-temp = l-temp % 30
+//
+	set l-ta = l-temp + 21
+	If l-temp = 29 
+		set l-ta = l-ta - 1
+	endif
+//
+	If (l-temp = 28 And l-remain19 > 10) 
+		set l-ta = l-ta - 1
+	endif
+//
+//	'find the next Sunday
+	set l-tB = (l-tA - 19) % 7
+//
+	set l-tC = (40 - l-firstdig) % 4
+	If l-tC = 3 
+		set l-tC = l-tC + 1
+	endif
+	If l-tC > 1 
+		set l-tC = l-tC + 1
+	endif
+//
+	set l-temp = lp-year % 100
+	set l-tD = integer(l-temp + (l-temp /  4)) % 7
+//
+	set l-tE = ((20 - l-tB - l-tC - l-tD) % 7) + 1
+	set l-easter-day = l-tA + l-tE
+//
+//	'return the date
+	If l-easter-day > 31 
+		set l-easter-day = l-easter-day - 31
+		set l-easter-month = 4
+	Else
+		set l-easter-month = 3
+	EndIf
+	set lr-easter = julian(l-easter-day,l-easter-month,lp-year)
+end-procedure
+//
+//

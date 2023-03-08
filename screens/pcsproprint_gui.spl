@@ -1,0 +1,49 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : 
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2019
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: screens/pcsproprint_gui.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 24Apr19  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+ 
+link 'clib/clibvsplfil'
+
+procedure library_init
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+end-procedure
+
+procedure run-preview user-trigger
+parameters
+	lp-spoolfile					pic x(1024) type string
+local
+	lf-form							pic x(60) type string
+	lf-count						type number
+	/*
+	Not 100% sure of the best process, but I decided that if the form 
+	was defined in trueform-document-types then it must be retro.  
+	*/
+	do clibvsplfil-get-form parameters are lp-spoolfile returning lf-form
+	select lf-count = count(*)
+		from trueform-document-types
+		where tdt-form-name = lf-form
+	end-select
+	if lf-count != 0 // we found it in the retro document types 
+		// therefore call velocity preview for retro
+		spl "sys/vgltfrpreview" parameters are lp-spoolfile
+		exit 1 // stops the normal preview in the pcs fil
+	endif
+	// else just do the normal thing.,
+end-procedure
+

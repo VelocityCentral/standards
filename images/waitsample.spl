@@ -1,0 +1,47 @@
+procedure main
+	do waitsample once
+end-procedure
+
+screen waitsample
+local
+	lf-display-wait				type boolean
+	responsive
+		window-position 5
+	title "Wait Sample"
+detail
+	screen-group // ---- Wait Sample ----------------------------
+	Option "Start"
+		@1,1 to @3,20
+		help is "Select Start"
+		scale is 120
+		icon BLANK-ICON
+		button-style STANDARD_BUTTON_STYLE
+		text-position 5
+		set lf-display-wait = TRUE
+		refresh whens
+	end-option
+	Option "End"
+		@1,1 to @3,20
+		help is "Select Start"
+		scale is 120
+		icon BLANK-ICON
+		button-style STANDARD_BUTTON_STYLE
+		text-position 5
+		set lf-display-wait = FALSE
+		refresh whens
+	end-option
+	Option "Quit"
+		@1,1 to @3,20
+		help is "Select Start"
+		scale is 120
+		icon BLANK-ICON
+		button-style STANDARD_BUTTON_STYLE
+		text-position 5
+		exit
+	end-option
+	end-screen-group // ---- Wait Sample --------------------------------------
+	field-group // ---- Wait ----------------------------
+		when lf-display-wait
+		display bitmap "/pro/pronto/cus/std/images/wait.gif" 
+	end-field-group // ---- Wait --------------------------------------
+end-screen // waitsample ------------------------------------------

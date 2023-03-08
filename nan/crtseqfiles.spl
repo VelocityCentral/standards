@@ -1,0 +1,149 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : 
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2022
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: nan/crtseqfiles.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 19Oct22  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+#include "../include/i8dictopen.spl"
+ 
+link "clib/clibdict"
+
+field
+	ws-function-title						type string
+	ws-next-seq								type number
+
+#define ADDM(A) \
+	set ws-next-seq += 1 \
+	initialise mem-file \
+	set mf-seq = ws-next-seq \
+	set mf-text = A \
+	insert mem-file
+
+object mem-file
+	type is memory
+	record is
+		mf-seq								type number
+		mf-text								pic x(1024) type string
+	end-record
+	key is mf-seq
+
+object text-file
+	type is external
+	record is 
+		tf-text								pic x(1024) type string
+	end-record
+
+
+procedure main
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8secabt-check-abort
+		parameters are sys-consolidation-division login-id() "EMS" "X000"
+		returning ws-function-title 
+	do i8proglog-write-log
+	do create-sequence-objects
+end-procedure
+
+procedure create-sequence-objects
+	do write-memfile
+	do write-text
+endprocedure
+
+procedure write-memfile
+local fields
+	lf-dict-path-name-suffix			pic x(BMSDEF_PATHSIZE)
+	lf-dict-type-description			pic x(25) type string
+	lf-bms-dict-version-code			like dvn-bms-dict-version
+	lf-spare							pic x(20)
+	lf-bms-dict-version-number			pic 9999v9999
+	lf-system-control-version-number	pic 9999v9999
+	/*
+	do clibdict-get-dict-name-with-suffix
+		parameter	get-env("PRODICT")
+		returning	lf-dict-path-name-suffix
+					lr-dict-suffix
+					lf-bms-dict-version-code
+					lf-spare
+					lf-bms-dict-version-number
+					lf-system-control-version-number
+	*/
+	do i8dictopen-open-dictionary
+		parameters	
+			DICTDEF_ALL_MAIN_DICT_TABLES//M-all the main dictionary files
+			DICTDEF_BMS_DICT			//objname:dict,dict-usr,dict-distributor
+			DICTDEF_ENV_PRODICT			//dictionary and path without suffix
+			SPACES						//only used if opening individual
+			TRUE						//Display message/abort if error found!
+			TRUE						//Open files read-only
+	open mem-file
+		temporary
+	ADDM("procedure main")
+	select * from dict-object
+		where obj-name between "a" and "z~~~~"
+		and obj-type = "N"
+	detail
+		ADDM(concat("open " rtrim(obj-name) " create"))
+	end-select
+	ADDM("end-procedure")
+end-procedure
+
+procedure write-text
+local
+	lf-filename							pic x(1024) type string
+	lf-loadfile							pic x(1024) type string
+	lf-logfile							pic x(1024) type string
+	lf-cmd								pic x(1024) type string
+	set lf-filename = concat("/tmp/seqcrt" str(pid()) ".spl")
+	set lf-loadfile = concat("/tmp/seqcrt" str(pid()) ".op7")
+	set lf-logfile = concat("/tmp/seqcrt" str(pid()) ".err")
+	open text-file
+		file is lf-filename
+		create permanent
+	select * 
+		from mem-file
+		order by mf-seq
+	detail
+		set tf-text = mf-text
+		insert text-file
+	end-select
+	close text-file
+	if not file-exists(lf-filename,FALSE)
+		message "source missing"
+		exit 1
+	endif
+	command 'procmp' parameters '-li' lf-filename
+	if exit-status != 0
+		message "compile failed"
+	endif
+	if file-exists(lf-loadfile,FALSE)
+		message lf-loadfile " created"
+		spl lf-loadfile
+	else
+		message "pgm did not compile - see report"
+		report "Compile List"
+			no-xml
+		open text-file
+			file is lf-logfile
+		select * from text-file
+		detail
+			print tf-text
+		end-select
+	endif
+end-procedure
+
+

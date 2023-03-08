@@ -1,0 +1,190 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : Enable SQL Tracing
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2019
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: clib/clibvgsqlt.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 12Jul19  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+/*
+
+	This documentation is in RST format.  To view this as a nice pdf goto
+	https://overbits.herokuapp.com/rsteditor/ or rst.ninjs.org and paste this content.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|           |           |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+
+	Alternatively
+
+	 =========== =========== ======================================================== 
+	  Direction   Data Type   Description                                             
+	 =========== =========== ======================================================== 
+	 =========== =========== ======================================================== 
+
+=========
+clibvsqlt
+=========
+
+Starts sql tracing for the session and returns the session ID for use in 
+dbeaver to analyse sql created by a session.
+
+.. Note:: You must have dba authority to use this function
+         The user running will also need to have read access to sysmaster
+		 and the ability to run the tracing start command.  
+		 Test with dbeaver first (using the right user id)
+
+clibsqlt-start-trace 
+~~~~~~~~~~~~~~~~~~~~
+
+Enables SQL tracing for the session
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|  Out      |Boolean    |True if successful                                      |
+	+-----------+-----------+--------------------------------------------------------+
+
+
+clibvsqlt-get-sid 
+~~~~~~~~~~~~~~~~~
+
+Returns the session ID (Informix) and process ID (Unix) for the current session.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|  Out      |Number     |The informix session id                                 |
+	+-----------+-----------+--------------------------------------------------------+
+	|  Out      |Number     |The unix process id                                     |
+	+-----------+-----------+--------------------------------------------------------+
+
+*/ 
+#include "../include/i8proglogparam.spl"
+
+object syssessions
+	file is "/sysmaster/informix.syssessions"
+	type is indexed
+	record is
+		session-id			pic 9(10)	db-column-name "sid"
+		session-user		pic x(32)	db-column-name "username"
+		session-pid			pic 9(10)	db-column-name "pid"
+		session-tty			pic x(16)	db-column-name "tty"
+		session-host		pic x(16)	db-column-name "hostname"
+	end
+	key is session-id
+	no-rowid
+ 
+procedure library-init
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8proglogparam-write-log parameters are "clibvsqlt"
+end-procedure
+
+procedure main
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do testcases
+end-procedure
+
+
+procedure clibvsqlt-get-sid export
+returning
+	lr-sid						type number
+	lr-pid						type number
+local
+	lf-count					type number
+	set lr-pid = pid()
+	select lf-count = count()
+		from syssessions
+		where session-pid = :lr-pid
+	end-select
+	if lf-count != 1
+		// sleep and try again
+		if sleep(2) endif
+		select lf-count = count()
+			from syssessions
+			where session-pid = :lr-pid
+		end-select
+		if lf-count != 1
+			message "Cannot locate sid for this pid"
+			exit
+		endif
+	endif
+	select *
+		from syssessions
+		where session-pid = :lr-pid
+	detail
+		set lr-sid = session-id
+		exit
+	end-select
+end-procedure
+
+procedure clibsqlt-start-trace export
+returning
+	lr-ok						type boolean
+local
+	lf-trace-cmd				pic x(1024) type string
+	lf-sid						type number
+	lf-return					type number
+	set lr-ok = TRUE
+	set lf-trace-cmd = 'execute function sysadmin:task("Set sql user tracing on ", '
+	do clibvsqlt-get-sid
+		returning lf-sid
+	string lf-trace-cmd appending str(lf-sid)
+	string lf-trace-cmd appending ");"
+	message lf-trace-cmd
+	set lf-return =  db-command(lf-trace-cmd)
+	if lf-return != 0
+		set lr-ok = FALSE
+		message str-concat(lf-trace-cmd " = " str(lf-return))
+	endif
+end-procedure
+
+
+//--------------------------------------------------------------------------------
+//     Test cases
+//--------------------------------------------------------------------------------
+
+procedure testcases
+	do test1
+end-procedure
+
+procedure test1
+local
+	lf-ok							type boolean
+	lf-count						type number
+	lf-sid							type number
+	lf-pid							type number
+	do clibsqlt-start-trace
+		returning lf-ok
+	if not lf-ok 
+		message "Failed to start tracing"
+	else
+		if sleep(10) endif
+		do clibvsqlt-get-sid returning lf-sid, lf-pid
+		select lf-count = count(*) from deb-master
+		end-select
+		message-box param-text("<<P1>><<BR>><<p2>><<BR>><<P3>>"
+			,"SQL Executed.  Run dbeaver to check results"
+			,concat("SID :", str(lf-sid), " PID:" str(lf-pid))
+			,"Do not press OK to this message until you have checked the results")
+			title is "clibvsqlt"
+			message-buttons  MSG_BOX_OK
+			icon MSG_BOX_INFORMATION
+	endif
+end-procedure

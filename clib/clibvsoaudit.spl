@@ -1,0 +1,235 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program :  Velocity SO Audit add
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2014
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: clib/clibvsoaudit.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 15May14  rjb         written 
+// 						the purpose of this routine is to provide an audit
+// 						funciton for sales audit records that are not part
+// 						of the standard set of audit records.  It uses the
+// 						sales-audit-details-file to hold extra details
+////////////////////////////////////////////////////////////////////////////////
+//
+/*
+
+	This documentation is in RST format.  To view this as a nice pdf goto
+	https://overbits.herokuapp.com/rsteditor/ or rst.ninjs.org and paste this content.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|           |           |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+
+	Alternatively
+
+	 =========== =========== ======================================================== 
+	  Direction   Data Type   Description                                             
+	 =========== =========== ======================================================== 
+	 =========== =========== ======================================================== 
+
+============
+clibvsoaudit
+============
+
+The purpose of this routine is to provide an audit
+funciton for sales audit records that are not part
+of the standard set of audit records.  It uses the
+sales-audit-details-file to hold extra details.
+
+Auto-transaction is enabled.  Calling programs should check for anon-zero exit status
+
+clibvsoaudit-write-audit 
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+Write a custom audit record.
+
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |Number     |Sales Order                                             |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |String 2   |Backorder Suffix                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |Number     |Sales Order line (can be zero)                          |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |String 30  |Short description                                       |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |Varchar 4k |Long Description                                        |
+	|           |           |                                                        |
+	|           |           |Notes will word wrapped to fit into safd-text           |
+	|           |           |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |String 256 |Any error message if an error occurred                  |
+	+-----------+-----------+--------------------------------------------------------+
+
+*/
+
+#include "../include/i8proglogparam.spl"
+
+// 19 May 2014 the value 96 was added to I8ologdesc.spl for "custom user only"
+#define AUDIT_TYPE 96
+
+field
+	ws-last-error						pic x(1024) type string
+ 
+procedure library-init
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8proglogparam-write-log parameters are "clibvsoaudit"
+end-procedure
+
+procedure clibvsoaudit-get-last-error export
+returning
+	lr-message							like ws-last-error
+	set lr-message = ws-last-error
+end-procedure
+
+procedure clibvsoaudit-write-audit export
+	autotransaction
+parameters
+	lp-so-order-no						like so-order-no
+	lp-so-bo-suffix						like so-bo-suffix
+	lp-sol-line-seq						like sol-line-seq
+	lp-short-text						like ordlog-old-info
+	lp-audit-text						pic x(4096) type varchar
+local
+	lf-message							pic x(256) type string
+	lf-ok								type boolean
+	lf-dedup							type number
+	i									type number
+	lf-counter							type number
+	lf-current-status					like so-order-status
+	lf-current-date						type date
+	lf-current-time						type time
+//
+	//
+	// ensure date and time do not kick over between operations
+	//
+	set lf-current-date = today()
+	set lf-current-time = tod()
+	//
+	// get Current status
+	//
+	get sales-order
+		on index so-order-no so-bo-suffix
+		key is lp-so-order-no lp-so-bo-suffix
+	on error
+	endon
+	set lf-current-status = so-order-status
+	//
+	// get next dedup
+	//
+	select lf-dedup = max(saf-dedup-seq)
+		from sales-audit-file
+		where so-order-no = :lp-so-order-no
+		and so-bo-suffix = :lp-so-bo-suffix
+		and sol-line-seq = :lp-sol-line-seq
+		and order-log-date = :lf-current-date
+		and order-log-time = :lf-current-time
+	endselect
+	set lf-dedup += 1
+	initialise sales-audit-file
+	set so-order-no = lp-so-order-no
+	set so-bo-suffix = lp-so-bo-suffix
+	set sol-line-seq = lp-sol-line-seq
+	set saf-dedup-seq = lf-dedup
+	set ordlog-type = AUDIT_TYPE
+	set ordlog-old-info = "See Details"
+	set ordlog-new-info = lp-short-text
+	set ordlog-old-value = today()				
+	set order-log-date = lf-current-date
+	set order-log-time = lf-current-time
+	set ordlog-terminal-no = str(tty())
+	set ordlog-login-id = login-id()
+	set order-status = lf-current-status
+	set saf-module = get-module-code()
+	set saf-function = get-function-code()
+	set saf-program-name = concat(strconcat(get-param(0)),
+						' ', strconcat(get-param(1)),
+						' ', strconcat(get-param(2))
+						' ', strconcat(get-param(3)) )
+	insert sales-audit-file
+	on error EDUPL
+	else
+		set lf-counter = 0
+		while lp-audit-text <> spaces and lf-counter < 2000 // infinite loop trap
+			set lf-counter += 1
+			if str-len(lp-audit-text) < size-of(safd-text)
+				do insert-one-detail-line parameters are lp-audit-text
+					returning lf-ok ws-last-error
+				if not lf-ok 
+					exit 1
+				endif
+				set lp-audit-text = spaces
+			else
+				for i = size-of(safd-text) down to 1
+					if substring(lp-audit-text,i,i) = spaces
+						do insert-one-detail-line parameters are 
+							substring(lp-audit-text,1,i - 1)
+							returning lf-ok ws-last-error
+						if not lf-ok 
+							exit 1
+						endif
+						string lp-audit-text deleting 1 to i
+						break
+					endif
+				end-for
+				if i = 1 // no spaces
+					do insert-one-detail-line parameters are 
+						substring(lp-audit-text,1,size-of(safd-text))
+						returning lf-ok ws-last-error
+					if not lf-ok 
+						exit 1
+					endif
+					string lp-audit-text deleting 1 to size-of(safd-text)
+				endif
+			endif
+		endwhile
+	endon
+//
+end-procedure
+
+procedure insert-one-detail-line
+parameters
+	lp-text							like safd-text
+returning
+	lr-ok							type boolean
+	lr-message						pic x(256) type string
+local
+	lf-next-seq						type number
+	set lr-ok = TRUE
+	// assumes currency on sales-audit-file
+	select lf-next-seq = max(safd-seq-no)
+		from sales-audit-file-detail
+		where so-order-no  = :so-order-no 
+		and so-bo-suffix  = :so-bo-suffix 
+		and sol-line-seq = :sol-line-seq
+		and order-log-date  = :order-log-date 
+		and order-log-time  = :order-log-time 
+		and saf-dedup-seq = :saf-dedup-seq
+	end-select
+	set lf-next-seq += 1
+	initialise sales-audit-file-detail
+		leaving so-order-no so-bo-suffix sol-line-seq
+			order-log-date order-log-time saf-dedup-seq
+	set safd-seq-no = lf-next-seq
+	set safd-text = lp-text
+	insert sales-audit-file-detail
+	on error
+		set lr-ok = FALSE
+		set lr-message = str-concat("Can't insert text:" error-description(file-status()))
+	endon
+endprocedure

@@ -1,0 +1,494 @@
+////////////////////////////////////////////////////////////////////////////////
+// pwrplay - Export for Powerplay model
+//=========================================================================//
+// Copyright (C) Prometheus Software Developments Pty Ltd 1987 thru 1996
+//
+// PRONTO is a registered trademark of Prometheus Software Developments P/L.
+//
+// All Rights Reserved. Unauthorised copying is prohibited.
+//=========================================================================//
+//
+// Modification History
+// Date		Who	SDR		What
+////////////////////////////////////////////////////////////////////////////////
+
+#define RBTCHPROC_SELECTION_PARAMETERS_VERSION		'1'
+#define REPORT_NAME "Power Play Export"
+#define DEBUG FALSE
+#define SEPARATOR ","
+
+#include "../include/bmsdef.spl"
+#include '../include/rbtchproc.spl'
+
+// When Creating an export file it is best to output a temp file in
+// a build file procedure.  This will create the export file
+// then simply list the temp file in the report print routine.
+// It is best to use the same field names in each file
+
+object temp-file
+	type is isam
+	record is
+		t-order					pic x(10)
+		t-whse					like stk-trans-whse
+		t-whse-desc				pic x(30)
+		t-date					like stk-trans-date
+		t-group					pic xxx
+		t-group-desc			pic x(60)
+		t-terr					pic xxxx
+		t-terr-desc				pic x(60)
+		t-bill-to				like accountcode
+		t-bill-to-desc			pic x(30)
+		t-accountcode			like accountcode
+		t-accountcode-desc		pic x(30)
+		t-industry				pic x(10)
+		t-indust-desc			pic x(30)
+		t-industry-sub			pic x(10)
+		t-indust-sub-desc		pic x(30)
+		t-stk-tg				pic xxx
+		t-stk-tg-desc			pic x(30)
+		t-stk-group				like stock-group
+		t-stk-group-desc		pic x(30)
+		t-stk-code				like stock-code
+		t-stk-desc				pic x(30)
+		t-rep-code				pic x(10)
+		t-rep-name				pic x(30)
+		t-ord-type				pic x(10)
+		t-ord-type-desc			pic x(30)
+		t-qty					like stk-trans-qty
+		t-value					like stk-trans-value
+		t-cost					like stk-trans-cost
+		t-type					pic x(30)
+		t-discount				like stk-trans-value
+	end-record
+	key is t-whse
+
+object temp-file-exp
+	type is external
+	record is
+		t-order					
+		t-whse				
+		t-whse-desc		
+		t-date		
+		t-group	
+		t-group-desc			
+		t-terr				
+		t-terr-desc		
+		t-bill-to	
+		t-bill-to-desc			
+		t-accountcode		
+		t-accountcode-desc		
+		t-industry			
+		t-indust-desc	
+		t-industry-sub			
+		t-indust-sub-desc	
+		t-stk-tg		
+		t-stk-tg-desc			
+		t-stk-group			
+		t-stk-group-desc
+		t-stk-code				
+		t-stk-desc			
+		t-rep-code		
+		t-rep-name	
+		t-ord-type
+		t-ord-type-desc			
+		t-qty				
+		t-value			
+		t-cost		
+		t-type					
+		t-discount
+	end-record
+	separator is SEPARATOR
+
+object temp-file-head
+	type is external
+	record is
+		l-text			pic x(900)
+	end-record
+	separator is SEPARATOR
+
+field	ws-pc-filename	pic x(100) type string
+		ws-host-filename	pic x(100) type string
+field ws-seed type number
+
+procedure main
+	get system-control first
+	set ws-seed = integer(fraction(square-root(systime() - 909000000)) * 100)
+	set ws-report-started = FALSE
+	RBTCHPROC_RUN_PROGRAM(REPORT_NAME)
+endprocedure //main ------------------------------------------------------------
+
+screen rbtchproc-report-parameters
+local x type number
+	allow entry
+before
+	clear
+	DO_SCREEN_HEADER()
+	display	REPORT_NAME @3,29 inverse
+	box @4,1 to @22,80
+	box @16,1 to @22,80
+	display "PC file name :" @20,4
+	set ws-pc-filename = lowercase(str-concat("/mydocu~1/work/pronto/cognos/",sys-consolidation-division,"/model.csv"))
+	set ws-pc-filename = lowercase(str-concat("\My Documents\work\pronto\cognos\",sys-consolidation-division,"\model.csv"))
+	set ws-pc-filename = "model.csv"
+detail
+	accept ws-pc-filename pic x(50) @20,22
+		default ws-pc-filename
+		show-value
+		help "Enter the name of the PC file or spaces to stop download"
+	validations
+		for x = 1 to str-len(ws-pc-filename)
+			if sub-string(ws-pc-filename,x,x) = "\"
+				string ws-pc-filename replacing "/" at x
+			endif
+		endfor
+		display ws-pc-filename @20,22
+	end-validations
+	confirm auto
+	confirmed
+		RBTCHPROC_EXECUTION
+	endconfirm
+endscreen //rbtchproc-report-parameters --------------------------------------
+
+procedure rbtchproc-set-parameters
+	RBTCHPROC_LOAD_SET_ALPHA(ws-pc-filename)
+//	RBTCHPROC_LOAD_SET_ALPHA_SUB(cust-or-terr,1,1)
+//	RBTCHPROC_LOAD_SET_DATE(ws-start-date)
+//	RBTCHPROC_LOAD_SET_NUM(max-trans-amount) //Can be upto size 12v6
+//	If field required more than 12 integers or 6 decimals use
+//	RBTCHPROC_LOAD_SET_NUM_SIZE(numeric-field,integers,decimals) 
+endprocedure //rbtchproc-set-parameters --------------------------------------
+
+procedure start-report
+	set rbtchproc-report-name = REPORT_NAME 
+	report rbtchproc-report-name		
+		header is skeleton-report-header
+		no-message
+	set ws-report-started = TRUE
+	if rbtchproc-in-background
+		RBTCHPROC_MESSAGE_REPORT_STARTED
+	else
+		display "Spoolfile :" @19,54
+		display spool-file-name() @19,66 pic x(12)
+	endif
+endprocedure //start-report ----------------------------------------------------
+
+procedure skeleton-report-header
+	print company-name col 1
+		rbtchproc-report-name col 51 bold
+		//or
+		//"Skeleton Report" col 51 bold
+		"Date:" col 85
+		tod() col 110
+		today() col 91
+		"Time:" col 104
+		'Page:' col 120
+		left-justify(str(page-no)) col 126 pic x(4)
+	skip
+	print 	"$#column Headings" 
+	print 132'-'
+endprocedure //skeleton-report-header ------------------------------------------
+
+// Your main processing routine must be named as follows
+procedure rbtchproc-report-detail
+local
+	l-excel 				pic x(100) type string
+	x						type number
+	do build-file
+	do start-report
+	if rbtchproc-in-background
+		RBTCHPROC_MESSAGE_REPORT_STARTED
+	else
+		box @18,47 to @22,80
+		display "Spoolfile :" @19,54
+			spool-file-name() @19,66 pic x(12)
+			"Now at :" @21,54
+	endif
+	page
+	// put the hard bits here
+		if not rbtchproc-in-background
+			display "Pass 2 :" @21,54
+		endif
+	do finish-report
+//	if operating-system() = 'WINDOWS'
+//		command ws-excel no-wait parameters ws-pc-filename
+//			on error message 'Cannot load Excel ' endon
+//	else
+//		if uppercase(get-env('PROTERM'))  = "PROTERM" and ws-pc-filename != spaces
+//			command 'sh' parameters are '-c'
+//				concat('send2proterm -r ',ws-host-filename," ",ws-pc-filename)
+//			if get-env("EXCEL") != spaces
+//				do flip-slashes parameters are ws-pc-filename
+//				set l-excel = get-env("EXCEL")
+//				command l-excel external no-wait parameters  ws-pc-filename
+//					on error message 'Cannot start Excel ' endon
+//			endif
+//		endif
+//	endif
+endprocedure //rbtchproc-report-detail ---------------------------------------
+
+procedure build-file //--------------------------------------------------------
+	window no-hide
+local
+	l-fields pic x(900) type string
+	l-counter	type number
+	random-no type number
+// using the following audit report to print any messages while building
+// the work file.
+//	report "Audit"
+//		no-message
+	// output column headings in first record of ascii file
+	set l-fields = concat( 'Order Code'
+		,SEPARATOR,'Warehouse'
+		,SEPARATOR,'Warehouse Name'
+		,SEPARATOR,'Date'
+		,SEPARATOR,'Group'
+		,SEPARATOR,'Group Name'
+		,SEPARATOR,'Territory'
+		,SEPARATOR,'Territory Name'
+		,SEPARATOR,'Bill-to'
+		,SEPARATOR,'Bill-to Name'
+		,SEPARATOR,'Accountcode'
+		,SEPARATOR,'Accountcode Name'
+		,SEPARATOR,'Industry'
+		,SEPARATOR,'Industry Name')
+	set l-fields = concat(l-fields,
+		,SEPARATOR,'Industry Sub'
+		,SEPARATOR,'Industry Sub Name'
+		,SEPARATOR,'Stock Class'
+		,SEPARATOR,'Class Name'
+		,SEPARATOR,'Stk Group'
+		,SEPARATOR,'Stk Group Name'
+		,SEPARATOR,'Stock'
+		,SEPARATOR,'Stock Desc'
+		,SEPARATOR,'Rep code'
+		,SEPARATOR,'Rep Name')
+	set l-fields = concat(l-fields,
+		,SEPARATOR,'Order Type'
+		,SEPARATOR,'Order Type Name'
+		,SEPARATOR,'Qty'
+		,SEPARATOR,'Value'
+		,SEPARATOR,'Cost'
+		,SEPARATOR,'Type'
+		,SEPARATOR,'Discount')
+	if ws-pc-filename != spaces
+		open temp-file-head 
+			file is ws-pc-filename
+			truncate
+			permanent
+		open temp-file-exp 
+			file is ws-pc-filename
+		set l-text = l-fields
+		insert temp-file-head
+	endif
+	// $# Do the hard bits here usually in loop
+		if not rbtchproc-in-background
+			display "Pass 1  :" @21,54
+		endif
+	extract stock-movements
+		where stk-trans-type = "SO"
+	detail
+		set l-counter += 1
+		if not l-counter % 1000
+			display l-counter @ 21,60
+		endif
+		set t-order	= stk-trans-ref1
+		set t-whse = stk-trans-whse
+		do get-sys-tbl parameters are "WH" t-whse returning t-whse-desc
+		if year(stk-trans-date) = sys-gl-yr
+			set t-date =  stk-trans-date
+		else
+			/*
+			do random-no returning random-no
+			if random-no % 2
+				set t-date = julian(day(stk-trans-date),month(stk-trans-date),sys-gl-yr)
+			else
+				set t-date = julian(day(stk-trans-date),month(stk-trans-date),sys-gl-yr - 1)
+			endif
+			*/
+			set t-date = stk-trans-date
+		endif
+		get deb-master
+			on index accountcode
+			key is stk-accountcode
+		on error
+			initialise deb-master leaving accountcode
+		endon
+		set t-accountcode = accountcode
+		set t-accountcode-desc = shortname
+		set t-industry = dr-industry-code
+		do get-sys-tbl parameters are "CI" t-industry returning t-indust-desc
+		set t-industry-sub = dr-industry-sub-group
+		do get-sys-tbl parameters are "CG" t-industry-sub 
+			returning t-indust-sub-desc
+		set t-terr = territory
+		do get-sys-tbl parameters are "TC" t-terr returning t-terr-desc
+		set t-group	 = substring(sys-tbl-alpha-1,5,8)
+		do get-sys-tbl parameters are "TG" t-group returning t-group-desc
+		set t-bill-to = bill-to
+		get deb-master
+			on index accountcode
+			key is bill-to
+		on error
+			initialise deb-master leaving accountcode
+		endon
+		set t-bill-to-desc = shortname
+		set t-stk-code = stock-code
+		get stock-master
+			key is t-stk-code
+		on error
+			message t-stk-code
+			initialise stock-master leaving stock-code
+		endon
+		set t-stk-desc = stk-description
+
+
+
+		set t-stk-group = stock-group
+		do get-sys-tbl parameters are "PG" t-stk-group returning t-stk-group-desc
+		set t-stk-tg = substring(sys-tbl-alpha-1,5,8)
+		do get-sys-tbl parameters are "TG" t-stk-tg returning t-stk-tg-desc
+		set t-rep-code = substring(stk-trans-ref2,12,14)
+		set t-rep-code = rep-code
+		get rep-master
+			on index rep-code
+			key is t-rep-code
+		on error
+			initialise rep-master leaving rep-code
+		endon
+		set t-rep-name = rep-description
+		set t-ord-type = substring(stk-trans-ref2,15,18)
+		do get-sys-tbl parameters are "TC" t-terr returning t-ord-type-desc
+		set t-qty = stk-trans-qty * -1
+		set t-value = stk-trans-value
+
+		if t-stk-code = "CH520"
+			set t-value *= 4
+		endif
+
+		do get-random parameters are 0 0.05 returning random-no
+		if t-stk-code = "BR100" or accountcode = "C0002"
+			do get-random parameters are 0.1 0.3 returning random-no
+		endif
+
+		switch t-stk-code
+		case "CH520"
+			set t-value *= 4
+		case "BU100"
+			set t-stk-desc = "Tasti Log Almond"
+		case "BU200"
+			set t-stk-desc = "Tasti Log Chocolate"
+		case "BU300"
+			set t-stk-desc = "Tasti Log Peanut Butter"
+		end-switch
+
+
+		set t-discount = t-value * random-no
+		set t-cost = stk-trans-cost
+		if t-qty < 0
+			set t-type = "CR Note"
+		else
+			set t-type = "Invoice"
+		endif
+		if ws-pc-filename != spaces
+			insert temp-file-exp
+		endif
+	end-extract
+//	report finished
+end-procedure //---------------------------------------------------------------
+
+procedure get-sys-tbl
+parameters are 
+	l-tbl		like sys-tbl-type
+	l-code		like sys-tbl-code
+returning 
+	l-desc		pic x(30)
+	get system-table
+		on index sys-tbl-type sys-tbl-code
+		key is l-tbl l-code
+	on error
+//		set l-desc = l-code
+		set l-desc = str-concat(str(file-status()),l-tbl,l-code)
+		set l-desc = "Unclassified"
+	else
+		set l-desc = sys-description
+	endon
+end-procedure
+
+procedure finish-report
+	if ws-report-started
+		skip 2
+		print 'Options selected : ' col 2 no-newline
+		print "$#ranges selected   : " col 22
+			ws-pc-filename
+			" - "
+			ws-pc-filename
+		skip
+		if ws-pc-filename != spaces
+			print "Downloaded to PC File : " in col 22
+				ws-pc-filename
+		endif
+	endif
+	RBTCHPROC_FINISH_REPORT_AND_MESSAGE(ws-report-started)
+	if not rbtchproc-in-background
+		display rbtchproc-report-finish-message @21,51
+		pause
+	endif
+endprocedure //finish-report ---------------------------------------------------
+
+procedure flip-slashes
+parameters are l-text			pic x(200) type string
+returning l-text			
+local x				type number
+	for x = 1 to str-len(l-text)
+		if sub-string(l-text,x,x) = "\"
+			string l-text replacing "/" at x
+		elseif sub-string(l-text,x,x) = "/"
+			string l-text replacing "\" at x
+		endif
+	endfor
+//end of file report.spl -------------------------------------------------------
+
+
+procedure random-no
+// Random numbers returned between 1 & 100000
+parameters are x type number 
+y type number
+returning n type number
+	set n = random(tod())
+	set n = random(0)
+	while n < x or n > y
+		set n = random (0)
+	endwhile
+	set n *= 10
+//	set n = (57 * ws-seed + 1) % 100000
+//	set ws-seed = (57 * n + 1) % 100000
+end-procedure
+
+procedure get-random
+parameters are 
+	l-start							type number
+	l-end							type number
+returning
+	l-value							type number
+	set l-value = random(tod())
+	if l-start < 0 
+		set l-start = 0
+	endif
+	if l-end > 1
+		set l-end = 1
+	endif
+	repeat
+		// random returns a number between 0 and 32767
+		set l-value = random(0)
+		// ensure the number is even spread between 0.0001 and +1
+		// 1. drop and amount > 10,000 ( to ensure we deal with an even range)
+		if l-value > 10000
+			set l-value = l-value - (integer(l-value / 10000) * 10000) + 1
+		endif
+		// now have a number between 0 and 9999
+		// divide by 10000 to get numbers between 0 and 0.9999
+		set l-value = l-value / 10000
+	until l-value between l-start and l-end
+	end-repeat
+end-procedure
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                

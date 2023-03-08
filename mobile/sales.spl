@@ -1,0 +1,1215 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : 
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2020
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: mobile/sales.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 12Jun20  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+// TODO: Credit limits 
+ 
+#define I50CREATE_SOL_SAVE_NOTNEEDED
+#define I50CREATE_SOL_ALLOW_CORRECT
+#include "../include/bmsdef.spl"
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+#include "../include/i8gparam.spl"
+#include "../include/i5sostatii.spl"
+#include "../so/i50headso.spl"
+#include "../include/i5linecalc.spl"
+#define DONT_INCLUDE_EDI_LOG
+#include "../so/i50edikit.spl"
+#include "../so/i5creatsol.spl"
+
+
+link 'clib/clibsearch'
+link 'clib/clibatp'
+link 'clib/clib403'
+link 'clib/clibstk'
+link 'clib/clibnewmast'
+link 'mobile/clibmob'
+link 'clib/clibvwp'
+
+#define RTITLE(ONE,TWO,THREE) param-text('{"title1":"<<p1>>","title2":"<<p2>>","title3":"<<p3>>"}',ONE,TWO,THREE)
+
+//#define DEBUG(A) concat(A ":" get-field-value(A))
+
+// The following is used to control the order lines
+#define CANEDIT (sol-line-type = "SN" and sol-chg-type = "S")
+#define LOCKEDCOLOUR RGB(228,228,228)
+
+// The following is used to make database-sql easy with
+// name-and-address-master
+#define DELIVERY_TYPES ("DA" \
+	'01'	'02'	'03'	'04'	'05'	'06'	'07'	'08'	'09'	'10' \
+	'11'	'12'	'13'	'14'	'15'	'16'	'17'	'18'	'19'	'20' \
+	'21'	'22'	'23'	'24'	'25'	'26'	'27'	'28'	'29'	'30' \
+	'31'	'32'	'33'	'34'	'35'	'36'	'37'	'38'	'39'	'40' \
+	'41'	'42'	'43'	'44'	'45'	'46'	'47'	'48'	'49'	'50' \
+	'51'	'52'	'53'	'54'	'55'	'56'	'57'	'58'	'59'	'60' \
+	'61'	'62'	'63'	'64'	'65'	'66'	'67'	'68'	'69'	'70' \
+	'71'	'72'	'73'	'74'	'75'	'76'	'77'	'78'	'79'	'80' \
+	'81'	'82'	'83'	'84'	'85'	'86'	'87'	'88'	'89'	'90' \
+	'91'	'92'	'93'	'94'	'95'	'96'	'97'	'98'	'99'	)
+
+#define ISKITPARENT (sol-line-type = "KN" and sol-chg-type = "K")
+#define ISKITCOMPONENT (sol-line-type = "SN" and sol-chg-type = "D" and sol-print-line = "N")
+// suppress zeros on display
+#define QTYPIC pic s(8)Tzzzz
+#define DOLLARPIC pic s(8)T99
+#define PERCENTPIC pic s(3).99%
+ 
+field
+	ws-function-title						type string
+
+mode md-select
+	prompt "Select"
+mode md-new-order
+	prompt "New"
+mode md-add-item
+	prompt "Add Item"
+mode md-add-note
+	prompt "Add &Note"
+mode md-add-memo
+	prompt "Add &Memo"
+mode md-correct
+	prompt "Correct"
+mode md-remove
+	prompt "Remove"
+
+procedure main
+local
+	lf-customer								like accountcode
+	lf-so-order-no							like so-order-no
+	lf-so-bo-suffix							like so-bo-suffix
+	lf-display-existing						type boolean
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8secabt-check-abort
+		parameters are sys-consolidation-division login-id() "ZMOB" "M004"
+		returning ws-function-title 
+	do i8proglog-write-log
+	do check-and-insert-zround
+	I8GPARAM_ALPHA("-customer",spaces,lf-customer)
+	I8GPARAM_NUM_ALPHA("-order",0,lf-so-order-no,lf-so-bo-suffix)
+	I8GPARAM_FLAG("-existing",FALSE,lf-display-existing)
+	if lf-so-order-no != 0
+		do order-header parameters are lf-so-order-no lf-so-bo-suffix
+		exit
+	elseif lf-display-existing
+		if lf-customer = spaces
+			do clibmob-enterprise-search entry once
+				parameters "4" "Customer Search" 
+				returning lf-customer
+			get deb-master lookup
+				on index accountcode
+				key is lf-customer
+			on error ENOREC
+				exit
+			endon
+		endif
+		do existing-orders-for-customer
+			parameters are lf-customer
+	elseif lf-customer != spaces 
+		get deb-master lookup
+			on index accountcode
+			key is lf-customer
+		on error ENOREC
+			exit
+		endon
+		do create-order-header parameters are lf-customer
+			returning lf-so-order-no lf-so-bo-suffix
+		do  order-header
+			parameters are lf-so-order-no lf-so-bo-suffix
+	elseif lf-customer = spaces 
+		do clibmob-enterprise-search //entry once
+			parameters "4" "Customer Search" 
+			returning lf-customer
+		get deb-master lookup
+			on index accountcode
+			key is lf-customer
+		on error ENOREC
+			exit
+		endon
+		do create-order-header parameters are lf-customer
+			returning lf-so-order-no lf-so-bo-suffix
+		do  order-header
+			parameters are lf-so-order-no lf-so-bo-suffix
+	endif
+end-procedure
+
+//--------------------------------------------------------------------------------
+// Main
+//--------------------------------------------------------------------------------
+//
+// basic process is :
+// 	prompt for customer using enterprise search
+// 	Ask whether quote or sale
+// 	Prompt for warehouse ?  // or just use customer warehouse
+// 	Prompt for hold before processing so that users can modify according to
+// 	notes?
+//
+// 	lines - need search, qty, barcodes, pricing, ATP, kits
+// 	kits will be done via i50edikit.
+//
+
+//------------------------------------------------------------------------------
+// Order header
+//------------------------------------------------------------------------------
+
+procedure create-order-header
+parameters
+	lp-accountcode						like accountcode
+returning
+	lr-so-order-no						like so-order-no
+	lr-so-bo-suffix						like so-bo-suffix
+	//
+	get deb-master
+		on index accountcode
+		key is lp-accountcode
+	on error
+		exit 1
+	endon
+	while so-order-no = 0
+		do clibserial-next-serial-number
+			parameters
+				"SO"
+			returning
+				so-order-no
+		get sales-order lookup
+		on error
+			get sales-order-archive lookup
+				on index so-order-no so-bo-suffix
+				key is so-order-no spaces
+			on error
+				//  doesnot exist so it's cool banana's
+			else
+				set so-order-no = 0
+			endon
+		else
+			set so-order-no = 0
+		endon
+	endwhile
+	set lr-so-order-no = so-order-no
+	set lr-so-bo-suffix = so-bo-suffix
+	initialise sales-order
+	set so-order-no  = lr-so-order-no 
+	set so-bo-suffix = lr-so-bo-suffix
+	set so-cust-code = lp-accountcode
+	insert sales-order
+	on error
+		message "Unable to insert sales order"
+		exit 1
+	endon
+	//
+	// Now lock it 
+	//
+	get sales-order lock
+		on index so-order-no so-bo-suffix
+		key is lr-so-order-no lr-so-bo-suffix
+	on error ELOCKED
+		message "Unable to re-lock order"
+		exit 1
+	endon
+	do populate-order-header parameters are so-order-no so-bo-suffix
+end-procedure
+
+procedure populate-order-header export
+parameters
+	lp-so-order-no						like so-order-no
+	lp-so-bo-suffix						like so-bo-suffix
+local
+	lf-count							type number
+	lf-type								like na-type	
+	lf-returned-type 					like na-type	
+	lf-nad-prompt						type boolean
+	// 
+	get deb-master 
+		on index accountcode 
+		key is so-cust-code
+	on error
+		message "Unable to get customer"
+		exit 1
+	endon
+	set so-order-date = today()
+	set so-delivery-date = today()
+	set so-carrier-code = dr-delivery-route-code
+	set so-order-status = I5SO_RDY_FOR_PICKING // '30'
+	set so-whse-code = warehouse
+	set so-territory-code = territory
+	set so-cust-type = dr-cust-type
+	set so-rep-code = rep-code
+	set so-terms-disc = terms-disc
+	set so-price-code = price-code
+	set so-order-priority = dr-order-priority
+	set so-part-shipment-allowed = dr-part-shipment-allowed
+	set so-date-stamp = today()
+	set so-time-stamp = tod()
+	set so-user-id-code = login-id()
+	set so-curr-code = dr-curr-code
+	select lf-count = count(*)
+		from name-and-address-master
+		where accountcode = :so-cust-code
+		and (na-type in DELIVERY_TYPES
+		or na-type = "C")
+	end-select
+	if lf-count <= 2
+		select lf-type = max(na-type) // result in nn "DA" "C" in that order
+			from name-and-address-master
+			where accountcode = :so-cust-code
+			and (na-type in DELIVERY_TYPES
+				or na-type = "C")
+		end-select
+		do insert-sod parameters are accountcode, lf-type, so-order-no, so-bo-suffix
+		set lf-nad-prompt = FALSE
+	else
+		// there are multple and need to choose
+		set lf-nad-prompt = TRUE
+	endif
+	do get-header-fields entry once
+		parameters lf-nad-prompt
+		returning so-cust-reference lf-returned-type
+	if lf-nad-prompt
+		set lf-type = lf-returned-type
+	endif
+	update sales-order lock
+	on error
+		message "unable to update header"
+		exit 1
+	endon
+	//
+	do insert-sod parameters are accountcode, lf-type, so-order-no, so-bo-suffix
+end-procedure
+
+procedure insert-sod
+parameters
+	lp-account						like accountcode
+	lp-type							like na-type
+	lp-order-no						like so-order-no
+	lp-bo-suffix					like so-bo-suffix
+// copy details from name and address master into sales order delivery
+	get name-and-address-master
+		on index accountcode na-type
+		key is lp-account lp-type
+	initialise sales-order-delivery
+	set so-order-no = lp-order-no
+	set so-bo-suffix = lp-bo-suffix
+	set so-text-type = "DA"
+	set so-dl-text[1] = na-name
+	set so-dl-text[2] = na-company
+	set so-dl-text[3] = na-street
+	set so-dl-text[4] = na-suburb
+	set so-dl-text[5] = na-country
+	set so-dl-text[6] = na-address-6
+	set so-dl-text[7] = na-address-7
+	insert sales-order-delivery
+	on error
+	endon
+end-procedure
+
+screen get-header-fields
+parameters
+	lp-nad-prompt					type boolean
+returning 
+	lr-cust-reference				like so-cust-reference
+	lr-type							like na-type
+	window
+		window-position 5
+		title shortname
+	responsive
+	no-ok-cancel
+detail
+	screen-group
+		accept lr-cust-reference
+			title "Reference or PO"
+			optional
+	end-screen-group
+	screen-group
+		when lp-nad-prompt
+		accept lr-type
+			title "Address"
+			when lp-nad-prompt
+			no-warning
+		drop-down 
+			width 38 
+			select na-type, DDS(na-type,na-company) 
+				from name-and-address-master
+				where accountcode = :so-cust-code
+				and na-type in DELIVERY_TYPES
+		end-drop-down
+	end-screen-group
+end-screen
+
+//------------------------------------------------------------------------------
+// Order lines
+//------------------------------------------------------------------------------
+
+screen order-header
+parameters
+	lp-order-no							like so-order-no
+	lp-bo-suffix						like so-bo-suffix
+	window
+	title RTITLE(ws-function-title,str-concat(str(so-order-no),so-bo-suffix),shortname)
+	responsive
+	select 
+		t0.*
+		t1.*
+		// note that it is important NOT to select the order number from the
+		// delivery table because this is an outer join.  If the delivery
+		// record is not there, then the order number will revert to 0
+		t2.so-text-type
+		t2.so-dl-text
+		from sales-order as t0
+		left join deb-master as t1 on t1.accountcode = t0.so-cust-code
+		left outer join sales-order-delivery as t2 
+			on t2.so-order-no = t0.so-order-no
+			and t2.so-bo-suffix = t0.so-bo-suffix
+			and t2.so-text-type = "DA"
+		where t0.so-order-no = :lp-order-no
+		and t0.so-bo-suffix = :lp-bo-suffix
+before
+	screen-section
+		title "Lines"
+		do order-lines parameters so-order-no so-bo-suffix no-wait
+	end-screen-section
+	screen-section
+		title "Totals"
+		do order-total no-wait
+	end-screen-section
+detail
+	if screenmode = show
+		reselect
+		refresh
+	endif
+	screen-group
+		field-group
+			title "Order"
+			display so-order-no
+			display so-bo-suffix
+		end-field-group
+		field-group
+			title "Customer"
+			display so-cust-code 
+			display shortname
+		end-field-group
+		display so-whse-code
+			title "Warehouse"
+		display so-rep-code
+			title "Rep"
+		display so-cust-reference
+			title "PO"
+	end-screen-group
+	screen-group
+		title "Address"
+		vertical
+		display so-dl-text[1]
+		display so-dl-text[2]
+		display so-dl-text[3]
+		display so-dl-text[4]
+		display so-dl-text[5]
+		display so-dl-text[6]
+		display so-dl-text[7]
+	end-screen-group
+end-screen
+
+//
+screen order-lines
+parameters
+	lp-so-order-no						like so-order-no
+	lp-so-bo-suffix						like so-bo-suffix
+local
+	lf-error-message					type string pic x(120)
+	lf-desc								like sol-line-description
+	window
+	select *
+		from sales-order-line 
+		where so-order-no = :lp-so-order-no
+		and so-bo-suffix = :lp-so-bo-suffix
+	order by sol-line-seq
+	review-from-start
+	datagrid occurs 10
+	allowed md-add-item md-correct search  md-add-note md-add-memo md-remove
+	no-prompt-for-search
+detail
+	// This is butt ugly - but no amount of joins/subselects could I get to
+	// allow a join on the stock-master to display the description
+	set lf-desc = sol-line-description
+	if sol-line-type = "SN" and not ISKITCOMPONENT
+		get stock-master
+			on index stock-code
+			key is stock-code
+		on error
+		else
+			set lf-desc = stk-description
+		endon
+	endif
+	if screenmode = md-add-item
+		do add-stock-item-prompt entry once 
+	elseif screenmode = md-correct
+		if sol-line-type = "DN"
+			do maintain-notes parameters are so-order-no so-bo-suffix sol-line-seq sol-print-line
+		else
+			if CANEDIT
+				do line-correct correct once parameters are so-order-no so-bo-suffix sol-line-seq 
+			endif
+		endif
+	elseif screenmode = md-add-note
+		do maintain-notes parameters are so-order-no so-bo-suffix 0 "Y"
+	elseif screenmode = md-add-memo
+		do maintain-notes parameters are so-order-no so-bo-suffix 0 "N"
+	elseif screenmode = md-remove
+		do remove-line parameters are so-order-no so-bo-suffix sol-line-seq
+			returning lf-error-message
+		if lf-error-message != spaces
+			message-box param-text("<<P1>><<BR>><<p2>>"
+				,"An Error Occurred"
+				,lf-error-message)
+				title is ws-function-title
+				message-buttons  MSG_BOX_CANCEL
+				icon MSG_BOX_STOP
+		endif
+	endif
+	if screenmode in (md-remove md-add-note md-correct md-add-item)
+		reselect 
+		position before sales-order-line
+			on index so-order-no so-bo-suffix sol-line-seq
+			key is so-order-no so-bo-suffix 0
+		refresh review
+		do order-total no-wait
+	endif
+	accept sol-line-seq @1,1
+		title "Seq"
+		when screenmode = search
+		show-value
+		colour 0 on if-then-else(CANEDIT,0,LOCKEDCOLOUR)
+	display stock-code @1,2
+		title "Stock Code"
+		colour 0 on if-then-else(CANEDIT,0,LOCKEDCOLOUR)
+	display lf-desc @1,3
+		title "Description"
+		colour 0 on if-then-else(CANEDIT,0,LOCKEDCOLOUR)
+	display sol-ordered-qty @1,4 QTYPIC
+		title "Qty"
+		colour 0 on if-then-else(CANEDIT,0,LOCKEDCOLOUR)
+	display sol-item-price @1,5 DOLLARPIC
+		title "Price"
+		colour 0 on if-then-else(CANEDIT,0,LOCKEDCOLOUR)
+	display sol-disc-rate @1,6 PERCENTPIC
+		title "Disc"
+		colour 0 on if-then-else(CANEDIT,0,LOCKEDCOLOUR)
+	display sol-shipped-qty @1,7 QTYPIC
+		title "Shipped Qty"
+		colour 0 on if-then-else(CANEDIT,0,LOCKEDCOLOUR)
+	display sol-backorder-qty @1,8 QTYPIC
+		title "Backorder Qty"
+		colour 0 on if-then-else(CANEDIT,0,LOCKEDCOLOUR)
+	display sol-line-amount @1,9 DOLLARPIC
+		title "Amount"
+		colour 0 on if-then-else(CANEDIT,0,LOCKEDCOLOUR)
+	display sol-stk-unit-desc @1,10
+		title "UOM"
+		colour 0 on if-then-else(CANEDIT,0,LOCKEDCOLOUR)
+#ifdef DEBUG
+	display sol-line-type @1,11
+		title "Line Type"
+		colour blue
+	display sol-chg-type @1,12
+		title "Charge Type"
+		colour blue
+	display sol-print-line @1,13
+		title "Print Line"
+		colour blue
+	display sol-price-overide-flag @1,14
+		title "Price Override"
+		colour blue
+#endif
+end-screen
+
+screen order-total
+	window
+	responsive
+	allowed show
+detail
+	screen-group
+		horizontal 
+		wrap
+		display so-order-total-shipped-amount
+			title "Total Amount"
+		display so-order-total-shipped-tax
+			title "GST"
+		display so-order-total-shipped-amount + so-order-total-shipped-tax
+			title "Total to Pay"
+	end-screen-group
+end-screen
+
+screen add-stock-item-prompt
+local
+	lf-stock-code						like stock-code
+	lf-qty								type number
+	lf-display-description				type boolean
+	window
+		window-position 5
+	responsive
+detail
+	screen-group
+		field-group
+			title "Stock Code"
+			horizontal
+			wrap
+			accept lf-stock-code
+				help "Enter stock code, scan or help"
+				default stock-code
+				uppercase
+			before-accept
+				set lf-display-description = false
+				refresh stk-description
+				if screenmode = form-entry-defaults
+					set stock-code = spaces
+				endif
+			end-before-accept
+			on help-key
+				do clibmob-enterprise-search // entry once 
+					parameters are "2" "Item Search" 
+					returning stock-code
+				re-enter optional
+			endon
+			validations
+				get stock-master
+					on index stock-code
+					key is lf-stock-code
+				on error ENOREC
+					// It's not a key 
+					// TODO: Need to check Barcodes, alternatives, etc etc
+					get stock-master 
+						on index stk-apn-number
+						key is lf-stock-code
+					on error ENOREC
+						do clibmob-perform-search parameters are "2" lf-stock-code
+							returning lf-stock-code
+						if lf-stock-code = spaces
+							message-box param-text("<<P1>><<BR>><<p2>>"
+								,"No items found with that term"
+								,"Try help")
+								title is ws-function-title
+								message-buttons  MSG_BOX_CANCEL
+								icon MSG_BOX_INFORMATION
+								optional bell 
+						endif
+						re-enter optional
+					else
+						re-enter optional
+					endon
+					// Everything failed - better do a search
+				endon
+				if stk-condition-code = "O"
+					message-box param-text("<<P1>><<BR>><<p2>>"
+						,"This stock item is obsolete and no longer available"
+						,lf-stock-code)
+						title is ws-function-title
+						message-buttons  MSG_BOX_CANCEL
+						icon MSG_BOX_STOP
+					re-enter lf-stock-code
+				elseif stk-condition-code = "N"
+					message-box param-text("<<P1>><<BR>><<p2>>"
+						,"This stock item is no longer available"
+						,lf-stock-code)
+						title is ws-function-title
+						message-buttons  MSG_BOX_CANCEL
+						icon MSG_BOX_STOP
+					re-enter lf-stock-code
+				endif
+				// TODO: Other rules here.
+				if stk-stock-status in ( "S" "I" )
+					get stock-warehouse-detail
+						on index stock-code whse-code
+						key is lf-stock-code so-whse-code
+					on error ENOREC
+						message-box param-text("<<P1>><<BR>><<p2>>"
+							,"Item not stocked at warehouse"
+							,str-concat(lf-stock-code, "/", so-whse-code))
+							title is ws-function-title
+							message-buttons  MSG_BOX_CANCEL
+							icon MSG_BOX_STOP
+						reenter
+					endon
+				endif
+				end-validations
+				on change
+					get stock-master
+						on index stock-code
+						key is lf-stock-code
+					on error
+					endon
+					set lf-display-description = TRUE
+					refresh stk-description
+				endon
+				accept stk-description
+					read-only
+					when lf-display-description
+			end-field-group
+		accept lf-qty
+			title "Qty"
+			help "Enter the required qty"
+			default sol-ordered-qty
+		before-accept
+			if screenmode = form-entry-defaults
+				set sol-ordered-qty = 1
+			endif
+		end-before-accept
+	end-screen-group
+	confirm 
+		auto
+	confirmed
+		do add-stock-item parameters are lf-stock-code lf-qty
+	end-confirm 
+end-screen
+
+procedure add-stock-item
+parameters
+	lp-stock-code						like stock-code
+	lp-qty								type number
+	//
+	get stock-master
+		on index stock-code
+		key is lp-stock-code
+	if stk-stock-status = "K"
+		do add-a-kit-line parameters are lp-qty
+	else
+		do add-a-normal-line parameters are lp-qty
+	endif
+	// update the header
+	do update-sales-order-header parameters are so-order-no so-bo-suffix
+end-procedure
+
+procedure add-a-normal-line
+// assumes current on stock-master
+parameters
+	lp-qty								type number
+local
+	lf-backorder						type number
+	lf-shipped							type number
+	lf-max-seq							like sol-line-seq
+	do check-available
+		parameter are so-cust-code stock-code so-whse-code lp-qty
+		returning lf-shipped lf-backorder
+	select lf-max-seq = max(sol-line-seq)
+		from sales-order-line
+		where so-order-no = :so-order-no
+		and so-bo-suffix = :so-bo-suffix
+	end-select
+	set sol-line-seq = lf-max-seq + 1
+	INSERT_SOL("SN", stock-code, stk-description, sol-line-seq, lp-qty, lf-shipped, lf-backorder,
+		spaces, 0, spaces, sol-line-seq)
+end-procedure
+
+procedure check-available
+//
+// The calculation of order qtys occurs in a number of places and therefore
+// we have one routine so that there is a single place to determine these
+// numbers
+//
+parameters
+	lp-accountcode						like accountcode
+	lp-stock-code 						like stock-code
+	lp-whse-code						like whse-code
+	lp-qty								like sol-ordered-qty
+returning
+	lr-shipped							like sol-shipped-qty
+	lr-backorder						like sol-backorder-qty
+local
+	lf-available						type number
+	//
+	do clib403-calculate-available
+		parameters are lp-stock-code, lp-whse-code
+		returning lf-available
+	if lf-available > lp-qty
+		set lr-shipped = lp-qty
+		set lr-backorder = 0
+	else
+		set lr-shipped = lf-available
+	// todo: Chack customer accepts backorders
+	// todo: check stock item is available for backorders
+		set lr-backorder = lp-qty - lr-shipped
+	endif
+end-procedure
+
+
+procedure add-a-kit-line
+// assumes current on stock-master
+parameters
+	lp-qty								type number
+local
+	lf-backorder						type number
+	lf-shipped							type number
+	lf-max-seq							like sol-line-seq
+	lf-dummy							pic 9
+	initialise sales-order-line
+		leaving so-order-no so-bo-suffix stock-code
+	set sol-line-description = stk-description
+	do check-available
+		parameter are so-cust-code stock-code so-whse-code lp-qty
+		returning lf-shipped lf-backorder
+	select lf-max-seq = max(sol-line-seq)
+		from sales-order-line
+		where so-order-no = :so-order-no
+		and so-bo-suffix = :so-bo-suffix
+	end-select
+	set sol-line-seq = lf-max-seq + 1
+	set i50edikit-price-passed = FALSE
+	INSERT_KIT_SOL_LOAD('KN',stock-code
+		,sol-line-description,sol-line-seq,lp-qty
+		,lf-shipped,lf-backorder
+		,sol-item-price,sol-stk-unit-desc,lf-dummy,TRUE)
+end-procedure
+
+
+procedure check-and-insert-zround
+local
+	lf-error-found						type boolean 
+	lf-error-message					type varchar pic x(256) 
+	lf-success-message					type varchar pic x(256) 
+//
+	transaction begin
+	get stock-master
+		on index stock-code
+		key is 'ZROUND'
+	on error ENOREC
+		initialise stock-master
+		set stock-code = 'ZROUND'
+		set stk-description = 'Stock rounding'
+		set stk-stock-status = 'Z'
+		set stk-serialized-flag = NO
+		set stk-conversion-factor = 1							
+		do clibstk-get-default-uom
+			parameter SPACES
+			returning stk-unit-desc
+		//
+		do clibnewmast-create-new-stock-master
+			parameter	stock-master.*
+			returning lf-error-found , lf-error-message lf-success-message 
+				stock-master.*
+		if lf-error-found
+			message-box param-text("<<P1>><<BR>><<p2>>"
+				,"An error creating ZROUND Occurred - do not use kits"
+				,lf-error-message)
+				title is ws-function-title
+				message-buttons  MSG_BOX_CANCEL
+				icon MSG_BOX_STOP
+			exit
+		else
+			// double check
+			get stock-master lookup
+				on index stock-code
+				key is stock-code
+			on error ENOREC
+				insert stock-master
+				on error
+				endon
+			endon
+		endif
+		//
+		initialise stock-price 
+			leaving stock-code 
+		insert stock-price
+		on error EDUPL
+		endon
+	else
+		if stk-stock-status <> "Z"
+		or stk-serialized-flag <> NO
+		or stk-condition-code in {'D','N','I'} 
+		or stk-issue-control-code in {'F'} 
+			get stock-master current lock
+			set stk-stock-status = "Z"
+			set stk-serialized-flag = NO
+			set stk-condition-code = SPACES
+			set stk-issue-control-code = SPACES
+			update stock-master
+		endif
+	endon
+	transaction commit
+	get stock-master
+		on index stock-code
+		key is "ZROUND"
+	on error ENOREC
+		acknowledge  "ZROUND still not there"
+		acknowledge lf-error-message
+		acknowledge lf-success-message
+	endon
+end-procedure
+
+// todo: enforce PO required rule
+
+screen line-correct
+parameters
+	lp-so-order-no						like so-order-no
+	lp-so-bo-suffix						like so-bo-suffix
+	lp-sol-line-seq						like sol-line-seq
+local
+	lf-price-changed					type boolean
+	//
+	window
+		window-position 5
+	title "Line Correct"
+	select *
+		from sales-order-line
+		where so-order-no = :lp-so-order-no
+		and so-bo-suffix = :lp-so-bo-suffix
+		and sol-line-seq = :lp-sol-line-seq
+	responsive
+detail
+	screen-group
+		accept stock-code
+			title "Stock Code"
+		accept sol-ordered-qty
+			title "Qty"
+		on change
+			do check-available
+				parameter are so-cust-code stock-code so-whse-code sol-ordered-qty
+				returning sol-shipped-qty sol-backorder-qty
+		endon
+		accept sol-item-price
+			title "Price"
+//		TODO : check whether user can overide price or not
+		on change
+			set lf-price-changed = TRUE
+		endon
+		accept sol-disc-rate pic s(5).99%
+			title "Discount"
+		on change
+			set lf-price-changed = TRUE
+		endon
+	end-screen-group
+	confirm auto
+	confirmed
+		if lf-price-changed  or sol-price-overide-flag = "Y"
+			CORRECT_SOL_USE_PRICE_AND_TAX(sol-line-type
+										,stock-code		
+										,sol-line-description
+										,sol-line-seq
+										,sol-ordered-qty		
+										,sol-shipped-qty
+										,sol-backorder-qty
+										,SPACES	
+										,sol-item-price
+										,SPACES)
+		else
+			CORRECT_SOL(sol-line-type
+										,stock-code		
+										,sol-line-description
+										,sol-line-seq
+										,sol-ordered-qty		
+										,sol-shipped-qty
+										,sol-backorder-qty
+										,SPACES	
+										,sol-item-price
+										,SPACES)
+		endif
+		update sales-order-line
+			no-warning
+		// update the header
+		do update-sales-order-header parameters are so-order-no so-bo-suffix
+//		do order-header parameters so-order-no so-bo-suffix no-wait
+		do order-total no-wait
+	end-confirm 
+end-screen
+
+
+procedure remove-line
+parameters
+	lp-so-order-no						like so-order-no
+	lp-so-bo-suffix						like so-bo-suffix
+	lp-sol-line-seq						like sol-line-seq
+returning
+	lr-error-message					type string pic x(120)
+local
+	lf-ok								type boolean
+	//
+	get sales-order-line 
+		on index so-order-no so-bo-suffix sol-line-seq
+		key is lp-so-order-no lp-so-bo-suffix lp-sol-line-seq
+	on error ENOREC
+		set lr-error-message = "Unable to get line"
+		exit 1
+	endon
+	//
+	if (NOT ISKITPARENT) and (NOT (ISKITCOMPONENT))
+		// it's a normal line - just delete it
+		get sales-order-line 
+			on index so-order-no so-bo-suffix sol-line-seq
+			key is lp-so-order-no lp-so-bo-suffix lp-sol-line-seq
+			lock
+		on error
+			set lr-error-message = "Unable to lock line"
+			exit 1
+		else
+			delete sales-order-line
+			on error
+				set lr-error-message = "Unable to delete line"
+				exit 1
+			endon
+		endon
+	elseif ISKITCOMPONENT
+		// It's a kit component - this is an error
+		set lr-error-message = "Cannot delete kit component - remove whole kit"
+		exit 1
+	elseif ISKITPARENT
+		// It's a kit header - delete the kit
+		transaction begin
+		set lf-ok = TRUE
+		select * from sales-order-line
+			where so-order-no = :so-order-no
+			and so-bo-suffix = :so-bo-suffix 
+			and sol-line-seq >= :lp-sol-line-seq
+			for update
+		detail
+			if ISKITPARENT or ISKITCOMPONENT
+				delete sales-order-line
+				on error
+					set lr-error-message = "Unable to delete some part of the kit"
+					set lf-ok = FALSE
+				endon
+			else
+				// Reached the end of kit
+				break
+			endif
+		end-select
+		if lf-ok
+			transaction commit
+		else
+			transaction rollback
+		endif
+	endif
+	// update the header
+	do update-sales-order-header parameters are so-order-no so-bo-suffix
+end-procedure
+
+procedure update-sales-order-header
+parameters
+	lp-so-order-no						like so-order-no
+	lp-so-bo-suffix						like so-bo-suffix
+	//
+	// Ensure we have a lock
+	//
+	get sales-order
+		on index so-order-no so-bo-suffix
+		key is lp-so-order-no lp-so-bo-suffix
+	on error
+		message-box param-text("<<P1>><<BR>><<p2>>"
+			,"Could not access sales order for updating header values"
+			,"Header values may not be correct")
+			title is ws-function-title
+			message-buttons  MSG_BOX_CANCEL
+			icon MSG_BOX_WARNING
+		exit
+	endon
+	set i5headso-lock-after-update = TRUE
+	set i5headso-force-update-totals = TRUE
+	do i50headso-calc-total-amounts-update
+end-procedure
+
+
+procedure maintain-notes
+parameters
+	lp-so-order-no						like so-order-no
+	lp-so-bo-suffix						like so-bo-suffix
+	lp-sol-line-seq						like sol-line-seq
+	lp-print-line						like sol-print-line // identifies memo or note
+local
+	lf-these-notes						pic x(16000) type varchar
+	lf-last-note-line					type number
+	if lp-sol-line-seq != 0
+		select * from sales-order-line
+			where so-order-no = :lp-so-order-no 
+			and so-bo-suffix = :lp-so-bo-suffix
+			and sol-line-seq >= :lp-sol-line-seq
+			and sol-print-line = :lp-print-line
+		detail
+			if lf-these-notes = spaces
+				set lf-these-notes = sol-line-description
+			else
+				string lf-these-notes appending concat(" ", sol-line-description)
+			endif
+			set lf-last-note-line = sol-line-seq
+		end-select
+	endif
+	if lp-print-line = "Y"
+//		do clibmob-edit-notes-via-prowp	parameters "External Notes" lf-these-notes 0 0
+//			returning lf-these-notes	
+    	do clibmob-notes-via-multiline correct once parameters "Enternal Notes" lf-these-notes returning lf-these-notes 
+	else
+//		do clibmob-edit-notes-via-prowp	parameters "Internal Memo" lf-these-notes 0 0
+//			returning lf-these-notes
+    	do clibmob-notes-via-multiline correct once parameters "Internal Memo" lf-these-notes returning lf-these-notes
+	endif
+	if exit-status != 0
+		exit 
+	endif
+	// If here then some notes were added.
+	// Now add or update the order:
+	if lp-sol-line-seq = 0
+		select lp-sol-line-seq = max(sol-line-seq)
+			from sales-order-line
+			where so-order-no = :lp-so-order-no
+			and so-bo-suffix = :lp-so-bo-suffix
+		end-select
+		set lp-sol-line-seq += 1
+		do add-note-lines-between parameters
+			lp-so-order-no lp-so-bo-suffix lp-sol-line-seq
+			0 lp-print-line lf-these-notes
+	else
+		// Correct is quite tricky because we need to insert lines in the
+		// right place.  The problem is if there are more lines than there
+		// used to be.
+		// Step 1 is to delete the relevant lines
+		sql-delete sales-order-line
+			where so-order-no = :lp-so-order-no
+			and so-bo-suffix = :lp-so-bo-suffix
+			and sol-line-seq >= :lp-sol-line-seq
+			and sol-line-seq <= :lf-last-note-line
+		// Now re-add them
+		do add-note-lines-between parameters
+			lp-so-order-no lp-so-bo-suffix lp-sol-line-seq
+			lf-last-note-line lp-print-line lf-these-notes
+	endif
+end-procedure
+
+procedure add-note-lines-between
+parameters
+	lp-so-order-no						like so-order-no
+	lp-so-bo-suffix						like so-bo-suffix
+	lp-start-line						like sol-line-seq
+	lp-end-line							like sol-line-seq
+	lp-print-line						like sol-print-line // identifies memo or note
+	lp-notes							pic x(16000) type varchar
+local
+	lf-next-line-seq					like sol-line-seq
+	//
+	set sol-line-seq = lp-start-line
+	repeat
+		do clibvwp-break-to-line parameters are lp-notes size-of(sol-line-description) 
+			returning sol-line-description lp-notes
+	until sol-line-description = spaces
+		initialise sales-order-line
+			leaving sol-line-description sol-line-seq
+		set so-order-no = lp-so-order-no
+		set so-bo-suffix = lp-so-bo-suffix
+		INSERT_SOL_USE_PRINT("DN", spaces, sol-line-description, sol-line-seq, 0, 0, 0,
+			spaces, 0, lp-print-line, spaces, lf-next-line-seq)
+		// 
+		// determine the next sequence to use
+		//
+		if lp-end-line  = 0 // we don't care - we are at the end of the order
+			set sol-line-seq += 1
+		else
+			// we do care so use decimals:
+			set sol-line-seq += smallest-increment(sol-line-seq)
+			if sol-line-seq >= lp-end-line 
+				message-box param-text("<<P1>><<BR>><<p2>>"
+					,"You have exceeded the number of lines that can be inserted"
+					,"Some notes will be missing")
+					title is ws-function-title
+					message-buttons  MSG_BOX_CANCEL
+					icon MSG_BOX_WARNING
+				exit
+			endif
+		endif
+	end-repeat
+end-procedure
+
+#ifdef DEBUG
+
+procedure testit
+local
+	lf-text								pic x(16000) type varchar
+	lf-result-line						pic x(16000) type varchar
+	report "test note editor"
+		no-xml
+	set lf-text = "In the middle of a global pandemic, which has to be squeezed down in every country to prevent it returning in wave after wave, Boris Johnson has announced that he will close the Department for International Development (DfiD). He called it a merger but made it absolutely clear that the foreign secretary would be in charge."
+	//
+	//start with teeting the break
+	repeat 
+		do break-to-line parameters are lf-text 40
+			returning lf-result-line lf-text
+	until lf-result-line = spaces
+		print lf-result-line pic x(40)
+	end-repeat
+	set lf-text = "In the middle of a global pandemic, which has to be squeezed down in every country to prevent it returning in wave after wave, Boris Johnson has announced that he will close the Department for International Development (DfiD). He called it a merger but made it absolutely clear that the foreign secretary would be in charge."
+	do edit-notes-via-prowp parameters are "test" lf-text 40 5
+		returning lf-text
+	skip
+	print "AFTER THE EDIT"
+	skip
+	repeat 
+		do break-to-line parameters are lf-text 80
+			returning lf-result-line lf-text
+	until lf-result-line = spaces
+		print lf-result-line pic x(80)
+	end-repeat
+end-procedure
+
+#endif
+
+screen existing-orders-for-customer
+parameters
+	lp-customer							like accountcode
+local
+	lf-so-order-no						like so-order-no
+	lf-so-bo-suffix						like so-bo-suffix
+	window @1,1 to @12,40
+		window-position 5
+	title RTITLE(ws-function-title,lp-customer,shortname)
+	select *
+		from sales-order as t0
+		inner join sales-order-status-desc as t1 on t0.so-order-status = t1.sosd-status and t1.sosd-language = spaces
+		inner join deb-master as t2 on t2.accountcode = t0.so-cust-code
+		where t0.so-cust-code = :lp-customer
+		and t0.so-order-status < "40"
+	datagrid occurs 10
+	allowed search md-select md-new-order
+detail
+	refresh title
+	if screenmode = md-new-order
+		do create-order-header parameters are lp-customer
+			returning lf-so-order-no lf-so-bo-suffix
+		do  order-header
+			parameters are lf-so-order-no lf-so-bo-suffix
+		reselect
+		refresh data
+	endif
+	if screenmode = md-select
+		do  order-header
+			parameters are so-order-no so-bo-suffix
+		reselect
+		refresh data
+	endif
+	accept so-order-no @1,1
+		title "Order"
+		when screenmode = search
+		show-value
+	accept so-bo-suffix @1,2
+		title "BO"
+		when screenmode = search
+		show-value
+	display sosd-description @1,3
+		title "Status"
+	display so-cust-reference @1,4
+		title "PO"
+	display so-order-total-shipped-amount @1,5
+		title "Value"
+	display so-order-date @1,6
+		title "Date"
+	display so-delivery-date @1,7
+		title "Delivery"
+end-screen
+
+

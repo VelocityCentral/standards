@@ -1,0 +1,209 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : overrides
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2019
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: so/m54custom.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 10Oct19  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+ 
+ 
+procedure main export
+    returning lr-spool-file type string
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+    do next main
+end-procedure
+
+procedure public-process-X1-header export
+parameters are 
+	lp-order-no 			                like so-order-no 
+	lp-bo-suffix 			                like so-bo-suffix 
+	lp-sso-value                            like sso-value 
+returning 
+	lr-invoice-field                        pic x(30) 
+	//
+	get sales-order
+		on index so-order-no so-bo-suffix
+		key is lp-order-no lp-bo-suffix
+	on error
+		set lr-invoice-field = spaces
+		exit
+	endon
+	if so-order-source = "J"
+		// Get current on job-cost-master
+		get job-cost-commitments
+			on index job-commitment-type, job-order-no, job-order-suffix
+			key is "S" so-order-no so-bo-suffix
+		on error
+			set lr-invoice-field = spaces
+		else
+			get job-cost-master
+				on index job-code
+				key is job-code
+			on error
+				set lr-invoice-field = spaces
+			endon
+		endon
+	endif
+		//
+	switch lp-sso-value 
+	case 'TM88BC' // TM88 Barcode
+        do tm88-barcode parameters are 
+            concat(str(so-order-no), so-bo-suffix)
+            returning lr-invoice-field
+	case "COY"
+		set lr-invoice-field = company-name
+	case "PROJ_MGR"
+		if so-order-source = "J"
+			get system-user-control
+				on index user-id
+				key is jcm-project-manager
+			on error
+				set lr-invoice-field = jcm-project-manager
+			else
+				set lr-invoice-field = user-employee-name
+			endon
+		else
+			set lr-invoice-field = spaces
+		endif
+	case "JOB_DESC"
+		if so-order-source = "J"
+			set lr-invoice-field = job-cost-description
+		else
+			set lr-invoice-field = spaces
+		endif
+	case "JOB_CODE"
+		if so-order-source = "J"
+			set lr-invoice-field = job-code
+		else
+			set lr-invoice-field = spaces
+		endif
+	else 
+		set lr-invoice-field = SPACES 
+	endswitch 
+endprocedure 
+
+procedure public-process-X1-totals export
+parameters are 
+	lp-order-no 			                like so-order-no 
+	lp-bo-suffix 			                like so-bo-suffix 
+	lp-sso-value                            like sso-value 
+returning 
+	lr-invoice-field                        pic x(30) 
+	//
+	get sales-order
+		on index so-order-no so-bo-suffix
+		key is lp-order-no lp-bo-suffix
+	on error
+	endon
+	switch lp-sso-value 
+	case 'TM88BC' // TM88 Barcode
+        do tm88-barcode parameters are 
+            concat(str(so-order-no), so-bo-suffix)
+            returning lr-invoice-field
+	case "COY"
+		set lr-invoice-field = company-name
+	else 
+		set lr-invoice-field = SPACES 
+	endswitch 
+endprocedure 
+
+procedure tm88-barcode
+parameters
+	lp-string							type string
+returning
+	lr-barcode							type string
+local 
+	lf-height							type string
+	lf-width							type string
+	lf-human-readable					type string
+	lf-barcode							type string
+    /*
+    Rather than ESC, the TM88 uses x1D (dec 29 - "GS") followed by lowercase k to start a bar code
+    That is followed by a code determinng the type of barcode
+    69 is code39
+    73 is code 128
+    The documentation says that after the code you need to include the number of bytes of data and then the data
+    I did not need to do that with code39 but that may be because it uses "*" to indicate start and stop
+    I could not make code128 to work,
+    */
+	// height - number of dots (in this case 120 dots - a dot is about 1/180
+	// inch)
+    set lf-height = concat(ascii-char(29),"h",ascii-char(60))
+	// width - the number is 2,3,4,5 or 6 and is a code.  2 is the thinnest.
+	set lf-width = concat(ascii-char(29),"w",ascii-char(4))
+	// human readable - 0 is none, 1 is above, 2 is below 3 is both
+	set lf-human-readable = concat(ascii-char(29),"H",ascii-char(2))
+	// barcode
+    set lf-barcode = concat(ascii-char(29)  
+            "k"
+            ascii-char(69)   
+            "*"
+            lp-string
+            "*"
+            )
+    set lr-barcode = concat(lf-height,lf-width,lf-human-readable,lf-barcode)
+end-procedure
+    
+
+procedure public-get-contact export
+//<CLIB_DOC>
+//<DESC>
+//Routine to return a trueform document address destination, document is unique
+//by following parameters passed. This is to override what is set in
+//trueform-get-contact because it doesn't handle having multiple documents for
+//a program, source, and type.  So in this situation you need to pass in
+//the layout code to differenciate between them.
+//
+//Address is gathered from trueform document delivery tables in conjunction with
+//Account master records.
+//
+//<P1> Program Name  ie(m54custom, m62custom, m19custom etc)
+//	  As defined in the trueform document types table.
+//<P2> Layout Code
+//<P3> Form Type -  See layout maintenance
+//<P4> Form Source - see layout maintenance
+//<P5> Method
+//	TA- TE = Email
+//  TF -TG = FAX
+//  TH = Folder
+//  TI = FTP
+//  TJ = HTTP
+//  TK = Print Queue
+//<P6> Accountcode   (Supplier, Customer or Warehouse)
+//<P7> Account Type
+//	C = Customer
+//	S = Supplier
+//	W = warehouse
+//<P8> Destination Address as it currently is
+//<R1> Destination Address returned
+//	Email Address, fax number , folder , Queue , etc....
+/////////////////////////////////////////////////////////////////////////////
+	parameters
+		lp-program			pic x(20)
+		lp-layout			like ssh-layout-code
+		lp-form-type		like ssh-order-status
+		lp-form-source		like ssh-order-source
+		lp-method			like sso-field-code
+		lp-account			like tdm-account
+		lp-account-type		like tdm-account
+		lp-invoice-field	type string pic x(300)
+	returning
+		lr-field	pic x(200)
+	//
+	set lr-field = lp-invoice-field
+	if lp-method    = 'TH'
+		set lr-field = 'TH\\192.168.111.123\quicklinks\debinvs'
+	endif
+endprocedure //public-get-contact ---------------------------------------------

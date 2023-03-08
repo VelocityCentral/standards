@@ -1,0 +1,174 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : 
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2011
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: c:\usr\pronto\cus\sample\vglrf\xmlparas.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 29Mar11	rayb		written
+////////////////////////////////////////////////////////////////////////////////
+//
+#ifndef "ixmlparas"
+#define ixmlparas
+
+object ixmlparas-text
+	type is text
+	record is
+		ixmlparas-line					pic x(1024) type string
+	end-record
+
+field 
+	// use this field to override the file name to be used.
+	// this allows for having a variety of different configurations
+	// for either different users or security options or whatever
+	ixmlparas-file-name					pic x(512) type string
+
+
+// ---------------------SAVE Routines----------------------------------------------
+procedure ixmlparas-save-open
+local
+	lf-xmlfile-name						pic x(512) type string
+//
+	do ixmlparas-get-filename
+		returning lf-xmlfile-name
+	open ixmlparas-text
+		file is lf-xmlfile-name
+		create truncate permanent
+	on error
+	endon
+	set ixmlparas-line = "<paras>"
+	insert ixmlparas-text
+	on error
+	endon
+end-procedure
+
+procedure ixmlparas-save-write
+parameters
+	lp-fld-name							pic x(128) type string
+//
+//  Even though it's all xml, note that the restore routine below expects the
+//  xml to be in a specific format.  So if you change this you need to change
+//  the restore.
+//
+	initialise ixmlparas-text
+	string ixmlparas-line appending "<fld-name>"
+	string ixmlparas-line appending lp-fld-name
+	string ixmlparas-line appending "</fld-name><fld-value>"
+	string ixmlparas-line appending get-field-value(lp-fld-name)
+	string ixmlparas-line appending "</fld-value>"
+	insert ixmlparas-text
+	on error
+	endon
+end-procedure
+
+procedure ixmlparas-save-close
+	set ixmlparas-line = "</paras>"
+	insert ixmlparas-text
+	on error
+	endon
+	close ixmlparas-text
+end-procedure
+// ---------------------RESTORE Routines----------------------------------------------
+
+procedure ixmlparas-restore-open
+returning
+	lr-ok								type boolean
+local
+	lf-xmlfile-name						pic x(512) type string
+//
+	set lr-ok = TRUE
+	do ixmlparas-get-filename
+		returning lf-xmlfile-name
+	open ixmlparas-text
+		file is lf-xmlfile-name
+	on error
+		set lr-ok = FALSE
+		exit
+	endon
+	get ixmlparas-text next
+	on error
+		set lr-ok = FALSE
+	endon
+end-procedure
+
+procedure ixmlparas-restore-getnext
+returning
+	lr-ok								type boolean
+	lr-fld-name							pic x(512) type string
+	lr-fld-value						pic x(512) type string
+//
+	set lr-ok = TRUE
+	get ixmlparas-text next
+	on error
+		set lr-ok = FALSE
+		exit
+	endon
+	// this is not strictly an xml parser.  I'm assuming the file was
+	// written according to the write routines above.
+	// 1. trim off the fldname node
+	string ixmlparas-line deleting 1 to pattern(ixmlparas-line,"<fld-name>") + 9
+	// 2. get the field name
+	set lr-fld-name = substring(ixmlparas-line,1,pattern(ixmlparas-line,"<") - 1)
+	// 3. now trim off the field name
+	string ixmlparas-line deleting 1 to pattern(ixmlparas-line,"<") - 1
+	// 4. trim off the field value node name
+	string ixmlparas-line deleting 1 to pattern(ixmlparas-line,"<fld-value>") + 10
+	// 5. get the value
+	if  pattern(ixmlparas-line,"</fld-value>") - 1 > 0
+		set lr-fld-value = substring(ixmlparas-line,1,pattern(ixmlparas-line,"</fld-value>") - 1)
+	endif
+end-procedure
+
+procedure ixmlparas-restore-close
+// really don't need this.  We could just close the file in the calling
+// program. But I added it for consistency sake.
+	close ixmlparas-text
+end-procedure
+
+
+// ---------------------Shared Routines----------------------------------------------
+procedure ixmlparas-get-filename
+returning
+	lr-xmlfile-name						pic x(512) type string
+local
+	i									type number
+	lf-dot-pos							type number
+	lf-slash-pos						type number
+//
+	if ixmlparas-file-name <> spaces
+		set lr-xmlfile-name = ixmlparas-file-name
+	else
+		set lr-xmlfile-name	= get-param(0)
+		for i = strlen(lr-xmlfile-name) down to 1 
+			if substring(lr-xmlfile-name,i,i) = "."
+				set lf-dot-pos = i
+			endif
+			if substring(lr-xmlfile-name,i,i) = "/"
+			or substring(lr-xmlfile-name,i,i) = "\"
+				set lf-slash-pos = i
+			endif
+			if lf-slash-pos <> 0 and lf-dot-pos <> 0
+				break
+			endif
+		endfor
+		if lf-slash-pos = 0 and lf-dot-pos  = 0
+			set lr-xmlfile-name = concat(lr-xmlfile-name,".xml")
+		elseif lf-slash-pos = 0 // dot must be non 0
+			set lr-xmlfile-name = concat(substring(lr-xmlfile-name,1,lf-dot-pos - 1),".xml")
+		elseif lf-dot-pos = 0 // slash pos must be non zero
+			set lr-xmlfile-name = concat(substring(lr-xmlfile-name,lf-slash-pos + 1,str-len(lr-xmlfile-name)),".xml")
+		else // neither are 0
+			set lr-xmlfile-name = concat(substring(lr-xmlfile-name,lf-slash-pos + 1,lf-dot-pos - 1),".xml")
+		endif
+	endif
+end-procedure
+
+#endif
+

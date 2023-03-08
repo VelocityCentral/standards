@@ -1,0 +1,330 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : Reprint all the sales orders on the stmemts
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2009
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: c:\usr\pronto\cus\jj\so\reprintmth.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 19Aug09	rjb Log 44	Reprint Sales orders by selection criteria.
+//						Note that you could use this in conjunction with an X1
+//						code in m54custom to return "get-param(2)" which you
+//						can then use as an indicator that this is a reprint
+//						and then determine whether you want to print the 
+//						"copy only" words.
+////////////////////////////////////////////////////////////////////////////////
+
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+
+object mem-ords
+	type is memory
+	record
+		mo-order-no						like so-order-no
+		mo-bo-suffix					like so-bo-suffix
+		mo-type							pic x(20)
+		mo-accountcode					like accountcode
+		mo-shortname					like shortname
+		mo-value						like so-order-total-shipped-amount
+		mo-whse-code					like so-whse-code
+	end-record
+	key is mo-accountcode mo-order-no mo-bo-suffix
+
+object sales-order-comms
+	type is external
+	record
+		sc-so-order-no					like so-order-no
+		sc-so-bo-suffix					like so-bo-suffix
+	end-record
+
+field
+	ws-function-title						type string
+
+mode md-print
+	prompt "Reprint All Orders"
+	help "Reprint all Invoices"
+mode md-enquire
+	prompt "Details"
+	help "View full details of order"
+
+procedure main
+	get system-control first
+	do i8secabt-check-abort
+		parameters are sys-consolidation-division login-id() "ZVG" "T009"
+		returning ws-function-title 
+	do i8proglog-write-log
+	do selection-criteria entry once
+end-procedure
+
+screen display-mem-file
+	window @1,1 to @24,80
+		title ws-function-title
+	select * from mem-ords
+	allowed search remove md-print md-enquire
+	datagrid occurs 20
+detail
+	if screenmode = md-enquire
+		spl "so/m5ordenq" parameters are "-e" mo-order-no mo-bo-suffix
+	endif
+	if screenmode = md-print
+		do reprint-invoices
+		exit
+	endif
+	display mo-order-no @1,1 
+ 		title "Order"
+	display mo-bo-suffix @1,2 
+ 		title "Suffix"
+	display mo-type @1,3 
+ 		title "Type"
+	display mo-accountcode @1,4 
+ 		title "Account"
+	display mo-shortname @1,5 
+ 		title "Name"
+	display mo-whse-code @1,6
+		title "Whse"
+	display mo-value @1,7 
+ 		title "Value"
+end-screen
+
+screen selection-criteria
+local
+	lf-start-account					like accountcode
+	lf-end-account						like accountcode
+	lf-start-date						type date
+	lf-end-date							type date
+	lf-start-whse						like whse-code
+	lf-end-whse							like whse-code
+	lf-whse-excl-pattern				type string
+//	
+	window @1,1 to @10,80
+		title ws-function-title
+	form-entry
+before
+	set  lf-start-account = min-value(lf-start-account)
+	set  lf-end-account = max-value(lf-end-account)
+	set  lf-start-date = addmonths(today(),-1,FALSE)
+	set lf-start-date = julian(1,month(lf-start-date),year(lf-start-date))
+	set  lf-end-date = addmonths(lf-start-date,1,FALSE) - 1
+	set  lf-start-whse = min-value(lf-start-whse)
+	set  lf-end-whse = max-value(lf-end-whse)
+	set  lf-whse-excl-pattern = "M*"
+	box @1,1 to @10,65
+		title "Selection Criteria"
+detail
+	accept lf-start-account @2,20
+		title "Accounts:"
+		help "The Starting Account to Process"
+		uppercase
+		default lf-start-account
+	accept lf-end-account @2,40
+		title "To:"
+		help "The Ending Account to Process"
+		uppercase
+		default lf-end-account
+	before-accept
+		set lf-end-account = max-value(lf-end-account)
+		string lf-end-account replacing str-concat(lf-start-account) at 1
+	end-before-accept
+	accept lf-start-date @3,20
+		title "Date Range:"
+		help "The PROCESSING date of the sales order (Start of range)"
+		default lf-start-date
+	accept lf-end-date @3,40
+		title "To:"
+		help "The PROCESSING date of the sales order (End of range)"
+		default lf-end-date
+	before-accept
+		set  lf-end-date = addmonths(lf-start-date,1,FALSE) - 1
+	end-before-accept
+	accept lf-start-whse @4,20
+		title "Whse Range:"
+		help "Start warehouse on sales order"
+		default lf-start-whse
+	accept lf-end-whse @4,40
+		title "To:"
+		help "End warehouse on sales order"
+		default lf-end-whse
+	before-accept
+		set lf-end-whse = max-value(lf-end-whse)
+		string lf-end-whse replacing str-concat(lf-start-whse) at 1
+	end-before-accept
+	accept lf-whse-excl-pattern @5,20
+		title "Whse Exclude Pattern:"
+		help "Pattern of warehouses to Exclude from the reprint"
+		default lf-whse-excl-pattern
+		uppercase
+	box @7,10 to @9,50
+	display "Customers with Mail Control set to 'R' will be selected" @8,12
+		foreground prompts
+	confirm auto
+		do create-pattern-from-wild-cards
+			parameters are lf-whse-excl-pattern
+			returning lf-whse-excl-pattern
+		do build-mem-file parameters are 
+			lf-start-account
+			lf-end-account
+			lf-start-date
+			lf-end-date
+			lf-start-whse
+			lf-end-whse
+			lf-whse-excl-pattern
+		do display-mem-file
+	end-confirm
+end-screen
+
+procedure create-pattern-from-wild-cards
+parameters are 
+	lp-string				type string
+returning 
+	lr-string				type string
+local
+	i						type number
+//
+	for i = 1 to strlen(lp-string)
+		if substring(lp-string,i,i) = "*"
+			string lr-string appending "?*"
+		else
+			string lr-string appending substring(lp-string,i,i)
+		endif
+	endfor
+end-procedure
+
+procedure build-mem-file
+parameters
+	lp-start-account					like accountcode
+	lp-end-account						like accountcode
+	lp-start-date						type date
+	lp-end-date							type date
+	lp-start-whse						like whse-code
+	lp-end-whse							like whse-code
+	lp-whse-excl-pattern				type string
+local
+	lf-process-cust						type boolean
+	window @19,44 to @24,80
+	    title is "Report Progress"
+	    color white
+	    no-hide
+//	if not rbtchproc-in-background
+		display bitmap concat(getenv('BMS')'/images/repedge.gif') @19,44
+		display spool-file-name() @20,68 pic x(12) foreground prompts
+		display "Now at :" @23,45 background prompts left
+//	endif
+	open mem-ords
+		temporary
+	select * from sales-order-archive
+		where so-cust-code >= :lp-start-account
+		and so-cust-code <= :lp-end-account
+		and so-processing-date >= :lp-start-date
+		and so-processing-date <= :lp-end-date
+		and so-whse-code >= :lp-start-whse
+		and so-whse-code <= :lp-end-whse
+		and so-order-status <> "99"
+		order by so-processing-date so-cust-code
+	before so-processing-date so-cust-code
+		set lf-process-cust = TRUE
+		get deb-master
+			on index accountcode
+			key is so-cust-code
+		on error
+			initialise deb-master
+				leaving accountcode
+		endon
+		if dr-mail-control-code != "R"
+			set lf-process-cust = FALSE
+		endif
+	detail
+		if pattern(so-whse-code,lp-whse-excl-pattern)
+			continue
+		endif
+		if not lf-process-cust
+			continue
+		endif
+//		if not rbtchproc-in-background
+			if time-elapsed(100,5)
+				display str-concat(format-picture(so-processing-date,"dd/mm") "-" so-cust-code) @23,50 
+						background prompts left
+			endif
+//		endif
+		initialise mem-ords
+		do get-order-type returning mo-type
+		set mo-order-no = so-order-no
+		set mo-bo-suffix = so-bo-suffix
+		set mo-accountcode = accountcode
+		set mo-shortname = shortname
+		set mo-value = so-order-total-shipped-amount
+		set mo-whse-code = so-whse-code
+		insert mem-ords
+	end-select
+end-procedure
+
+procedure get-order-type
+returning
+	lr-type								like mo-type
+	set lr-type = "Normal"
+	if so-credit-note-no <> 0
+		set lr-type = "Credit"
+	endif
+	if pattern(uppercase(so-cust-reference),"OVERDUE")
+		string lr-type appending ":Interest"
+	endif
+end-procedure
+
+procedure reprint-header
+	print company-name in col 1
+		"Reprint List" in col 40
+		today() in col 80
+		tod in col 95
+		" Page "
+		page-no
+//
+	print 
+		"Customer" in col 1
+		"Order " in col 50
+		"Value" in col 60 pic x(14)
+			right
+		"Type" in col 75
+end-procedure
+
+procedure reprint-invoices
+local
+	lf-counter								type number
+	lf-filename								pic x(100) type string
+	report "Reprint List"
+		no-message
+		header reprint-header
+	page
+	set lf-filename = "/tmp/reprint"
+	open sales-order-comms
+		file is lf-filename
+		create truncate permanent
+	select * from mem-ords
+	detail
+		initialise sales-order-comms
+		set sc-so-order-no = mo-order-no
+		set sc-so-bo-suffix = mo-bo-suffix
+		insert sales-order-comms
+		on error
+		endon
+		set lf-counter += 1
+		print mo-accountcode in col 1
+			shortname in col 11
+			mo-order-no in col 50
+			mo-bo-suffix in col 58
+			mo-value in col 60 pic s(9)9.99
+			mo-type in col 75
+	end-select
+	skip
+	print lf-counter pic s(6) " Orders to print in file " 
+	close mem-ords
+	spl "so/m54custom" parameters are "-reprtbulk" lf-filename "S"
+end-procedure
+			
+
+
+

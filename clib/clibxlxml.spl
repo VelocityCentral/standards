@@ -1,0 +1,855 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : This clib provides routines to create an Excel file in 2003 xml
+// format.  This is useful to enable creation of spreadsheets in batch mode.
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2011
+// 
+
+
+DO NOT USE
+
+USE CLIB100 - ODS
+
+
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: c:\usr\pronto\cus\sample\clib\clibxlxml.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 5May11	rayb		written
+////////////////////////////////////////////////////////////////////////////////
+/*
+
+	This documentation is in RST format.  To view this as a nice pdf goto
+	https://overbits.herokuapp.com/rsteditor/ and paste this content.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|           |           |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+
+	Alternatively
+
+	 =========== =========== ======================================================== 
+	  Direction   Data Type   Description                                             
+	 =========== =========== ======================================================== 
+	 =========== =========== ======================================================== 
+
+=========
+clibxlxml
+=========
+
+Retired.  Do Not Use.
+
+Use clibods.
+
+*/
+
+ 
+#include "../include/i8proglog.spl" 
+#define DEFAULTFONTNAME "Calibri"
+#define DEFAULTFONTSIZE 11
+#define DEFAULTFONTCOLOUR "#000000"
+#define HEXCHARS { "0" "1" "2" "3" "4" "5" "6" "7" "8" "9" "0" "A" "B" "C" "D" "E" "F" }
+
+#define WRITELINE(A) \
+	do writeline parameters are A \
+		returning lf-ok lf-message
+
+#define CHECKERROR() \
+	if not lf-ok \
+		set lr-ok = FALSE \
+		set lr-message = lf-message \
+	endif
+
+	
+field 
+	ws-clib-status						type number
+//
+// Cell properties that can be set via "SET CELL PROPERTY"
+// see clibxlxml-set-cell-property for an explanation of
+// how this is used
+//
+	ws-cell-merge-across				type number
+	ws-cell-formula						pic x(512) type string
+
+// Clib status controls where we are in the file creation.
+// It is important that only certain elements are added when
+// we are within certain elements.  e.g. column defitinions must come between
+// the table defintion and the first row.
+//
+#define STATUS_LIBRARY_INITIALISED 1
+#define STATUS_FILE_CREATED 5
+#define STATUS_BASE_STYLES_ADDED 10
+#define STATUS_STYLES_CLOSED 20
+#define STATUS_WORKSHEET_ADDED 25
+#define STATUS_TABLE_ADDED 30
+#define STATUS_ROWS_STARTED 35
+#define STATUS_ROW_ADDED 40
+#define STATUS_CELL_ADDED 45  // Future use
+
+
+
+object xml-file
+	type is text
+	record is 
+		lf-text							pic x(1024) type string
+	end-record
+
+ 
+procedure library-init 
+	get system-control first 
+	on error
+		abort "No Control Record"
+	endon
+	do i8proglog-write-log
+	set ws-clib-status = STATUS_LIBRARY_INITIALISED
+end-procedure
+
+procedure writeline
+parameters
+	lp-text								pic x(1024) type string
+returning
+	lr-ok								type boolean
+	lr-message							pic x(512) type string
+//
+	set lr-ok = TRUE
+	initialise xml-file
+	set lf-text = lp-text
+	insert xml-file
+	on error 
+		set lr-ok = FALSE
+		set lr-message = error-description(file-status())
+	endon
+end-procedure
+
+procedure clibxlxml-create-file export
+parameters 
+	lp-file-name						pic x(512) type string
+returning
+	lr-ok								type boolean
+	lr-message							pic x(512) type string
+local
+	lf-ok								type boolean
+	lf-message							pic x(512) type string
+//
+	set lr-ok = TRUE
+	open xml-file
+		file is lp-file-name
+		create truncate permanent
+	on error
+		set lr-message = error-description(file-status())
+		set lr-ok = FALSE
+	endon
+	WRITELINE('<?xml version="1.0"?>')
+	CHECKERROR()
+	WRITELINE('<?mso-application progid="Excel.Sheet"?>')
+	CHECKERROR()
+	WRITELINE('<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"')
+	CHECKERROR()
+	WRITELINE('xmlns:o="urn:schemas-microsoft-com:office:office"')
+	CHECKERROR()
+	WRITELINE('xmlns:x="urn:schemas-microsoft-com:office:excel"')
+	CHECKERROR()
+	WRITELINE('xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"')
+	CHECKERROR()
+	WRITELINE('xmlns:html="http://www.w3.org/TR/REC-html40">')
+	CHECKERROR()
+	if lr-ok
+		set ws-clib-status = STATUS_FILE_CREATED
+	endif
+	do clibxlxml-add-base-styles
+end-procedure
+
+procedure clibxlxml-add-base-styles
+returning
+	lr-ok								type boolean
+	lr-message							pic x(512) type string
+local
+	lf-ok								type boolean
+	lf-message							pic x(512) type string
+//
+	set lf-ok = TRUE
+	WRITELINE('<Styles>')
+	CHECKERROR()
+	if lf-ok
+		set ws-clib-status = STATUS_BASE_STYLES_ADDED
+	endif
+//
+	do clibxlxml-add-user-style parameters are "Default" // lp-style-name
+					FALSE // lp-bold
+					FALSE // lp-underline
+					FALSE  // lp-italic
+					DEFAULTFONTSIZE  // lp-fontsize
+					DEFAULTFONTCOLOUR //  lp-colour
+					DEFAULTFONTNAME // lp-fontname
+					spaces // lp-h-alignment
+					"Top" // lp-v-alignment
+					Spaces // lp-shading
+					spaces // lp-number-format
+					0 // lp-rotation
+		returning lr-ok lr-message
+	CHECKERROR()
+	//
+	do clibxlxml-add-user-style parameters are "ColHead" // lp-style-name
+					TRUE // lp-bold
+					FALSE // lp-underline
+					FALSE  // lp-italic
+					DEFAULTFONTSIZE  // lp-fontsize
+					"#FFFFFF" //  lp-colour
+					DEFAULTFONTNAME // lp-fontname
+					spaces // lp-h-alignment
+					spaces // lp-v-alignment
+					"#000000" // lp-shading
+					spaces // lp-number-format
+					0 // lp-rotation
+		returning lr-ok lr-message
+	CHECKERROR()
+	//
+	do clibxlxml-add-user-style parameters are "StringStyle" // lp-style-name
+					FALSE // lp-bold
+					FALSE // lp-underline
+					FALSE  // lp-italic
+					DEFAULTFONTSIZE  // lp-fontsize
+					DEFAULTFONTCOLOUR //  lp-colour
+					DEFAULTFONTNAME // lp-fontname
+					spaces // lp-h-alignment
+					spaces // lp-v-alignment
+					spaces // lp-shading
+					spaces // lp-number-format
+					0 // lp-rotation
+		returning lr-ok lr-message
+	CHECKERROR()
+	//
+	do clibxlxml-add-user-style parameters are "NumberStyle" // lp-style-name
+					FALSE // lp-bold
+					FALSE // lp-underline
+					FALSE  // lp-italic
+					DEFAULTFONTSIZE  // lp-fontsize
+					DEFAULTFONTCOLOUR //  lp-colour
+					DEFAULTFONTNAME // lp-fontname
+					"Right" // lp-h-alignment
+					spaces // lp-v-alignment
+					spaces // lp-shading
+					spaces // lp-number-format
+					0 // lp-rotation
+		returning lr-ok lr-message
+	CHECKERROR()
+	//
+	do clibxlxml-add-user-style parameters are "Shortdate" // lp-style-name
+					FALSE // lp-bold
+					FALSE // lp-underline
+					FALSE  // lp-italic
+					DEFAULTFONTSIZE  // lp-fontsize
+					DEFAULTFONTCOLOUR //  lp-colour
+					DEFAULTFONTNAME // lp-fontname
+					"Right" // lp-h-alignment
+					spaces // lp-v-alignment
+					spaces // lp-shading
+					"Short Date" // lp-number-format
+					0 // lp-rotation
+		returning lr-ok lr-message
+	CHECKERROR()
+	//
+	do clibxlxml-add-user-style parameters are "Shorttime" // lp-style-name
+					FALSE // lp-bold
+					FALSE // lp-underline
+					FALSE  // lp-italic
+					DEFAULTFONTSIZE  // lp-fontsize
+					DEFAULTFONTCOLOUR //  lp-colour
+					DEFAULTFONTNAME // lp-fontname
+					"Right" // lp-h-alignment
+					spaces // lp-v-alignment
+					spaces // lp-shading
+					"Short Time" // lp-number-format
+					0 // lp-rotation
+		returning lr-ok lr-message
+	CHECKERROR()
+	//
+	do clibxlxml-add-user-style parameters are "Currency" // lp-style-name
+					FALSE // lp-bold
+					FALSE // lp-underline
+					FALSE  // lp-italic
+					DEFAULTFONTSIZE  // lp-fontsize
+					DEFAULTFONTCOLOUR //  lp-colour
+					DEFAULTFONTNAME // lp-fontname
+					"Right" // lp-h-alignment
+					spaces // lp-v-alignment
+					spaces // lp-shading
+					'<NumberFormat ss:Format="#,##0.00_ ;[Red]\-#,##0.00\ "/>' // lp-number-format
+					0 // lp-rotation
+		returning lr-ok lr-message
+	CHECKERROR()
+	//
+	do clibxlxml-add-user-style parameters are "Percent" // lp-style-name
+					FALSE // lp-bold
+					FALSE // lp-underline
+					FALSE  // lp-italic
+					DEFAULTFONTSIZE  // lp-fontsize
+					DEFAULTFONTCOLOUR //  lp-colour
+					DEFAULTFONTNAME // lp-fontname
+					"Right" // lp-h-alignment
+					spaces // lp-v-alignment
+					spaces // lp-shading
+					"Percent" // lp-number-format
+					0 // lp-rotation
+		returning lr-ok lr-message
+	CHECKERROR()
+	//
+end-procedure
+
+procedure clibxlxml-add-user-style export
+parameters are 
+	lp-style-name						pic x(512) type string
+	lp-bold								type boolean
+	lp-underline						type boolean
+	lp-italic							type boolean
+	lp-fontsize							type number
+	lp-colour							type string // in the format "#RRGGBB"
+	lp-fontname							type string
+	lp-h-alignment						type string // LEFT,RIGHT,CENTER
+	lp-v-alignment						type string // TOP, BOTTOM, CENTERA
+	lp-shading							type string // in the format "#RRGBB"
+	lp-number-format					type string pic x(128)
+	lp-rotation							type number 
+returning
+	lr-ok								type boolean
+	lr-message							pic x(512) type string
+local 
+	lf-ok								type boolean
+	lf-message							pic x(512) type string
+	set lr-ok = TRUE
+	// verify satus
+	if ws-clib-status >= STATUS_STYLES_CLOSED
+	or ws-clib-status < STATUS_BASE_STYLES_ADDED
+		set lr-ok = FALSE
+		set lr-message = "XML file not in correct status (Styles Already Closed)" 
+		exit 
+	endif
+	// verify and set deaults
+	if lp-fontname = spaces
+		set lp-fontname = DEFAULTFONTNAME
+	endif
+	if lp-colour = spaces
+		set lp-colour = DEFAULTFONTCOLOUR
+	else
+		do clibxlxml-verify-colour parameters are lp-colour
+			returning lr-ok lr-message
+		if not lr-ok
+			exit
+		endif
+	endif
+	if lp-fontsize = 0 
+		set lp-fontsize = DEFAULTFONTSIZE
+	else
+		if lp-fontsize < 0 or lp-fontsize  > 100
+			set lr-message = "Invalid Font Size"
+			set lr-ok = FALSE
+			exit
+		endif
+	endif
+	if lp-h-alignment = spaces
+		set lp-h-alignment = "Left"
+	else
+		if lp-h-alignment not in { "Left" "Right" "Center" }
+			set lr-message = "Invalid Horizontal Alignment"
+			set lr-ok = FALSE
+			exit
+		endif
+	endif
+	if lp-v-alignment = spaces
+		set lp-v-alignment = "Top"
+	else
+		if lp-v-alignment not in { "Top" "Bottom" "Center" }
+			set lr-message = "Invalid Vertical Alignment"
+			set lr-ok = FALSE
+			exit
+		endif
+	endif
+	if lp-shading <> spaces
+		do clibxlxml-verify-colour parameters are lp-shading
+			returning lr-ok lr-message
+		if not lr-ok
+			exit
+		endif
+	endif
+	if lp-number-format <> spaces
+		switch uppercase(lp-number-format)
+			case "Shortdate"
+				set lp-number-format = "Short Date"
+			case "Shorttime"
+				set lp-number-format = "Short Time"
+			case "Percent"
+				set lp-number-format = "Percent"
+			case "Currency"
+				set lp-number-format = "#,##0.00_ ;[Red]\-#,##0.00\ "
+			// anything else is acceptable - but you're on you're own.
+		end-switch
+	endif
+	WRITELINE(concat('<Style ss:ID="',lp-style-name,'">'))
+	CHECKERROR()
+	// Start with font
+	WRITELINE( str-concat(
+		'<Font ss:FontName="' lp-fontname '"'
+			' ss:Size="' str(lp-fontsize) '"'
+			' ss:Color="' lp-colour '"'
+			if-then-else(lp-bold, ' ss:Bold="1"', ' ')
+			if-then-else(lp-Italic, ' ss:Italic="1"', ' ')
+			if-then-else(lp-underline, ' ss:Underline="1"', ' ')
+		' />'
+		))
+	CHECKERROR()
+	// Now alignments
+	WRITELINE( str-concat(
+		'<Alignment ss:Horizontal="' lp-h-alignment '"'
+		' ss:Vertical="' lp-v-alignment '"'
+		if-then-else(lp-rotation = 0,' ',str-concat(' ss:Rotate="',str(lp-rotation),'"'))
+		' />'))
+	CHECKERROR()
+	// Interior
+	if lp-shading <> spaces
+		WRITELINE( str-concat(
+			'<Interior ss:Color="' lp-shading '"'
+			' ss:Pattern="Solid" '
+			' />'))
+		CHECKERROR()
+	endif
+	// Number format
+	if lp-number-format <> spaces
+		// Some number formats require a trailing space at the end
+		// This is impossible to identify with PRONTO so we allow
+		// the calling routine to add any line that starts with a <
+		// as the complete xml string
+		if substring(lp-number-format,1,1) = "<" 
+			WRITELINE(lp-number-format)
+		else
+			WRITELINE(str-concat(
+				'<NumberFormat ss:Format="' lp-number-format '"/>'))
+		endif
+		CHECKERROR()
+	endif
+	WRITELINE('</Style>')
+	CHECKERROR()
+end-procedure
+
+procedure clibxlxml-complete-styles export
+local
+	lf-ok								type boolean
+	lf-message							pic x(512) type string
+	WRITELINE('</Styles>')
+	set ws-clib-status = STATUS_STYLES_CLOSED
+end-procedure
+
+procedure clibxlxml-add-worksheet export
+parameters
+	lp-worksheet-name					pic x(100) type string
+returning
+	lr-ok								type boolean
+	lr-message							pic x(512) type string
+local
+	lf-ok								type boolean
+	lf-message							pic x(512) type string
+//
+	set lr-ok = TRUE
+	if ws-clib-status = STATUS_BASE_STYLES_ADDED
+		do clibxlxml-complete-styles
+	endif
+	if ws-clib-status <> STATUS_STYLES_CLOSED
+		set lr-ok = FALSE
+		set lr-message = "XML file not in correct status (ready to insert worksheet)"
+		exit 
+	endif
+//
+	WRITELINE(concat('<Worksheet ss:Name="',lp-worksheet-name,'">'))
+	CHECKERROR()
+	if lr-ok
+		set ws-clib-status = STATUS_WORKSHEET_ADDED
+	endif
+end-procedure
+
+procedure clibxlxml-add-col-width export
+parameters
+	lp-column-no						type number
+	lp-width							type number
+returning
+	lr-ok								type boolean
+	lr-message							pic x(512) type string
+local
+	lf-ok								type boolean
+	lf-message							pic x(512) type string
+//
+	set lr-ok = TRUE
+//
+	if ws-clib-status <> STATUS_TABLE_ADDED
+		set lr-ok = FALSE
+		set lr-message = "XML file not in correct status (ready to insert rows)"
+		exit 
+	endif
+//
+	WRITELINE(concat('<Column ss:Index="',str(lp-column-no),'" ss:AutoFitWidth="0" ss:Width="',str(lp-width),'"/>'))
+	CHECKERROR()
+end-procedure
+
+procedure clibxlxml-add-table export
+returning
+	lr-ok								type boolean
+	lr-message							pic x(512) type string
+local
+	lf-ok								type boolean
+	lf-message							pic x(512) type string
+//
+	set lr-ok = TRUE
+	if ws-clib-status <> STATUS_WORKSHEET_ADDED
+		set lr-ok = FALSE
+		set lr-message = "XML file not in correct status (ready to insert worksheet)"
+		exit 
+	endif
+//
+	WRITELINE('<Table>')
+	CHECKERROR()
+	if lr-ok
+		set ws-clib-status = STATUS_TABLE_ADDED
+	endif
+end-procedure
+
+procedure clibxlxml-add-row export
+returning
+	lr-ok								type boolean
+	lr-message							pic x(512) type string
+local
+	lf-ok								type boolean
+	lf-message							pic x(512) type string
+//
+	set lr-ok = TRUE
+//
+// Column defintions can go between tables and rows
+// but once the rows have started there should be no more column defintions
+	if ws-clib-status = STATUS_TABLE_ADDED 
+		set ws-clib-status = STATUS_ROWS_STARTED
+	endif
+//
+	if ws-clib-status <> STATUS_ROWS_STARTED
+		set lr-ok = FALSE
+		set lr-message = "XML file not in correct status (ready to insert row)"
+		exit 
+	endif
+//
+	WRITELINE('<Row>')
+	CHECKERROR()
+	if lr-ok
+		set ws-clib-status = STATUS_ROW_ADDED
+	endif
+end-procedure
+
+procedure clibxlxml-add-cell export
+parameters
+	lp-value							type string
+	lp-data-type 						type string
+returning
+	lr-ok								type boolean
+	lr-message							pic x(512) type string
+//
+	set lr-ok = TRUE
+//
+	if ws-clib-status <> STATUS_ROW_ADDED
+		set lr-ok = FALSE
+		set lr-message = "XML file not in correct status (ready to insert cell)"
+		exit 
+	endif
+//
+	switch uppercase(lp-data-type)
+	case "HEADING"
+		do clibxlxml-add-cell-style parameters are lp-value lp-data-type "ColHead" 
+			returning lr-ok lr-message
+	case "STRING"
+		do clibxlxml-add-cell-style parameters are lp-value lp-data-type "StringStyle" 
+			returning lr-ok lr-message
+	case "NUMBER"
+		do clibxlxml-add-cell-style parameters are lp-value lp-data-type "NumberStyle" 
+			returning lr-ok lr-message
+	case "PERCENT"
+		do clibxlxml-add-cell-style parameters are lp-value lp-data-type "Percent" 
+			returning lr-ok lr-message
+	case "DATE"
+		do clibxlxml-add-cell-style parameters are lp-value lp-data-type "Shortdate" 
+			returning lr-ok lr-message
+	case "TIME"
+		do clibxlxml-add-cell-style parameters are lp-value lp-data-type "Shorttime" 
+			returning lr-ok lr-message
+	case "CURRENCY"
+		do clibxlxml-add-cell-style parameters are lp-value lp-data-type "Currency" 
+			returning lr-ok lr-message
+	else
+		set lr-ok = FALSE
+		set lr-message = str-concat("Invalid Data Type (" lp-data-type "/" lp-value ")")
+	end-switch
+end-procedure
+
+procedure clibxlxml-add-cell-style export
+parameters
+	lp-value							type string
+	lp-data-type 						type string
+	lp-style	 						type string
+returning
+	lr-ok								type boolean
+	lr-message							pic x(512) type string
+local
+	lf-ok								type boolean
+	lf-message							pic x(512) type string
+	lf-date								type date
+	lf-time								type time
+	i									type number
+	lf-time-array						pic xx occurs 3
+	lf-output							pic x(512) type string
+//
+	set lr-ok = TRUE
+//
+	if ws-clib-status <> STATUS_ROW_ADDED
+		set lr-ok = FALSE
+		set lr-message = "XML file not in correct status (ready to insert cell)"
+		exit 
+	endif
+//
+	set lf-output = '<Cell'
+	if ws-cell-merge-across <> 0
+		string lf-output appending ' ss:MergeAcross="'
+		string lf-output appending str(ws-cell-merge-across)
+		string lf-output appending '"'
+	endif
+	if ws-cell-formula <> spaces
+		string lf-output appending ' ss:Formula="'
+		string lf-output appending ws-cell-formula
+		string lf-output appending '"'
+	endif
+	string lf-output appending ' ss:StyleID="'
+	string lf-output appending lp-style
+	string lf-output appending '">'
+	WRITELINE(lf-output)
+	CHECKERROR()
+	switch uppercase(lp-data-type)
+	case "HEADING"
+		WRITELINE(str-concat('<Data ss:Type="String">',lp-value,'</Data>'))
+		CHECKERROR()
+	case "STRING"
+		WRITELINE(str-concat('<Data ss:Type="String">',lp-value,'</Data>'))
+		CHECKERROR()
+	case "NUMBER" "CURRENCY" "PERCENT"
+		if not valid-number(lp-value)
+			set lr-ok = FALSE
+			set lr-message = concat("Value passed is not a valid number:",lp-value)
+		else
+// Convert to number to ensure that we get leading negatives - trailing
+// negatives cause errors in excel
+		WRITELINE(str-concat('<Data ss:Type="Number">',
+			str(num(lp-value)),
+			'</Data>'))
+			CHECKERROR()
+		endif
+	case "DATE"
+		set lf-date = date2julian(lp-value)
+		if lf-date = 0
+			set lr-ok = FALSE
+			set lr-message = concat("Value passed is not a valid date:", lp-value)
+		else
+			WRITELINE(str-concat('<Data ss:Type="DateTime">',
+				format-picture(lf-date,"yyyy-mm-dd"),
+				'T00:00:00.000',
+				'</Data>'))
+			CHECKERROR()
+		endif
+	case "TIME"
+		set lr-message = concat("Time data invalid:",lp-value,"  Must be a string in the format HH:MM:SS")
+		if str-len(lp-value) <> 8
+			set lr-ok = FALSE
+		else
+			set lf-time-array[1] = substring(lp-value,1,2)
+			set lf-time-array[2] = substring(lp-value,4,5)
+			set lf-time-array[3] = substring(lp-value,7,8)
+			//
+			for i = 1 to 3
+				if not valid-number(lf-time-array[i])
+					set lr-ok = FALSE
+				else
+					if num(lf-time-array[i]) < 0
+						set lr-ok = FALSE
+					endif
+					if num(lf-time-array[i]) > if-then-else(i = 1,23,59)
+						set lr-ok = FALSE
+					endif
+				endif
+			end-for
+			if lr-ok
+				set lr-message = spaces
+				set lf-time = (num(lf-time-array[1]) * 3600 +
+								num(lf-time-array[2]) * 60 +
+								num(lf-time-array[3]))
+				WRITELINE(str-concat('<Data ss:Type="DateTime">',
+					'1899-12-31T',
+					format-picture(lf-time,"HH:MM:SS"),
+					'.000',
+					'</Data>'))
+				CHECKERROR()
+			endif
+		endif
+	else
+		set lr-ok = FALSE
+		set lr-message = str-concat("Invalid Data Type (" lp-data-type "/" lp-value ")")
+	end-switch
+	WRITELINE('</Cell>')
+	CHECKERROR();
+	set ws-cell-merge-across = 0
+	set ws-cell-formula = spaces
+end-procedure
+
+procedure clibxlxml-set-cell-property export
+// The purpose of this structure is to create some properties that apply to a
+// cell that are used very infrequently.  The alternative is to have them as
+// parameters to each cell add routine.  That would mean they need to be added
+// to each call to the routine even if you weren't using them.
+// This structure is intended to provide a sort of "optional" set of
+// parameters.  It works much like you would expose properties of an object in
+// an OO environment.
+parameters
+	lp-parameter-name					type string
+	lp-parameter-value					type string pic x(1024)
+returning
+	lr-ok								type boolean
+	lr-message							pic x(512) type string
+//
+	switch uppercase(lp-parameter-name)
+	case "MERGEACROSS"
+		if not valid-number(lp-parameter-value)
+			set lr-ok = FALSE
+			set lr-message = "Invalid numeric value for merge operation"
+		else
+			set ws-cell-merge-across = num(lp-parameter-value)
+		endif
+	case "FORMULA"
+		set ws-cell-formula = lp-parameter-value
+	end-switch
+end-procedure
+
+procedure clibxlxml-close-row export
+returning
+	lr-ok								type boolean
+	lr-message							pic x(512) type string
+//
+	set lr-ok = TRUE
+//
+	if ws-clib-status <> STATUS_ROW_ADDED
+		set lr-ok = FALSE
+		set lr-message = "XML file not in correct status (in open row)"
+		exit 
+	endif
+//
+	do writeline parameters are "</Row>"
+		returning lr-ok lr-message
+	if lr-ok
+		set ws-clib-status = STATUS_ROWS_STARTED
+	endif
+end-procedure
+
+procedure clibxlxml-close-worksheet export
+returning
+	lr-ok								type boolean
+	lr-message							pic x(512) type string
+local
+	lf-ok								type boolean
+	lf-message							pic x(512) type string
+//
+	set lr-ok = TRUE
+//
+	if ws-clib-status <> STATUS_ROWS_STARTED
+		set lr-ok = FALSE
+		set lr-message = "XML file not in correct status (in open table)"
+		exit 
+	endif
+//
+	WRITELINE("</Table>")
+	CHECKERROR()
+	WRITELINE("</Worksheet>")
+	CHECKERROR()
+	if lr-ok
+		set ws-clib-status = STATUS_STYLES_CLOSED
+	endif
+end-procedure
+
+
+procedure clibxlxml-close-file export
+returning
+	lr-ok								type boolean
+	lr-message							pic x(512) type string
+local
+	lf-ok								type boolean
+	lf-message							pic x(512) type string
+//
+	set lr-ok = TRUE
+//
+	if ws-clib-status <> STATUS_STYLES_CLOSED
+		set lr-ok = FALSE
+		set lr-message = "XML file not in correct status (Styles Closed)"
+		exit 
+	endif
+//
+	WRITELINE("</Workbook>")
+	CHECKERROR()
+	close xml-file
+	on error
+		set lr-ok = FALSE
+		set lr-message = error-description(file-status())
+	endon
+	if lr-ok
+		set ws-clib-status = STATUS_LIBRARY_INITIALISED
+	endif
+end-procedure
+
+procedure clibxlxml-verify-colour
+parameters
+	lp-colour							type string
+returning
+	lr-ok								type boolean
+	lr-message							pic x(512) type string
+local
+	i									type number
+//
+	set lr-ok = TRUE
+	if substring(lp-colour,1,1) <> "#"
+		set lr-ok = FALSE
+		set lr-message = "Colour strings must start with #"
+		exit
+	endif
+	for i = 2 to 7
+		if substring(lp-colour,i,i) not in HEXCHARS
+			set lr-ok = FALSE
+			set lr-message = "Colour strings must only contain Hex characters after the first #"
+			exit
+		endif
+	endfor
+end-procedure
+
+
+
+
+/*
+ <Style ss:ID="s81">
+   <Alignment ss:Horizontal="Center" ss:Vertical="Bottom"/>
+   <-- Sample Font: -->
+   <Font ss:FontName="Calibri" x:Family="Swiss" ss:Size="18" ss:Color="#000000"
+    ss:Bold="1" ss:Italic="1" ss:Underline="Single"/>
+  </Style>
+ </Styles>
+ <Worksheet ss:Name="11145">
+  <Table ss:ExpandedColumnCount="8" ss:ExpandedRowCount="6" x:FullColumns="1"
+   x:FullRows="1" ss:DefaultRowHeight="15">
+   <Column ss:StyleID="s63" ss:AutoFitWidth="0"/>
+
+   <-- below: -->
+   <Row ss:Height="24">
+    <Cell ss:MergeAcross="7" ss:StyleID="s81"><Data ss:Type="String">My Heading</Data></Cell>
+   </Row>
+*/

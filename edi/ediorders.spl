@@ -1,0 +1,876 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : EDI Orders 
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2011
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: edi/ediorders.spl
+//
+// Maintenance
+// (P1) -m
+//
+// Enquiry
+//
+// (P1) -e
+//
+//
+// Modification History
+// Date		Who	SDR		What
+// 06Oct17	rjb Log 115	Access the order
+// 22Feb12	mdr	77		Adapted for GD Rutter
+// 12Oct11	mdr			Add multi warehouse function
+// 04May11  mdr         written 
+////////////////////////////////////////////////////////////////////////////////
+#include '../include/i8secabt.spl'
+#include '../include/i8secok.spl'
+#include '../include/i8proglog.spl'
+#include '../include/m4enqstk.spl'
+#include '../include/i85codes.spl'
+#include '../edi/iedi.spl'
+link 'clib/clibvedi.spl'
+ 
+field
+	ws-function-title					type string
+	ws-allow-maint						type boolean
+
+mode md-cancel
+	prompt 'C&ancel'
+	help 'Cancel order or line'
+	currency
+	when ws-allow-maint
+	always-show
+	process correct
+
+mode md-console
+	prompt 'Inv Console'
+	help 'Display the inventory console for the selected item'
+	currency
+	always-show
+
+mode md-correct
+	prompt 'Correct'
+	help 'Correct'
+	currency
+	when ws-allow-maint
+	always-show
+	process correct
+
+mode md-delivery
+	prompt 'Delivery'
+	help 'View or change delivery address'
+	currency
+	when ws-allow-maint
+	always-show
+	process correct
+
+mode md-delivery-change
+	prompt 'Change To Delivery'
+	help 'Change order to use selected delivery address'
+	currency
+
+mode md-entry
+	prompt 'Entry'
+	help 'Enter a line'
+	currency
+	when ws-allow-maint
+	always-show
+	process entry
+
+mode md-errors
+	prompt 'Errors'
+	help 'View all errors'
+	currency
+
+mode md-lines
+	prompt 'Lines'
+	help 'View order lines'
+	currency
+
+mode md-line-errors
+	prompt 'Line &Errors'
+	help 'View Line errors'
+	currency
+
+mode md-process
+	prompt 'Process'
+	help 'Process order into Pronto'
+	when ws-allow-maint
+	always-show
+	currency
+
+mode md-revalidate
+	prompt 'Re&Validate'
+	help 'Revalidate order for errors'
+	currency
+	when ws-allow-maint
+	always-show
+
+mode md-order-edit
+	prompt "Sales Order"
+	help "Edit the Pronto Order"
+	currency
+	always-show
+
+procedure main
+	local field
+		lf-ok							type boolean
+	get system-control
+		first
+	on error
+		abort 'No Control Record'
+	endon
+	do clibvedi-open-create-tables
+	if exit-status != 0 
+		message-box param-text("<<P1>><<BR>><<p2>>"
+			,"There was a problem creating tables in the database"
+			,"See the system administrator")
+			title is ws-function-title
+			message-buttons MSG_BOX_CANCEL
+			icon MSG_BOX_STOP
+	endif
+	if not set-env("PROXMLREPORTS", "SPOOL")
+	endif
+	do clibvedi-check-add-error-codes
+	if get-param(1) = '-m'
+		do i8secabt-check-abort
+			parameters are sys-consolidation-division login-id() 'ZEDI' 'M051'
+			returning ws-function-title 
+		do i8proglog-write-log
+		do order-screen search md-cancel md-correct md-delivery md-lines md-errors md-revalidate md-process
+			md-order-edit
+	else
+		do i8secok-check-ok
+			parameters are sys-consolidation-division login-id() 'ZEDI' 'E051'
+			returning lf-ok ws-function-title
+		do i8proglog-write-log
+		do order-screen search md-lines md-errors
+	endif
+end-procedure
+
+screen order-screen
+local
+		lf-bill-to-name					like shortname
+		lf-receipt-number				like v-edi-receipt-number
+		lf-status						pic x(10)
+	lf-count							type number
+	window @1,1 to @29,130
+	title is ws-function-title
+	select * from edi-order-headers
+		order by v-edi-receipt-number
+	datagrid occurs 20
+	review-from-start
+before
+	clear
+	box @20,3 to @28,48
+		title 'Account'
+	box @20,52 to @28,96
+		title 'Deliver To'
+	box @20,100 to @28,144
+		title 'Instructions'
+detail
+	set ws-allow-maint = FALSE
+	if v-edi-h-status not in ( IEDI_LOADING IEDI_LOADED IEDI_CANCELLED) and get-param(1) = '-m'
+		set ws-allow-maint = TRUE
+	endif
+	get deb-master
+		on index accountcode
+		key is v-edi-h-bill-to
+	on error
+		set lf-bill-to-name = '** Unknown'
+	else
+		set lf-bill-to-name = shortname
+	end-on
+	get deb-master
+		on index accountcode
+		key is v-edi-h-accountcode
+	on error
+		set shortname = '** Unknown'
+	end-on
+	do clibvedi-get-status-desc parameters are v-edi-h-status
+		returning lf-status
+	if v-edi-h-status = IEDI_EXCEPTION
+		if v-edi-h-error-count = ZERO
+			set lf-status = 'Warnings'
+		else
+			set lf-status = 'Errors'
+		endif
+	endif
+	/*
+	switch on v-edi-h-status
+		case IEDI_RECEIVED
+			set lf-status = 'Received'
+		case '10'
+			if v-edi-h-error-count = ZERO
+				set lf-status = 'Warnings'
+			else
+				set lf-status = 'Errors'
+			endif
+		case '50'
+			set lf-status = 'Loading'
+		case '90'
+			set lf-status = 'Loaded'
+		case '99'
+			set lf-status = 'Cancelled'
+		else
+			set lf-status = '** Unknown'
+	end-switch
+	*/
+	if screen-mode() = md-cancel
+		message-box 'Cancel Order - Are You Sure?'
+			title is 'Warning'
+			message-buttons MSG_BOX_OK_CANCEL
+			default is MSG_BOX_CANCEL
+			icon MSG_BOX_WARNING
+			bell
+			if message-status = MSG_BOX_CANCEL
+			else
+			set lf-receipt-number = v-edi-receipt-number
+			// Flag Lines
+			select * from edi-order-lines
+				where v-edi-receipt-number = :lf-receipt-number
+				for update
+			detail
+				set v-edi-l-status = IEDI_L_CANCELLED
+				update edi-order-lines
+				on error
+				end-on
+			end-select
+			// Flag Header
+			set v-edi-h-status = IEDI_CANCELLED
+		endif
+		refresh review
+	endif
+	if screen-mode() = md-delivery
+		do order-delivery-screen search md-delivery-change
+			parameters are v-edi-h-accountcode
+				v-edi-h-addr-supplied
+				v-edi-h-std-addr1
+				v-edi-h-std-addr2
+				v-edi-h-std-addr3
+				v-edi-h-std-addr4
+				v-edi-h-std-addr5
+				v-edi-h-address-id
+			returning v-edi-h-addr-supplied
+				v-edi-h-std-addr1
+				v-edi-h-std-addr2
+				v-edi-h-std-addr3
+				v-edi-h-std-addr4
+				v-edi-h-std-addr5
+				v-edi-h-address-id
+		refresh review
+	endif
+	if screen-mode() = md-errors
+		do order-errors-screen search
+			parameters are v-edi-receipt-number 
+		refresh data
+	endif
+	if screen-mode() = md-lines
+		if get-param(1) = '-m'
+			do order-lines-screen search md-cancel md-console md-correct md-entry md-line-errors
+				parameters are v-edi-receipt-number
+			else
+			do order-lines-screen search md-console md-line-errors
+				parameters are v-edi-receipt-number
+		endif
+		refresh review
+	endif
+	if screen-mode() = md-revalidate
+		do clibvedi-validate-receipt
+			parameters are v-edi-receipt-number
+		refresh review
+	endif
+	if screen-mode() = md-order-edit
+		if v-edi-h-so-order-no != 0
+		get sales-order-archive
+			on index so-order-no so-bo-suffix
+			key is v-edi-h-so-order-no v-edi-h-so-bo-suffix
+		on error ENOREC
+			spl "so/m50ordent" parameters are "-E" v-edi-h-so-order-no v-edi-h-so-bo-suffix
+		else
+			spl "so/m5ordenq" parameters are "-e" v-edi-h-so-order-no v-edi-h-so-bo-suffix
+		endon
+		else
+			select lf-count = count(*)
+				from sales-order
+				where so-cust-reference = :v-edi-h-cust-reference
+			end-select
+			if lf-count != 1
+				message-box param-text("<<P1>><<BR>><<p2>>"
+					,"Sorry, we are unable to determine the sales order at this stage"
+					,"Either the order has not been updated, or the reference number is non-unique")
+					title is ws-function-title
+					message-buttons MSG_BOX_CANCEL
+					icon MSG_BOX_STOP
+			else
+				select so-order-no, so-bo-suffix
+					from sales-order
+					where so-cust-reference = :v-edi-h-cust-reference
+				detail
+					// there will be only one because we just checked above
+					spl "so/m50ordent" parameters are "-E" so-order-no so-bo-suffix
+					break
+				end-select
+			endif
+		endif
+	endif
+	if screen-mode() = md-process
+		// OK To Process
+		if v-edi-h-error-count <> ZERO
+			message 'Cannot process as order has errors'
+			continue
+		endif
+		if v-edi-h-status = IEDI_LOADING
+			message 'Order is being loaded into Pronto'
+			continue
+		endif
+		if v-edi-h-status = IEDI_LOADED
+			message 'Order has been loaded into Pronto'
+			continue
+		endif
+		// Re-Validate To Make Sure & Update Supply From Warehouse
+		do clibvedi-validate-receipt
+			parameters are v-edi-receipt-number
+		// Load Order
+		do clibvedi-load-order
+			parameters are v-edi-receipt-number
+		refresh review
+	endif
+	display v-edi-receipt-number @1,1 pic z(12)
+		title 'Receipt#'
+	display v-edi-h-accountcode @1,2
+		title 'Customer'
+	display shortname @1,3
+		title 'Name'
+	display v-edi-h-warehouse @1,4 pic x(6)
+		title 'Whse'
+	display v-edi-h-warehouse-1 @1,5 pic x(8)
+		title 'Alt Whse'
+	accept v-edi-h-order-date @1,6 
+		title 'Date'
+		help 'Enter an order date'
+		showvalue
+		when screen-mode() = md-correct
+	accept v-edi-h-delivery-date @1,7 
+		title 'Delivery'
+		help 'Enter a date that delivery is required'
+		showvalue
+		when screen-mode() = md-correct
+	validations
+		if v-edi-h-delivery-date < (today() - 5)
+			message 'Delivery date is more than five days ago - old order?'
+			re-enter
+		endif
+		if v-edi-h-order-date <> ZERO
+			if v-edi-h-delivery-date <> ZERO and v-edi-h-order-date > v-edi-h-delivery-date
+				message 'Order date is greater than delivery date'
+				re-enter
+			endif
+		endif
+	end-validations
+	display v-edi-h-status @1,8 pic x(4)
+		title 'Sts'
+	display lf-status @1,9
+		title 'Description'
+	display v-edi-h-warning-count @1,10
+		title 'Warnings' pic z(9)
+	display v-edi-h-error-count @1,11 pic z(9)
+		title 'Errors'
+	display v-edi-h-date-received @1,12
+		title 'Received'
+	display v-edi-h-date-processed @1,13
+		title 'Processed'
+	display v-edi-h-bill-to @22,10 bold
+		title 'Bill To:'
+	display lf-bill-to-name @23,10 bold
+	display v-edi-h-address-id @24,10 bold
+		title 'DPID:'
+	display v-edi-h-cust-reference @26,10 bold
+		title 'Ref:'
+// rjb log 115-start-------------------------------------------------------------
+	if v-edi-h-so-order-no != 0
+		get sales-order 
+			on index so-order-no so-bo-suffix
+			key is v-edi-h-so-order-no v-edi-h-so-bo-suffix
+		on error
+			get sales-order-archive
+				on index so-order-no so-bo-suffix
+				key is v-edi-h-so-order-no v-edi-h-so-bo-suffix
+			on error
+			endon
+		endon
+		display concat(str(v-edi-h-so-order-no) v-edi-h-so-bo-suffix) @27,10
+		get sales-order-status-desc
+			on index sosd-status sosd-language
+			key is so-order-status spaces
+		on error
+			set sosd-description = spaces
+		endon
+		display  sosd-description @27,20 pic x(15)
+	else
+		clear @27,10 to @27,60
+	endif
+// rjb log 115-end---------------------------------------------------------------
+	display v-edi-h-std-addr1 @22,55 bold
+	display v-edi-h-std-addr2 @23,55 bold
+	display v-edi-h-std-addr3 @24,55 bold
+	display v-edi-h-std-addr4 @25,55 bold
+	display v-edi-h-std-addr5 @26,55 bold
+	display v-edi-h-addr-supplied @27,69 bold
+		title 'Address Supplied:'
+	display v-edi-h-std-instr1 @22,105 bold
+	display v-edi-h-std-instr2 @23,105 bold
+	display v-edi-h-std-instr3 @24,105 bold
+	display v-edi-h-std-instr4 @25,105 bold
+	display v-edi-h-std-instr5 @26,105 bold
+	confirm auto
+	confirmed
+		// Force Revalidate After Correct Mode
+		if screen-mode() = md-correct
+			do clibvedi-validate-receipt
+				parameters are v-edi-receipt-number
+			refresh review
+		endif
+	end-confirm
+end-screen
+
+screen order-lines-screen
+	parameters are
+		lp-receipt-number				like v-edi-receipt-number
+	local field
+		lf-line-type					pic x(10)
+		lf-status						pic x(10)
+		lf-tm-notes						like stock-note occurs 4
+		x								type number
+	window @1,1 to @27,130
+	title is concat('EDI Order Receipt ',str(lp-receipt-number),' Lines')
+	select * from edi-order-lines
+		where v-edi-receipt-number = :lp-receipt-number
+		order by v-edi-receipt-number v-edi-receipt-line
+	datagrid occurs 20
+	review-from-start
+before
+	clear
+	box @20,3 to @26,78
+		title 'Detail'
+	box @20,80 to @26,128
+		title 'TM Note'
+detail
+	switch on v-edi-l-line-type
+		case ' '
+			set lf-line-type = 'Order'
+		case 'N'
+			set lf-line-type = 'Note'
+		else
+			set lf-line-type = '** Unknown'
+	end-switch
+	do clibvedi-get-line-status-desc 
+		parameters are v-edi-l-status
+		returning lf-status
+	if v-edi-l-status = IEDI_EXCEPTION 
+		if v-edi-l-error-count = ZERO
+			set lf-status = 'Warnings'
+		else
+			set lf-status = 'Errors'
+		endif
+	endif
+/*
+	switch on v-edi-l-status
+		case ' '
+			set lf-status = 'Received'
+		case '10'
+			if v-edi-l-error-count = ZERO
+				set lf-status = 'Warnings'
+			else
+				set lf-status = 'Errors'
+			endif
+		case '90'
+			set lf-status = 'Loaded'
+		case '99'
+			set lf-status = 'Cancelled'
+		else
+			set lf-status = '** Unknown'
+	end-switch
+*/
+	get stock-master
+		on index stock-code
+		key is v-edi-l-stock-code
+	on error
+		if v-edi-l-line-type = 'N'
+			set stk-description = v-edi-l-description
+		else
+			set stk-description = '**Unknown'
+		endif
+	end-on
+	set lf-tm-notes[*] = SPACES
+	set x = 1
+	select * from stock-notes
+		where stock-code = :v-edi-l-stock-code
+		and stock-note-type = 'TM'
+	detail
+		if x > 4
+			break
+		endif
+		set lf-tm-notes[x] = stock-note
+		set x += 1
+	end-select
+	if screen-mode() = md-cancel
+		message-box 'Cancel Order Line - Are You Sure?'
+			title is 'Warning'
+			message-buttons MSG_BOX_OK_CANCEL
+			default is MSG_BOX_CANCEL
+			icon MSG_BOX_WARNING
+			bell
+			if message-status = MSG_BOX_CANCEL
+			refresh review
+		else
+			set v-edi-l-status = IEDI_L_CANCELLED
+			refresh review
+		endif
+	endif
+	if screen-mode() = md-console
+		spl 'stk/m4stkconsol' 
+			parameters are '-item' v-edi-l-stock-code
+	endif
+	if screen-mode() = md-line-errors
+		do order-line-errors-screen search
+			parameters are v-edi-receipt-number v-edi-receipt-line
+		refresh data
+	endif
+	accept v-edi-receipt-line @1,1 pic z(8)
+		title 'Line#'
+		help 'Enter line number'
+		showvalue
+		when screen-mode() = md-entry
+	validations
+		get edi-order-lines
+			on index v-edi-receipt-number v-edi-receipt-line
+			key is v-edi-receipt-number v-edi-receipt-line
+			lookup
+		on error
+		else
+			message 'Line Number Already Exists'
+			re-enter
+		end-on
+	end-validations
+	display lf-line-type @1,2 pic x(10)
+		title 'Line Type'
+	accept v-edi-l-stock-code @1,3
+		title 'Item'
+		help 'Enter Pronto item code'
+		showvalue
+		when screen-mode() in (md-correct md-entry) and v-edi-l-line-type = SPACES
+		on help-key
+			do m4enqstk-enquire-on-stock
+				parameters v-edi-l-stock-code SPACES SPACES
+				returning v-edi-l-stock-code
+			reenter
+			optional
+		end-on
+	validations
+		get stock-master
+			on index stock-code
+			key is v-edi-l-stock-code
+		on error
+			message 'Invalid Item Code'
+			re-enter
+		end-on
+		set v-edi-l-warehouse = v-edi-h-warehouse
+		set v-edi-l-uom = stk-unit-desc
+		set v-edi-l-price = ZERO
+		set v-edi-l-accept-price = 'N'
+	end-validations
+	accept stk-description @1,4
+		title 'Description'
+		help 'Enter a description'
+		showvalue
+		when screen-mode() = md-correct and v-edi-l-line-type = 'N'
+	validations
+		set v-edi-l-description = stk-description
+	end-validations
+	display v-edi-l-warehouse @1,5 pic x(6)
+		title 'Whse'
+	display stk-condition-code @1,6 pic x(4)
+		title 'I/O'
+	accept v-edi-l-qty-ordered @1,7 
+		title 'Ordered'
+		help 'Enter an order quantity'
+		showvalue
+		when screen-mode() in (md-correct md-entry) and v-edi-l-line-type = SPACES
+	validations
+		if v-edi-l-qty-ordered <= ZERO
+			message 'Ordered quantity cannot be zero or negative'
+			re-enter
+		endif
+	end-validations
+	display stk-pack-qty @1,8
+		title 'Pack'
+	display stk-unit-desc @1,9 pic x(10)
+		title 'Our UOM'
+	accept v-edi-l-uom @1,10 pic x(6)
+		title 'UOM'
+		help 'Enter a valid item UOM'
+		default v-edi-l-uom
+		uppercase
+		showvalue
+		when screen-mode() in (md-correct md-entry) and v-edi-l-line-type = SPACES
+		on help-key
+			set sys-tbl-type = 'UM'					
+			do i85codes-table-help					
+			if sys-tbl-code > SPACES
+				set v-edi-l-uom = sys-tbl-code
+			endif
+			reenter
+			optional
+		end-on
+	validations
+		if v-edi-l-uom <> stk-unit-desc and v-edi-l-uom <> stk-alt-unit-desc
+			message 'Item UOM is ' stk-unit-desc ' or ' stk-alt-unit-desc
+			re-enter
+		endif
+	end-validations
+	accept v-edi-l-price @1,11
+		title 'Price'
+		help 'Enter or correct the customer price sent'
+		default is v-edi-l-price
+		showvalue
+		when screen-mode() in (md-correct md-entry) and v-edi-l-line-type = SPACES
+	validations
+		if v-edi-l-price < ZERO
+			message 'Price cannot be negative'
+			re-enter
+		endif
+	end-validations
+	display v-edi-l-discount @1,12
+		title 'Discount'
+	display v-edi-l-system-price @1,13
+		title 'System Price'
+	accept v-edi-l-accept-price @1,14 pic x(13)
+		title 'Accept Price'
+		help 'Accept customer price sent? - N=No Y=Yes S=Use System Price'
+		default is v-edi-l-accept-price
+		showvalue
+		when screen-mode() in (md-correct md-entry) and v-edi-l-line-type = SPACES
+	validations
+		if v-edi-l-accept-price not in ('N' 'Y' 'S')
+			message 'Accept customer price not N,Y or S'
+			re-enter
+		endif
+	end-validations
+	display v-edi-l-status @1,15 pic x(4)
+		title 'Sts'
+	display lf-status @1,16
+		title 'Description'
+	display v-edi-l-warning-count @1,17
+		title 'Warnings' pic z(9)
+	display v-edi-l-error-count @1,18 pic z(9)
+		title 'Errors'
+	display lf-line-type @22,17 bold
+		title 'Line Type:'
+	display v-edi-l-gtin @23,17 bold
+		title 'GTIN:'
+	display v-edi-l-cust-item @24,17 bold
+		title 'Customer Item:'
+	display v-edi-l-description @25,17 bold
+		title 'Customer Desc:'
+	display lf-tm-notes[1] @22,82 bold
+	display lf-tm-notes[2] @23,82 bold
+	display lf-tm-notes[3] @24,82 bold
+	display lf-tm-notes[4] @25,82 bold
+	confirm auto
+	confirmed
+	after
+		// Force Revalidate After Correct Mode
+		if screen-mode() in (md-correct md-cancel md-entry)
+			do clibvedi-validate-receipt
+				parameters are v-edi-receipt-number
+			refresh review
+		endif
+	end-confirm
+end-screen
+
+screen order-errors-screen
+	parameters are
+		lp-receipt-number				like v-edi-receipt-number
+	local field
+		lf-error-type					pic x(10)
+	window @1,1 to @26,68
+	title is concat('EDI Order Receipt ',str(lp-receipt-number),' Errors')
+	select * from edi-order-errors
+		where v-edi-receipt-number = :lp-receipt-number
+		order by v-edi-receipt-number v-edi-receipt-line v-edi-e-error-line
+	datagrid occurs 20
+	review-from-start
+before
+detail
+	get edi-error-codes
+		on index v-edi-error-code
+		key is v-edi-error-code
+	on error
+		set v-edi-error-description = '**Unknown'
+	end-on
+	switch on v-edi-error-type
+		case 'W'
+			set lf-error-type = 'Warning'
+		else
+			set lf-error-type = 'Error'
+	end-switch
+	display v-edi-receipt-line @1,1 pic z(8)
+		title 'Line#'
+	display v-edi-e-error-line @1,2 pic z(10)
+		title 'Error#'
+	display v-edi-error-description @1,3
+		title 'Error'
+	display lf-error-type @1,4
+		title 'Type'
+	confirm auto
+	confirmed
+	end-confirm
+end-screen
+
+screen order-line-errors-screen
+	parameters are
+		lp-receipt-number				like v-edi-receipt-number
+		lp-receipt-line					like v-edi-receipt-line
+	local field
+		lf-error-type					pic x(10)
+	window @1,1 to @26,68
+	title is concat('EDI Order Receipt ',str(lp-receipt-number),' Line Errors')
+	select * from edi-order-errors
+		where v-edi-receipt-number = :lp-receipt-number and v-edi-receipt-line = :lp-receipt-line
+		order by v-edi-receipt-number v-edi-receipt-line v-edi-e-error-line
+	datagrid occurs 20
+	review-from-start
+before
+detail
+	get edi-error-codes
+		on index v-edi-error-code
+		key is v-edi-error-code
+	on error
+		set v-edi-error-description = '**Unknown'
+	end-on
+	switch on v-edi-error-type
+		case 'W'
+			set lf-error-type = 'Warning'
+		else
+			set lf-error-type = 'Error'
+	end-switch
+	display v-edi-receipt-line @1,1 pic z(8)
+		title 'Line#'
+	display v-edi-e-error-line @1,2 pic z(10)
+		title 'Error#'
+	display v-edi-error-description @1,3
+		title 'Error'
+	display lf-error-type @1,4
+		title 'Type'
+	confirm auto
+	confirmed
+	end-confirm
+end-screen
+
+screen order-delivery-screen
+	parameters are
+		lp-accountcode					like v-edi-h-accountcode
+		lp-addr-supplied				like v-edi-h-addr-supplied
+		lp-std-addr1					like v-edi-h-std-addr1
+		lp-std-addr2					like v-edi-h-std-addr2
+		lp-std-addr3					like v-edi-h-std-addr3
+		lp-std-addr4					like v-edi-h-std-addr4
+		lp-std-addr5					like v-edi-h-std-addr5
+		lp-address-id					like v-edi-h-address-id
+	returning
+		lr-addr-supplied				like v-edi-h-addr-supplied
+		lr-std-addr1					like v-edi-h-std-addr1
+		lr-std-addr2					like v-edi-h-std-addr2
+		lr-std-addr3					like v-edi-h-std-addr3
+		lr-std-addr4					like v-edi-h-std-addr4
+		lr-std-addr5					like v-edi-h-std-addr5
+		lr-address-id					like v-edi-h-address-id
+	window @1,1 to @26,130
+	title is concat('Delivery Addresses for ',shortname)
+	select * from name-and-address-master
+		where accountcode = :lp-accountcode
+			and (na-type in ('DA') or na-type between '00' and '99')
+		order by accountcode na-type descending
+	datagrid occurs 20
+	review-from-start
+before
+	get deb-master
+		on index accountcode
+		key is lp-accountcode
+	on error
+		set shortname = '**Unknown'
+	end-on
+	set lr-addr-supplied = lp-addr-supplied
+	set lr-std-addr1 = lp-std-addr1
+	set lr-std-addr2 = lp-std-addr2
+	set lr-std-addr3 = lp-std-addr3
+	set lr-std-addr4 = lp-std-addr4
+	set lr-std-addr5 = lp-std-addr5
+	set lr-address-id = lp-address-id
+detail
+	if screen-mode() = md-delivery-change
+		set lr-addr-supplied = 'O'
+		set lr-std-addr1 = na-name
+		set lr-std-addr2 = na-company
+		set lr-std-addr3 = na-street
+		set lr-std-addr4 = na-suburb
+		set lr-std-addr5 = na-country
+		if lr-address-id <> na-address-id
+			set lr-address-id = na-address-id
+		endif
+		exit
+	endif
+	display na-type @1,1 pic x(8)
+		title 'Type'
+	display na-address-id @1,2 pic x(8)
+		title 'DPID'
+	display na-name @1,3
+		title 'Name'
+	display na-company @1,4
+		title 'Address 1'
+	display na-street @1,5
+		title 'Address 2'
+	display na-suburb @1,6
+		title 'Address 3'
+	display na-country @1,7
+		title 'Address 4'
+	confirm auto
+	confirmed
+	end-confirm
+end-screen
+
+screen confirm-screen 
+	parameters
+		lp-message						pic x(60) type string
+	returning
+		lr-ok							type boolean
+	local field
+		lf-ok							pic x
+	window @1,1 to @8,80
+	title 'Warning'
+	allowed entry
+	no-ok-cancel
+before
+	set lr-ok = FALSE
+	display lp-message @3,10 bold background
+detail
+	accept lf-ok @5,10
+		help "Enter Y or N"
+		allowed YES NO
+		default is NO
+		uppercase
+	validations
+		if lf-ok = YES 
+			set lr-ok = TRUE
+		else
+			set lr-ok = FALSE
+		endif
+	end-validations
+	confirm auto
+	confirmed
+	end-confirm
+end-screen

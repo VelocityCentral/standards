@@ -1,0 +1,33 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : 
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2022
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: screens/pcsm50quote.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 18Mar22  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+ 
+procedure library-init
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+end-procedure
+
+procedure print-quote
+parameters
+	lp-order-no						like so-order-no
+	lp-bo-suffix					like so-bo-suffix
+//
+	spl 'so/quoteprint' parameters are lp-order-no lp-bo-suffix	
+	exit 1 // make sure the normal function does not work
+endprocedure
+

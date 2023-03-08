@@ -1,0 +1,3 @@
+Select *
+from cusmetrics
+where cm_datetime = (select max(cm_datetime) from cusmetrics)

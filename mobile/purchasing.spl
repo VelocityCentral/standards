@@ -1,0 +1,709 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : Mobile Purchase Order Capture
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2020
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: mobile/purchasing.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 17Dec20  rjb         written 
+// Phase I
+// 	Identify supplier, prompt for notes, prompt for amount
+// Phase II
+//  Prompt for Customer / Service Call / Project
+// Phase III
+//  Prompt only for jobs I am allocated to???
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+#define I6GENERAL_CHECK_ORDER_UNIQUE
+#define I6GENERAL_ASSIGN_NEXT_ORDER_NUMBER
+#include "../po/i6general.spl"
+#include "../include/i8gparam.spl"
+#include "../include/i8validgl.spl"
+
+ 
+link 'clib/clibsearch'
+link 'mobile/clibmob'
+link 'clib/clibvwp'
+link 'clib/clibtaxpo'
+link 'clib/clibtax'
+link 'clib/clibjobcat'
+
+#define RTITLE(ONE,TWO,THREE) param-text('{"title1":"<<p1>>","title2":"<<p2>>","title3":"<<p3>>"}',ONE,TWO,THREE)
+
+field
+	ws-function-title					type string
+	ws-passed-project					like job-code
+	ws-passed-cost-cat					like job-cost-centre
+	ws-passed-cbs						like pal-cbs-section-code
+	ws-allow-gl-entry					type boolean
+	ws-allow-project-entry				type boolean
+	ws-allow-cbs-entry					type boolean
+	ws-default-gl						like suot-alpha-20-1
+
+object tmp-cost-cats-for-dropdown
+	type is isam
+	record is
+		tccfd-cat						like job-cost-centre
+		tccfd-desc						pic x(30)
+		tccfd-active					type boolean
+	end-record
+	key is tccfd-cat
+
+object tmp-cbs-for-dropdown
+	type is isam
+	record is
+		tcfd-sort						type number
+		tcfd-code						like jcb-section-code
+		tcfd-description				like jcb-description
+		tcfd-cost-cat					like job-cost-centre
+		tcfd-active						type boolean
+	end-record
+	key is tcfd-sort
+
+procedure main
+local
+	lf-config							type boolean
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8secabt-check-abort
+		parameters are sys-consolidation-division login-id() "ZMOB" "M005"
+		returning ws-function-title 
+	do i8proglog-write-log
+	do initialise-parameters
+	do clibvwp-set-line-at-line-feed parameters are TRUE
+	I8GPARAM_FLAG("-config",FALSE,lf-config)
+	if lf-config 
+		do config
+	else
+		do start-new-po
+	endif
+end-procedure
+
+procedure start-new-po
+local
+	lf-supplier								like cre-accountcode
+	do clibmob-enterprise-search entry once
+		parameters "3" "Supplier Search" 
+		returning lf-supplier
+	get cre-master lookup
+		on index cre-accountcode
+		key is lf-supplier
+	on error ENOREC
+		// todo - allow only certain types - e.g. no forex etc
+		message "Invalid Supplier"
+		exit
+	endon
+	do get-po-details correct once parameters are lf-supplier
+end-procedure
+
+screen get-po-details
+parameters
+	lp-supplier								like cre-accountcode
+local
+	lf-notes								pic x(16000) type varchar
+	lf-amount								pic 9(5).99 
+	lf-po									like po-order-no
+	//
+	lf-gl-code 								like gl-accountcode
+	lf-job-code 							like job-code
+	lf-cost-cat 							like job-cost-centre
+	lf-cbs									like jcb-section-code
+	lf-message 								pic x(256)
+	lf-ok									type boolean
+	lf-re-enter								type boolean
+	//
+	title cr-shortname
+	responsive
+before
+	get cre-master 
+		on index cre-accountcode
+		key is lp-supplier
+	on error
+		message "Invalid Supplier"
+		exit
+	endon
+detail
+	screen-group // ----PO Details ----------------------------
+	accept lf-amount 
+		title "Total Value including GST"
+	accept lf-notes 
+		title  "Description"
+		help "Type a description of the goods here"
+		default lf-notes
+		multi-line
+		rows 8
+	end-screen-group
+	screen-group // ---- Analysis ----------------------------
+		title "GL"
+		when ws-allow-gl-entry and ws-passed-project = spaces
+			and lf-job-code = spaces
+		accept lf-gl-code
+			title "Accountcode"
+			no-warning
+			help "Enter either an accountcode or job/cost category"
+			uppercase
+			default lf-gl-code
+		drop-down
+			width 38
+			concat-title
+			select gl-accountcode, gl-desc
+				from gl-master 
+				where gl-total-level = '0'
+		end-drop-down
+		before-accept
+			if screenmode = form-entry-defaults
+				set lf-gl-code = lf-gl-code
+			endif
+		end-before-accept
+		validations
+			I8VALIDGL_VALIDATE_GL_POST(lf-gl-code,YES,lf-job-code,lf-cost-cat,lf-message,lf-ok)
+		end-validations 
+		on change
+			refresh whens
+		endon
+	end-screen-group // ----  Details --------------------------------------
+	screen-group // ---- Project ----------------------------
+		title "Project"
+		when ws-allow-project-entry and lf-gl-code = spaces
+		and ws-passed-project = spaces
+		accept lf-job-code
+			title "Job"
+			help "Enter a valid job Code"
+			uppercase
+			default lf-job-code
+		drop-down
+			width 38
+			concat-title
+			select job-code, job-cost-description
+				from job-cost-master 
+				where jcm-status in ("I" "S")
+				and (ws-passed-project = spaces
+				OR ws-passed-project = job-code)
+		end-drop-down
+		before-accept
+			if screenmode = form-entry-defaults
+				set lf-job-code = ws-passed-project
+			endif
+		end-before-accept
+		on change
+			set lf-cost-cat = spaces
+			set lf-cbs = spaces
+			do build-temp-cost-cats parameters are lf-job-code
+			do build-temp-cbs-dropdown parameters are lf-job-code spaces
+			refresh whens
+			refresh lf-cost-cat
+			refresh lf-cbs
+		endon
+		/*
+		Read carefully:
+		At the end of screen entry EITHER the user has entered a cost cat OR a CBS.
+		if CBS has been entered then the COST CAT must match the CBS entry.
+		If the user has entered a cost cat then CBS is not required.
+		*/
+		accept lf-cost-cat 
+			title "Cost Category"
+			help "Enter a valid cost category"
+			uppercase
+			when lf-job-code != spaces  and not ws-allow-cbs-entry
+			default lf-cost-cat
+		drop-down
+			dynamic
+			width 38
+			concat-title
+			select tccfd-cat, tccfd-desc ,0, tccfd-active from tmp-cost-cats-for-dropdown
+		end-drop-down
+		before-accept
+			if screenmode = form-entry-defaults
+				set lf-cost-cat = ws-passed-cost-cat
+			endif
+		end-before-accept
+		on change
+			do build-temp-cbs-dropdown parameters are lf-job-code lf-cost-cat
+			refresh whens
+			refresh lf-cbs
+		endon
+		accept lf-cbs
+			title "CBS"
+			help "Select a valid CBS Item"
+			when ws-allow-cbs-entry and lf-job-code != spaces
+			uppercase
+			default lf-cbs
+		drop-down
+			width 38
+			dynamic
+			concat-title
+			select tcfd-code, tcfd-description,0, tcfd-active
+				from tmp-cbs-for-dropdown
+		end-drop-down
+		on change
+			// need to make sure cost cat changed to match cbs 
+			// (user may not have entered cost cat)
+			set lf-re-enter = FALSE
+			select *
+				from tmp-cbs-for-dropdown
+				where tcfd-code = :lf-cbs
+			detail 
+				if lf-cost-cat != tcfd-cost-cat
+					set lf-cost-cat = tcfd-cost-cat
+					set lf-re-enter = TRUE
+					break
+				endif
+			end-select
+			if lf-re-enter 
+				re-enter lf-cost-cat optional
+			endif
+		endon
+	end-screen-group // ---- Project --------------------------------------
+	confirm
+	confirmed
+		do add-po parameters are lp-supplier lf-notes lf-amount lf-gl-code lf-job-code lf-cost-cat spaces
+			returning lf-po
+		message-box param-text("<<P1>><<BR>><<p2>>"
+			,"Your Purchase Order Number"
+			,str(lf-po))
+			title is ws-function-title
+			message-buttons  MSG_BOX_OK
+			icon MSG_BOX_INFORMATION
+	end-confirm
+end-screen
+
+procedure add-po
+parameters
+	lp-supplier							like cre-accountcode
+	lp-notes							pic x(16000) type varchar
+	lp-amount							pic 9(5).99 
+	lp-gl-code							like gl-accountcode
+	lp-job-code							like job-code
+	lp-cost-centre						like job-cost-centre
+	lp-cbs								like pal-cbs-section-code
+returning
+	lr-po-order-no						like po-order-no
+local
+	lf-commit							type boolean
+	lf-failed							type boolean
+	lf-next-line						like po-l-seq
+	lf-tax-group						like po-tax-group
+	lf-tax-rate							like tcgd-tax-code-rate
+	//
+	set lf-commit = TRUE
+	transaction begin
+	//
+	initialise purchase-order
+	do i6general-assign-next-order-no
+		returning
+			po-order-no
+			po-whse-code
+			lf-failed
+	if lf-failed
+		message "Unable to allocate PO number"
+		exit 1
+	endif
+	//
+	do determine-posting parameters are lp-gl-code lp-job-code lp-cost-centre lp-cbs
+		returning pol-gl-accountcode lp-job-code lp-cost-centre
+			pal-cbs-section-code
+	set cre-accountcode = lp-supplier
+	set po-order-date = today()
+	set po-action-date = today()
+	set po-arrival-date = today()
+	set po-order-status = "40"
+	set po-initial-currency-rate = 1
+	do clibtaxpo-get-supplier-default-tax-group-or-code 
+		parameters are cre-accountcode
+		returning lf-tax-group
+	do clibtax-get-tax-code-rate-for-display
+		parameters are lf-tax-group spaces "I" today()
+		returning lf-tax-rate
+	set po-order-total = lp-amount / (1 + (lf-tax-rate / 100))
+	set po-ordered-tax-amt = lp-amount - po-order-total
+	set po-specials-provision-amount = po-order-total
+	set po-user-name = login-id()
+	set po-order-type = "P"
+	set po-invoice-due-date = today()
+	set po-curr-mord = "M"
+	set po-curr-unit-from = 1
+	set po-curr-unit-to = 1
+	set po-job-no = lp-job-code
+	set po-job-cost-centre = lp-cost-centre
+	set pol-document-no = right-justify(str(po-order-no),size-of(pol-document-no))
+	insert purchase-order
+	on error
+		set lf-commit = FALSE
+	endon
+	initialise purchase-order-delivery
+		leaving po-order-no po-backorder-flag
+	// todo : set delivery address to warehouse address
+	set po-dl-text[1] = "Taken"
+	insert purchase-order-delivery
+	on error
+		set lf-commit = FALSE
+	endon
+	//
+	// insert po notes
+	//
+	while lp-notes <> spaces
+		do clibvwp-break-to-line parameters are lp-notes  size-of(po-line-description)
+			returning po-line-description lp-notes
+		do insert-po-note parameters are po-order-no po-backorder-flag 
+			po-line-description FALSE
+		if exit-status != 0
+			set lf-commit = FALSE
+		endif
+	end-while
+	//
+	//  Add the special line
+	//
+	initialise purchase-order-line 
+		leaving po-order-no po-backorder-flag
+	select lf-next-line = max(po-l-seq)
+		from purchase-order-line
+		where po-order-no = :po-order-no
+		and po-backorder-flag = :po-backorder-flag
+	end-select
+	set po-l-seq = lf-next-line + 1
+	set po-line-type = "SS"
+	set stock-code = "Special Item"
+	set po-line-description = "Goods as above"
+	set po-item-price = po-order-total
+	set pol-ordered-tax-amt = lp-amount - po-order-total
+	set po-supplier-unit-of-measure = 1
+	set po-supplier-unit-description = "EACH"
+	set po-supplier-unit-conversion = 1
+	set po-order-qty = 1
+	set po-order-line-total = po-item-price
+	set po-line-date-expected = today()
+	set pol-tax-rate = lf-tax-rate
+	set pol-document-no = right-justify(str(po-order-no),size-of(pol-document-no))
+	insert purchase-order-line
+	on error
+		set lf-commit = FALSE
+	endon
+	initialise purchase-order-line-allocation
+		leaving po-order-no po-backorder-flag po-l-seq pal-cbs-section-code
+	set pal-type = "D"
+	set pal-seq-no = 1
+	set pal-gl-accountcode = pol-gl-accountcode
+	insert purchase-order-line-allocation
+	on error
+		set lf-commit = FALSE
+	endon
+	do insert-po-note parameters are po-order-no po-backorder-flag 
+		concat("Entered by " login-id()) TRUE
+	if exit-status != 0
+		set lf-commit = FALSE
+	endif
+	//
+	if lf-commit 
+		transaction commit
+	else
+		transaction rollback
+		message 'Unable to add PO at this time'
+		exit 1
+	endif
+	set lr-po-order-no = po-order-no
+end-procedure
+
+procedure insert-po-note
+parameters
+	lp-order-no							like po-order-no
+	lp-backorder-flag					like po-backorder-flag
+	lp-line-text						like po-line-description
+	lp-memo								type boolean
+local
+	lf-next-line						like po-l-seq
+	initialise purchase-order-line 
+	set po-order-no = lp-order-no
+	set po-backorder-flag = lp-backorder-flag
+	select lf-next-line = max(po-l-seq)
+		from purchase-order-line
+		where po-order-no = :po-order-no
+		and po-backorder-flag = :po-backorder-flag
+	end-select
+	set po-line-description = lp-line-text
+	set po-l-seq = lf-next-line + 1
+	set po-line-type = "DN"
+	if lp-memo
+		set po-line-type = "DM"
+	endif
+	set po-line-date-expected = today()
+	set pol-document-no = right-justify(str(po-order-no),size-of(pol-document-no))
+	insert purchase-order-line
+	on error
+		exit 1
+	endon
+end-procedure
+
+procedure determine-posting
+parameters 
+	lp-gl-code							like gl-accountcode
+	lp-job-code							like job-code
+	lp-cost-centre						like job-cost-centre
+	lp-cbs								like pal-cbs-section-code
+returning 
+	lr-account							like pol-gl-accountcode
+	lr-job-code							like job-code
+	lr-cost-centre						like job-cost-centre
+	lr-cbs								like pal-cbs-section-code
+	// If Job costing is installed then prompt for job and cbs-section-code
+	// else if there is a default expense account for the supplier use that
+	// else use this one
+	// Job / gL
+	get job-cost-centre-budget-actual
+		on index job-code job-cost-centre
+		key is lp-job-code lp-cost-centre
+		lookup
+	on error ENOREC
+		// if we were passed one then use that
+		if ws-passed-project != spaces
+		and ws-passed-cost-cat != spaces
+			set lr-account = str-concat(ws-passed-project, "." ws-passed-cost-cat)
+			set lr-job-code = ws-passed-project
+			set lr-cost-centre = ws-passed-cost-cat
+		else
+			// try the gl code
+			get gl-master
+				on index gl-accountcode
+				key is lp-gl-code
+				lookup
+			on error ENOREC
+				set lr-account = ws-default-gl
+			else
+				set lr-account = lp-gl-code
+			endon
+		endif
+	else
+		set lr-account = str-concat(lp-job-code, "." lp-cost-centre)
+		set lr-job-code = lp-job-code
+		set lr-cost-centre = lp-cost-centre
+	endon
+	// CBS
+	// todo : needs validating and everything
+	if lp-cbs = spaces
+		set lr-cbs = ws-passed-cbs
+	endif
+end-procedure
+
+procedure determine-cbs
+returning
+	lr-cbs								like pal-cbs-section-code
+	set lr-cbs = ws-passed-cbs
+end-procedure
+
+screen config
+	window
+		title "User Configuration"
+	responsive
+	select *
+		from system-user-only-table
+		where suot-tbl-type = 'MOBPO'
+		and suot-tbl-code = login-id()
+		no-warning
+	allowed correct
+before
+	get system-user-only-table
+		on index suot-tbl-type suot-tbl-code 
+		key is 'MOBPO' login-id
+	on error ENOREC
+		initialise system-user-only-table
+			leaving suot-tbl-type suot-tbl-code 
+		insert system-user-only-table
+	endon
+detail
+	screen-group // ---- Configuration ----------------------------
+		title "Configuration"
+	check-box suot-alpha-4-1
+		values YES NO
+		title "Allow GL Code Entry"
+		default is suot-alpha-4-1
+		help "Select this box to make the field true"
+		before-check-box
+			if screenmode = form-entry-defaults
+				set suot-alpha-4-1 = YES
+			endif
+		end-before-check-box
+	accept suot-alpha-20-1
+		title "Default GL Accountcode"
+		help "Default GL code for special lines"
+		uppercase
+		default suot-alpha-20-1
+		next row 
+	drop-down
+		width 38
+		concat-title
+		select gl-accountcode, gl-desc
+			from gl-master 
+			where gl-total-level = '0'
+	end-drop-down
+	before-accept
+		if screenmode = form-entry-defaults
+			set suot-alpha-20-1 = suot-alpha-20-1
+		endif
+	end-before-accept
+	check-box suot-alpha-4-2
+		values YES NO
+		title "Allow Project Allocation"
+		default is suot-alpha-4-2
+		help "Select this box to make the field true"
+		before-check-box
+			if screenmode = form-entry-defaults
+				set suot-alpha-4-2 = YES
+			endif
+		end-before-check-box
+	check-box suot-alpha-4-3
+		values YES NO
+		title "Allow CBS Allocation"
+		default is suot-alpha-4-3
+		help "Select this box to make the field true"
+		before-check-box
+			if screenmode = form-entry-defaults
+				set suot-alpha-4-3 = NO
+			endif
+		end-before-check-box
+	end-screen-group // ---- Configuration --------------------------------------
+end-screen
+
+procedure initialise-parameters
+	I8GPARAM_ALPHA("-project",spaces,ws-passed-project)
+	I8GPARAM_ALPHA("-costcat",spaces,ws-passed-cost-cat)
+	I8GPARAM_ALPHA("-cbs",spaces,ws-passed-cbs)
+	get system-user-only-table
+		on index suot-tbl-type suot-tbl-code 
+		key is 'MOBPO' login-id
+	on error ENOREC
+		set ws-allow-gl-entry = TRUE
+		set ws-allow-project-entry = FALSE
+		set ws-allow-cbs-entry = FALSE
+		// Who knows?  MAy as well make it the first expense account
+		select gl-accountcode 
+			from gl-master
+			where gl-account-type = 'E'
+		detail
+			set ws-default-gl = suot-alpha-20-1
+			break
+		end-select
+	else
+		set ws-allow-gl-entry = if-then-else(suot-alpha-4-1 = YES,True,False)
+		set ws-allow-project-entry = if-then-else(suot-alpha-4-2 = YES,True,False)
+		set ws-allow-cbs-entry = if-then-else(suot-alpha-4-3 = YES,True,False)
+		set ws-default-gl = suot-alpha-20-1
+	endon
+	/*
+	acknowledge ws-passed-project
+	acknowledge ws-passed-cost-cat
+	acknowledge ws-passed-cbs
+	acknowledge ws-allow-gl-entry
+	acknowledge ws-allow-project-entry
+	acknowledge ws-allow-cbs-entry
+	*/
+end-procedure
+
+procedure build-temp-cost-cats
+parameters
+	lp-job-code							like job-code
+	//
+	close tmp-cost-cats-for-dropdown  and remove
+	open tmp-cost-cats-for-dropdown temporary truncate
+	select job-cost-centre
+		from job-cost-centre-budget-actual
+		where job-code = :lp-job-code
+	detail
+		initialise tmp-cost-cats-for-dropdown
+		get job-cost-categories
+			on index jcc-code
+			key is job-cost-centre
+		on error ENOREC
+			continue // don't add
+		endon
+		get system-table
+			on index sys-tbl-type sys-tbl-code
+			key is "JD" jcc-type
+		on error ENOREC
+			continue // don't add
+		else 
+			// Cannot post to Profit, Income or Overhead types
+			if sys-tbl-alpha-1 in ( "A" "I" "O" )
+				continue // don't add
+			endif
+		endon
+		//
+		set tccfd-cat = job-cost-centre
+		get job-cost-centre-description
+			on index job-code job-cost-centre
+			key is lp-job-code job-cost-centre
+		on error ENOREC
+			set tccfd-desc = jcc-std-description
+		else
+			set tccfd-desc = jccd-description
+		endon
+		// Now deal with active or retired
+		set tccfd-active = TRUE
+		if jcc-lock-flag = "I"
+			set tccfd-active = FALSE
+		endif
+		if jcc-active-date <= today() and jcc-active-date != 0
+			set tccfd-active = FALSE
+		endif
+		insert tmp-cost-cats-for-dropdown
+		on error
+		endon
+	end-select
+end-procedure
+
+procedure build-temp-cbs-dropdown
+parameters
+	lp-job-code							like job-code
+	lp-cost-cat							like job-cost-centre
+local
+	lf-open-allocations-count			type boolean
+	lf-sort								type number
+	//
+	close tmp-cbs-for-dropdown and remove
+	open tmp-cbs-for-dropdown temporary truncate
+	//
+	// check is cost allocation flag being used.
+	//
+	select lf-open-allocations-count = count(*)
+		from job-cost-breakdown
+		where jcb-job-code = :lp-job-code
+		and jcb-base-record = "B"
+		and (:lp-cost-cat = spaces or jcb-cost-category = :lp-cost-cat)
+		and jcb-cost-allocation-flag = "1"
+		and jcb-variation-no  = spaces
+		and jcb-version-no = spaces
+	end-select
+	//
+	select *
+		from job-cost-breakdown
+		where jcb-job-code = :lp-job-code
+		and (:lp-cost-cat = spaces or jcb-cost-category = :lp-cost-cat)
+		and (lf-open-allocations-count = 0 or jcb-cost-allocation-flag = "1")
+		and jcb-variation-no  = spaces
+		and jcb-version-no = spaces
+		order by jcb-section-key
+	detail
+		initialise tmp-cbs-for-dropdown
+		set lf-sort += 1
+		set tcfd-code = jcb-section-code
+		set tcfd-description = jcb-description
+		set tcfd-sort = lf-sort
+		set tcfd-active = TRUE
+		set tcfd-cost-cat = jcb-cost-category
+		if jcb-base-record != "B"
+			set tcfd-active = FALSE
+		endif
+		insert tmp-cbs-for-dropdown
+		on error endon
+	end-select
+	//
+end-procedure	

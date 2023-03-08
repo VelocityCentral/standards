@@ -1,0 +1,14 @@
+#PRONTO Screen Customiser File (Override statements only).
+#PCS_TIMESTAMP : Thu Jun 07 08:32:18 2018 rayb
+#PCS_TIMESTAMP : Thu Jun 07 08:24:37 2018 rayb
+#PCS_TIMESTAMP : Fri Jun 01 13:05:40 2018 rayb
+screen get-set-of-orders
+	{
+	trigger
+		{
+		trigger_point = on_help
+		name = so-order-no
+		run = "screens/pcsm54custom|get-sales-order" " "
+		type = clib
+		}
+	}

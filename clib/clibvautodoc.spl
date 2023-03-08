@@ -1,0 +1,730 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : Automatically document Clibs
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2020
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: clib/autodoc.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 23Jul20  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+//
+//
+/*
+
+	This documentation is in RST format.  To view this as a nice pdf goto
+	https://overbits.herokuapp.com/rsteditor/ or rst.ninjs.org and paste this content.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|           |           |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+
+	Alternatively
+
+	 =========== =========== ======================================================== 
+	  Direction   Data Type   Description                                             
+	 =========== =========== ======================================================== 
+	 =========== =========== ======================================================== 
+
+=======
+autodoc
+=======
+
+
+	The purpose of this clib is to extract documentation (in this format) from an spl
+	file and convert it into a pdf.  A program can link to this clib and produce it's own
+	documentation (clibvautodoc-one-pdf) or a merge a number of spl files together to 
+	produce documentation for an entire folder (clibvautodoc-multi-file).
+
+	The rules are:
+
+	- Only the first comments between slash-asterisk and astersik-slash will be processed
+	- The content between the comments must be in rst format (reStructuredText)
+	- A line of equal signs starting in col 1 marks the beginning of the documentation
+	  This line must be length of the file name
+	- This line must be followed by the file name
+	- A line of equal signs of smae length must follow it.
+	- e.g.
+
+::
+
+		=======
+		autodoc
+		=======
+
+From there, everything to the closing asterisk-slash will be considered documentation
+
+	Some important pointers
+
+	- blank lines are important - the tend to indicate the beginning or ending of something
+	- Alignment is everything.  - they indicate that text belongs to preceding text.
+	- there are some special characters in some instances.  A line ending in a double colon means something
+	  Asterisk characters are reserved
+	- Do not use tabs in tables
+	- section headings are determined by underlining (and optionally overlining).  The sequence in which
+	  these are used is not important but it MUST be consitent,.
+	- The underlining MUST follow these rules:
+
+	===== =================== ==================================================
+	Level Underline character Notes
+	===== =================== ==================================================
+	  1 		"=" 			Should only occur once at the start of the file
+	  2         "~"				Second Level
+	  3         "-"             Third Level
+	  4         "+"             Fourth level
+	===== =================== ==================================================
+
+clibvautodoc-one-pdf
+~~~~~~~~~~~~~~~~~~~~
+
+	Use this when you want to create a pdf from one spl file.  (Usually the file that
+	that is running the calling program).  This is useful for end-user documentation.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      | String    | full path to the file being documented.                |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      | Boolean   | True - download the file as well as creating it.       |
+	|           |           | False - Create the file in /tmp only                   |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      | Boolean   | True - include a Velocity Copyright statement          |
+	|           |           | False = no copyright                                   |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      | Number    | The number of levels in the TOC.                       |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     | String    | The name of the created file.                          |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvautodoc-multi-file
+~~~~~~~~~~~~~~~~~~~~~~~
+
+	Use this when you want to create a pdf containing documentation from multiple 
+	spl files.
+
+
+	lp-path-to-folder					pic x(128) type string
+	lp-file-name						pic x(128) type string
+	lp-pattern							pic x(128) type string
+	lp-quiet-mode						type boolean
+	lp-include-copyright				type boolean
+	lp-output-type						pic x
+	lp-toc-level						type number
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      | String    | full path to the file being documented.                |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      | String    | The name of the final output file (either pdf or       |
+	|           |           | or HTML                                                |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      | String    | A valid Pronto pattern to match against the file       |
+	|           |           | names in the selected folder.  This could either       |
+	|           |           | be a single file or a pattern such as ^clib?*.spl      |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      | Boolean   | True - download the file as well as creating it.       |
+	|           |           | False - Create the file in /tmp only                   |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      | Boolean   | True - include a Velocity Copyright statement          |
+	|           |           | False = no copyright                                   |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      | String x  | Must be either P for pdf or H for HTML                 |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      | Number    | The number of levels in the TOC.                       |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     | String    | The name of the created file.                          |
+	+-----------+-----------+--------------------------------------------------------+
+
+*/
+ 
+#define DEBUG
+
+#include "../include/i8proglog.spl"
+#include "../include/i8proglogparam.spl"
+
+#define METRICS7STRING \
+	if-then-else(get-system-metrics(7) = 0,"Thick Client" \
+	,if-then-else(get-system-metrics(7) = 1,"Web - no LA" \
+	,if-then-else(get-system-metrics(7) = 2,"Web - LA Active" \
+	,if-then-else(get-system-metrics(7) = 3,"Web - on Local Machine" \
+	,"Unknown"))))
+		
+#define ADDINSTRUCTION(A) \
+	string lf-instructions appending A \
+	string lf-instructions appending ASCII-CHAR(10)
+
+link "clib/clibvfile"
+
+object tmp-text
+	type text
+	record is
+		tmp-text						pic x(1024)
+	endrecord
+
+object files-to-read
+	type is memory
+	record is 
+		fr-filename						pic x(512) type string
+		fr-base							pic x(512) type string
+	end-record
+	key is fr-filename
+
+object source-file
+	type is text
+	record is 
+		sf-line							pic x(1024) type string
+	end-record
+
+#define I(TXT) \
+	do write-one-line parameters are TXT
+ 
+field
+	ws-function-title					type string
+	ws-last-error						pic x(1024) type string
+
+procedure library-init
+	get system-control first
+	on error
+		abort "No Control File"
+	endon
+	set ws-function-title = "Auto Documenter"
+	do i8proglogparam-write-log parameters are "clibvods"
+end-procedure
+
+procedure main
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	set ws-function-title = "Auto Documenter"
+	do i8proglog-write-log
+	do test-get-parameters entry once
+end-procedure
+
+// ------------------------------------------------------------------------------------------
+// Exported Methods / Interfaces
+// ------------------------------------------------------------------------------------------
+
+procedure clibvods-get-last-error export
+returning
+	lr-message							like ws-last-error
+	set lr-message = ws-last-error
+end-procedure
+
+procedure clibvautodoc-one-pdf export
+parameters
+	lp-filename							pic x(256) type string
+	lp-download							type boolean // include the download or just return the filename
+	lp-include-copyright				type boolean
+	lp-toc-level						type number
+returning
+	lr-result-file						pic x(512) type string
+local
+	lf-unc								pic x(20) type string
+	lf-folder							pic x(256) type string
+	lf-file								pic x(256) type string
+	lf-ext								pic x(20) type string
+	//
+	do clibvfile-get-parts parameters are lp-filename
+		returning lf-unc lf-folder lf-file lf-ext
+	do document-folder entry once parameters are 
+		lf-folder 
+		str-concat(lf-file "." lf-ext) 
+		lf-file 
+		TRUE  // quiet mode
+		lp-include-copyright
+		"P" // output to pdf
+		lp-toc-level
+		False // include filename
+	returning lr-result-file
+	if file-exists(lr-result-file,false)
+		if get-system-metrics(7) =  2
+			// open the file
+			command "proclientft"
+				parameters
+					"-lq"
+					lr-result-file
+					str-concat(lf-file,".pdf")
+		endif
+	endif
+end-procedure
+
+procedure clibvautodoc-one-html export
+parameters
+	lp-filename							pic x(256) type string
+	lp-download							type boolean // include the download or just return the filename
+	lp-include-copyright				type boolean
+	lp-toc-level						type number
+returning
+	lr-result-file						pic x(512) type string
+local
+	lf-unc								pic x(20) type string
+	lf-folder							pic x(256) type string
+	lf-file								pic x(256) type string
+	lf-ext								pic x(20) type string
+	//
+	do clibvfile-get-parts parameters are lp-filename
+		returning lf-unc lf-folder lf-file lf-ext
+	do document-folder entry once parameters are 
+		lf-folder 
+		str-concat(lf-file "." lf-ext) 
+		lf-file 
+		TRUE  // quiet mode
+		lp-include-copyright
+		"H" // output to html
+		lp-toc-level
+		False // include filename
+	returning lr-result-file
+	if file-exists(lr-result-file,false)
+		if get-system-metrics(7) =  2
+			// open the file
+			command "proclientft"
+				parameters
+					"-lq"
+					lr-result-file
+					str-concat(lf-file,".html")
+		endif
+	endif
+end-procedure
+
+procedure clibvautodoc-multi-file
+parameters 
+	lp-path-to-folder					pic x(128) type string
+	lp-file-name						pic x(128) type string
+	lp-pattern							pic x(128) type string
+	lp-quiet-mode						type boolean
+	lp-include-copyright				type boolean
+	lp-output-type						pic x
+	lp-toc-level						type number
+returning
+	lr-result-file						pic x(512) type string
+	do document-folder entry once parameters are 
+			lp-path-to-folder 
+			lp-pattern 
+			lp-file-name 
+			lp-quiet-mode 
+			lp-include-copyright 
+			lp-output-type 
+			lp-toc-level
+			true // include filename
+	returning lr-result-file
+	if file-exists(lr-result-file,false)
+		if get-system-metrics(7) =  2
+			// open the file
+			command "proclientft"
+				parameters
+					"-lq"
+					lr-result-file
+					str-concat(lp-file-name,".pdf")
+		endif
+	endif
+end-procedure
+
+// ------------------------------------------------------------------------------------------
+//  Private methods
+// ------------------------------------------------------------------------------------------
+
+
+procedure document-folder
+parameters
+	lp-path-to-folder					pic x(128) type string // folder containing spl files
+	lp-pattern							pic x(128) type string // pattern of files to match
+	lp-file-name						pic x(1024) type string // name of pdf / html
+	lp-quiet-mode						type boolean
+	lp-include-copyright				type boolean
+	lp-output-type						pic x  // must be "P" or "H"
+	lp-toc-level						type number
+	lp-include-filename					type boolean
+returning 
+	lr-result-file						pic x(512) type string
+local
+	lf-rst-file							pic x(100) type string
+	lf-err-file							pic x(100) type string
+	lf-out-file							pic x(100) type string
+	lf-this-file						pic x(100) type string
+	lf-next								type string
+	lf-write-line						type boolean
+	lf-equal-line-count					type number
+	lf-command							pic x(1024) type string
+	lf-count							type number
+	lf-line-no							type number
+	lf-loop-brake						type number
+	//
+	// Parameter validation
+	//
+	if not file-exists(lp-path-to-folder,false) = 2
+		set ws-last-error = param-text("Passed folder (<<p1>>) is not a folder" lp-path-to-folder )
+		exit 1
+	endif
+	//
+	if lp-output-type not in ("P" "H")
+		set ws-last-error = param-text("Output type invalid (<<p1>>).  Must be P-pdf or H-html", lp-output-type)
+		exit 1
+	endif
+#ifdef DEBUG
+	report "debug report"
+		no-xml
+	print "Paras:"
+	print "lp-path-to-folder:" lp-path-to-folder
+	print "lp-pattern:" lp-pattern
+	print "lp-file-name:" lp-file-name
+	print "lp-quiet-mode:" lp-quiet-mode
+	print "lp-include-copyright:" lp-include-copyright
+	print "lp-output-type:" lp-output-type
+	print "lp-toc-level:" lp-toc-level
+#endif
+	set lf-rst-file = str-concat("/tmp/" lp-file-name ".rst")
+	if lp-output-type = "P"
+		set lf-out-file = str-concat("/tmp/" lp-file-name ".pdf")
+	else
+		set lf-out-file = str-concat("/tmp/" lp-file-name ".html")
+	endif
+	set lf-err-file = str-concat("/tmp/" lp-file-name ".err")
+	if file-exists(lf-rst-file,FALSE)
+		command "rm" wait parameters " -f " lf-rst-file
+	endif
+	if file-exists(lf-out-file,FALSE)
+		command "rm" parameters " -f " lf-out-file
+	endif
+	if file-exists(lf-err-file,FALSE)
+		command "rm" parameters " -f " lf-err-file
+		if file-exists(lf-err-file,FALSE)
+			message lf-err-file " still exits"
+			pause
+		endif
+	endif
+	open tmp-text truncate temporary
+		file is lf-rst-file
+	on error
+		message-box param-text("<<P1>><<BR>><<p2>>"
+			,'Unable to create rst file:'
+			,error-description(file-status()))
+			title is "Auto Doc"
+			message-buttons  MSG_BOX_CANCEL
+			icon MSG_BOX_STOP
+		exit 1
+	endon
+	//
+	// we want the files in alphabetical order so put them in
+	// a temp table
+	//
+	close files-to-read and remove
+	open files-to-read temporary
+	if start-dir-search(lp-path-to-folder,lp-pattern)
+		repeat
+			set lf-this-file = next-dir-entry()
+		until lf-this-file = spaces
+			set fr-filename = str-concat(lp-path-to-folder, "/", lf-this-file)
+			set fr-base = substring(lf-this-file,1,str-len(lf-this-file) - 4)
+			set lf-count += 1
+			insert files-to-read
+			on error
+			endon
+		end-repeat
+	endif
+	if lf-count = 0 
+		set ws-last-error = param-text("There are no files that match the pattern <<p1>> in <<p2>>"
+			lp-pattern, lp-path-to-folder)
+		if lp-quiet-mode 
+			exit 1
+		else 
+			message ws-last-error
+			exit 1
+		endif
+	endif
+	// create the table header
+	do write-rst-header parameters lp-toc-level
+	if lp-include-copyright
+		do add-copyright
+	endif
+	// Now read the temp table and create the document
+	select * from files-to-read
+	detail
+#ifdef DEBUG
+		print "Fullname:" fr-filename
+		print "Base:" fr-base
+#endif
+		open source-file
+			file is fr-filename
+		on error
+		else
+			set lf-line-no = 0
+			set lf-write-line = false
+			set lf-next = "^/\*$"
+			set lf-equal-line-count = 0
+			select * from source-file
+			detail
+				set lf-line-no += 1
+#ifdef DEBUG
+				print "START OF READ LOOP"
+				print lf-line-no pic zzzz9 ":" sf-line
+				print "line len:" str-len(sf-line)
+				print "looking for " lf-next
+#endif
+				if pattern(sf-line,"^\*/$")
+					break
+				endif
+				if pattern(sf-line,lf-next)
+#ifdef DEBUG
+							print "Matched" lf-next
+#endif
+					if lf-next = "^/\*$"
+						set lf-next = "^=*$"
+					elseif lf-next = "^=*$" and lf-equal-line-count = 0
+						if str-len(sf-line) = str-len(fr-base)
+							set lf-equal-line-count += 1
+							set lf-next = fr-base
+#ifdef DEBUG
+							print "looking for base " fr-base
+#endif
+						endif
+					elseif lf-next = fr-base
+						if sf-line = fr-base
+							set lf-next = "^=*$"
+						endif
+					elseif lf-next = "^=*$" and lf-equal-line-count = 1
+						// write out the first two
+						I(" ")
+						if lp-include-filename
+							I(sf-line)
+							I(fr-base)
+						endif
+						// now setup the loop to write the rest
+						if str-len(sf-line) = str-len(fr-base)
+							set lf-write-line = TRUE
+						endif
+					endif
+				endif
+				if lf-write-line
+					I(sf-line)
+					endif
+			end-select
+		endon
+	end-select
+	// Tell the user we're finished
+	if lp-output-type = "P"
+		set lf-command = concat("rst2pdf.sh -o " lf-out-file " " lf-rst-file " 2>" lf-err-file)
+	else
+		set lf-command = concat("rst2html  " lf-rst-file  " 2>" lf-err-file " > " lf-out-file)
+	endif
+	if not lp-quiet-mode
+		message lf-command
+		pause
+	endif
+	command "/bin/sh" parameters "-c" lf-command
+	if exit-status != 0
+		set ws-last-error = "rst build command failed"
+		if not lp-quiet-mode
+			message ws-last-error
+		endif
+		exit 1
+	endif
+	while not file-exists(lf-out-file,FALSE) and lf-loop-brake >= 10
+		set lf-loop-brake += 1
+		if sleep(10) endif
+	end-while
+	if lf-loop-brake >= 10
+		set ws-last-error = "rst build command completed byt output file missing"
+		if not lp-quiet-mode
+			message ws-last-error
+		endif
+		exit 1
+	endif
+	if file-exists(lf-err-file,FALSE) and file-size(lf-err-file) > 0 and not lp-quiet-mode
+		do clibvfile-display-text-file parameters are lf-err-file 100 "pdf create results"
+	endif
+	if not lp-quiet-mode
+		message-box param-text("<<P1>><<BR>><<p2>>"
+			,"RST file Created"
+			,lf-out-file)
+			title is ws-function-title
+			message-buttons  MSG_BOX_OK
+			icon MSG_BOX_INFORMATION
+	endif
+	set lr-result-file = lf-out-file
+end-procedure
+
+procedure write-rst-header
+parameters
+	lp-toc-level						type number
+	//
+	if lp-toc-level < 1 or lp-toc-level > 10
+		set lp-toc-level = 2
+	endif
+	 I('.. |date| date::')
+	 I('.. |time| date:: %H:%M')
+	 I('.. header:: Program Documentation.  Created : |date| |time|')
+	 I('.. footer:: Page ###Page### of ###Total###')
+	 I(' ')
+	 I('.. sectnum::')
+	 I(' ')
+	 I('.. contents:: Table of Contents')
+	 I(concat('    :depth: ' str(lp-toc-level)))
+	 I(' ')
+	 I('.. raw:: pdf')
+	 I(' ')
+	 I('		PageBreak')
+	 I(' ')
+	 I(' ')
+	 /*
+	 I('=====================')
+	 I('How to view this file')
+	 I('=====================')
+	 I(' ')
+	 I('Goto https://overbits.herokuapp.com/rsteditor/ and either open this file or paste it into the window')
+	 I('You can then save, print or view a pdf of the content')
+	 */
+end-procedure
+
+procedure add-copyright
+	I("=========")
+	I("Copyright")
+	I("=========")
+	I("All of code documented in this manual is Copyright Velocity Global.")
+	 I(' ')
+	I("It is not to be shared with any person or organization outside")
+	I("of Velocity Global or it's immediate customers")
+end-procedure
+
+procedure write-one-line
+parameters
+	lp-text							pic x(1024) type string
+local
+	lf-tab-pos						type number
+	repeat
+		set lf-tab-pos = pattern(lp-text,ascii-char(9)) 
+	until lf-tab-pos = 0
+		string lp-text deleting lf-tab-pos to lf-tab-pos
+		string lp-text inserting "    " at lf-tab-pos
+	end-repeat
+	set tmp-text = lp-text
+	insert tmp-text
+end-procedure
+
+// ------------------------------------------------------------------------------------------------------
+// Test Routines
+// ------------------------------------------------------------------------------------------------------
+
+screen test-get-parameters
+local
+	lf-path-to-folder						pic x(128) type string
+	lf-file-name							pic x(128) type string
+	lf-pattern								pic x(128) type string
+	lf-instructions							pic x(1024) type string
+	lf-output-type							pic x
+	lf-toc-level							pic 9(5)
+	window
+		window-position 109
+	responsive
+before
+	set lf-instructions = 'It is fundamentally important that the range of files selected follows these rules:'
+    ADDINSTRUCTION('    The rules are:')
+    ADDINSTRUCTION(' ')
+    ADDINSTRUCTION('    - Only the first comments between slash-asterisk and astersik-slash will be processed')
+    ADDINSTRUCTION('    - The content between the comments must be in rst format (reStructuredText)')
+    ADDINSTRUCTION('    - A line of equal signs starting in col 1 marks the beginning of the documentation')
+    ADDINSTRUCTION('      This line must be length of the file name')
+    ADDINSTRUCTION('    - This line must be followed by the file name')
+    ADDINSTRUCTION('    - A line of equal signs of smae length must follow it.')
+    ADDINSTRUCTION('    - e.g.')
+    ADDINSTRUCTION(' ')
+    ADDINSTRUCTION('        ======')
+    ADDINSTRUCTION('        MyFile')
+    ADDINSTRUCTION('        ======')
+    ADDINSTRUCTION(' ')
+    ADDINSTRUCTION('From there, everything to the closing asterisk-slash will be considered documentation')
+    ADDINSTRUCTION(' ')
+    ADDINSTRUCTION('    - Do not use tabs in tables')
+    ADDINSTRUCTION('    - The underlining MUST follow these rules:')
+    ADDINSTRUCTION(' ')
+    ADDINSTRUCTION('    Level Character     Notes')
+    ADDINSTRUCTION('      1     "="         Should only occur once at the start of the file')
+    ADDINSTRUCTION('      2     "~"         Second Level')
+    ADDINSTRUCTION('      3     "-"         Third Level')
+    ADDINSTRUCTION('      4     "+"         Fourth level')
+detail
+	screen-group // ---- Instructions ----------------------------
+		title "Instructions"  // The title is optional
+		accept lf-instructions 
+			fixed-width-font
+			read-only
+			rows 5
+			multi-line
+	end-screen-group // ---- Instructions --------------------------------------
+	screen-group
+		title "Parameters"
+		width 6
+		accept lf-path-to-folder  pic x(60)
+			title 'Path'
+		before-accept 
+			if lf-path-to-folder = spaces
+				if get-env('STD') != spaces
+					set lf-path-to-folder = concat(get-env('STD'),"/clib")
+				else
+					set lf-path-to-folder = concat(get-env('CUS'),"/clib")
+				endif
+			endif
+		end-before-accept
+		validations
+			if file-exists(lf-path-to-folder,False) != 2
+				message "This is not a folder"
+			endif
+		end-validations
+		accept lf-pattern pic x(60)
+			title "Pattern"
+			help "Enter the pattern in Pronto 'pattern' format"
+		before-accept
+			if lf-pattern = spaces
+				set lf-pattern = "^clibv?*spl$"
+			endif
+		end-before-accept
+		accept lf-toc-level pic z9
+			title "Levels in Toc"
+			help "Levels in Table of Contents - use 3 when doing a single clib or 2 for a range of clibs"
+			default 3
+		accept lf-file-name pic x(60)
+			title "File Name"
+			help "File name without extension"
+		before-accept
+			if lf-file-name = spaces
+				set lf-file-name = "autodoc"
+			endif
+		end-before-accept
+		validations
+			if pattern(lf-file-name,"/") != 0
+			or pattern(lf-file-name,"\\") != 0
+			or pattern(lf-file-name,".") != 0
+				message "Do not include a path nor an extension"
+				reenter
+			endif
+		end-validations
+		field-group
+			title "File Type"
+		radio-button lf-output-type
+			"P" title  "PDF"
+			"H" title  "HTML"
+			default lf-output-type
+		end-radio-button 
+		end-field-group
+		display "File will be created in /tmp"
+	end-screen-group
+	confirm
+		do clibvautodoc-multi-file parameters
+			lf-path-to-folder 
+			lf-file-name 
+			lf-pattern 
+			FALSE  // quiet mode
+			TRUE // include copyright
+			lf-output-type
+			lf-toc-level
+	end-confirm
+end-screen

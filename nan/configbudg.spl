@@ -1,0 +1,514 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : 
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2017
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: nan/configbudg.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 08Feb17  rjb         written 
+// This is the replacement for the old budgetting system replacing with
+// configuratbe budgets
+////////////////////////////////////////////////////////////////////////////////
+ 
+
+#define ERROR 1
+#define WARNING 2
+#define MSG 3
+#define DEBUG 4
+
+#define PRINT_ERR(A) do print-message parameters are A ERROR
+#define PRINT_WARN(A) do print-message parameters are A WARNING
+#define PRINT_MSG(A) do print-message parameters are A MSG
+#define PRINT_DEBUG(A) do print-message parameters are A DEBUG
+
+#define RANDOM_BETWEEN(A,B) \
+	(((RANDOM(0) / 32767) * (B - A)) + A)
+
+#include "../include/stddef.spl"  // for "round" #define
+link 'clib/clibstk'
+link 'clib/clibvfile'
+
+ 
+field
+	ws-error-count						type number
+	ws-warning-count					type number
+	ws-main-forecast-id					like bd-id
+	ws-cust-item-forecast				like bd-id
+	
+
+object forecast-flat-file
+	type is external
+	record is
+		fff-stock-code						like stock-code
+		fff-mth								type number occurs 12
+	end-record
+
+object deb-master-copy like deb-master
+
+procedure main
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do mainmenu
+end-procedure
+
+menu mainmenu
+	window @1,1 to @5,60
+		window-position 5
+	no-hide
+before
+	display "use forecast.xlsm to create a forecast and export that to a flatfile of " @1,1
+	display "stockcode|mth1|...|mth12" @2,1
+detail
+	option "Select and Process" @4,1
+		do doit
+		if ws-error-count > 0
+			message "There were errors"
+		elseif ws-warning-count > 0
+			message "There are warnings"
+		else
+			message "Completed successfully"
+		endif
+		exit
+end-menu
+
+procedure doit
+local i type number
+	window @1,1 to @22,80
+		title "Importing File"
+	no-hide
+	report "Sales History Build Audit"
+		heading is print-heading
+	page
+	display "please wait"  @10,10
+//	do initialise-budgets
+	do import-forecast
+	if exit-status != EXIT_NORMAL
+		exit
+	endif
+	PRINT_MSG("Processing Stock Items")
+	do blow-kit-items-through-bom
+	do create-customers
+	display "finished" @10,10
+end-procedure
+
+procedure initialise-budgets
+local 
+	lf-id									like bd-id
+	// clear files
+	do print-message parameters are "Clearing Files" MSG
+	sql-delete ALL budget-design 
+	sql-delete ALL budget-work-space 
+	sql-delete ALL budget-values 
+	sql-delete ALL budget-values-types 
+	//
+	// forecast master
+	PRINT_MSG("initialising Files")
+	initialise budget-design
+	select lf-id = max(bd-id) from budget-design end-select
+	set bd-id = lf-id + 1
+	set ws-main-forecast-id = bd-id
+	set bd-description = "Main Forecast"
+	set bd-design-field-1-type = 1
+	set bd-design-field-1 = 17
+	set bd-design-field-2-type = 1
+	set bd-design-field-3-type = 1
+	set bd-measure = 2 // qty
+	set bd-frequency = 1 // by perdio
+	set bd-precision = "-,---,---,---,--9"
+	set bd-module = "AR"
+	set bd-function = "M081"
+	set bd-user = "rayb"
+	set bd-datetime = gmt()
+	insert budget-design
+	on error
+		PRINT_ERR(concat("Failed to insert budget design" str(bd-id)))
+	endon
+	//
+	initialise budget-values-types
+	set bvt-id = bd-id
+	set bvt-type = 0
+	set bvt-description = "Main Forecast"
+	insert budget-values-types
+	on error
+		PRINT_ERR("There was a problem adding a value type")
+	endon
+	// customer item
+	initialise budget-design
+	select lf-id = max(bd-id) from budget-design end-select
+	set bd-id = lf-id + 1
+	set ws-cust-item-forecast = bd-id
+	set bd-description = "Item by Customer"
+	set bd-design-field-1-type = 1
+	set bd-design-field-1 = 17
+	set bd-design-field-2-type = 2
+	set bd-design-field-2 = 16
+	set bd-design-field-3-type = 1
+	set bd-measure = 2 // qty
+	set bd-frequency = 1 // by perdio
+	set bd-precision = "-,---,---,---,--9"
+	set bd-module = "AR"
+	set bd-function = "M081"
+	set bd-user = "rayb"
+	set bd-datetime = gmt()
+	insert budget-design
+	on error
+		PRINT_ERR(concat("Failed to insert budget design" str(bd-id)))
+	endon
+	initialise budget-values-types
+	set bvt-id = bd-id
+	set bvt-type = 0
+	set bvt-description = "Initial Budget"
+	insert budget-values-types
+	on error
+		PRINT_ERR("There was a problem adding a value type")
+	endon
+	//
+end-procedure
+
+procedure import-forecast
+local
+	lf-record-counter					type number
+	i									type number
+	lf-filename							pic x(100) type string
+	lf-folder							pic x(100) type string
+	set lf-folder = concat(get-env("CUS"), "/nan")
+	if file-exists(lf-folder,FALSE) != 2
+		set lf-folder = "/pro/pronto/cus/std/nan"
+		if file-exists(lf-folder,FALSE) != 2
+			set lf-folder = get-env("CUS")
+		endif
+	endif
+	do clibvfile-chooser
+		parameters are "*.csv" lf-folder
+		returning lf-filename  lf-folder
+	if lf-filename = spaces
+		exit 1
+	endif
+	open forecast-flat-file
+		file is concat(lf-folder,"/",lf-filename)
+	on error
+		message-box param-text("<<P1>><<BR>><<p2>>"
+			,"Could not open flat file"
+			,"You must do this step Again (until you get it right)")
+			title is "Budget Import"
+			message-buttons MSG_BOX_CANCEL
+			icon MSG_BOX_STOP
+		PRINT_ERR(concat("Could not open flat file" filename(forecast-flat-file)))
+		exit 1
+	endon
+	do initialise-budgets
+	set lf-record-counter = 0
+	select * from forecast-flat-file
+	detail
+		set lf-record-counter += 1
+		get stock-master
+			on index stock-code
+			key is fff-stock-code
+		on error
+			// skips header records
+			continue
+		endon
+		initialise budget-work-space
+		set bd-id = 1
+		set bws-field-1 = fff-stock-code
+		set bws-year =  sys-stk-yr
+		print stock-code no-newline
+		for i = 1 to 12
+			set bws-num[i] = fff-mth[i]
+			print str(fff-mth[i]) "," no-newline
+		end-for
+		skip
+		insert  budget-work-space
+		on error
+			PRINT_ERR(concat("Failed to add masater forecast for " fff-stock-code))
+		endon
+	end-select
+end-procedure
+
+procedure blow-kit-items-through-bom
+local
+	lf-found							type boolean
+	lf-parent-qty						like bws-num
+	lf-parent-id						like bd-id
+	lf-parent-year						like bws-year
+	lf-parent-type						like bws-type
+	i									type number
+	PRINT_MSG("1. Blowing kit items through BOM")
+	select * from budget-work-space
+		where bd-id = ws-main-forecast-id
+	detail
+		get stock-master 
+			on index stock-code
+			key is bws-field-1
+		on error
+			PRINT_ERR(concat("Invalid stock code",bws-field-1))
+		endon
+		// only process the kits.
+		if stk-stock-status <> "K"
+			continue
+		endif
+		set lf-found = FALSE
+		//
+		// find the bom id
+		//
+		select * from bill-of-materials-header
+			where stock-code = :stock-code
+		detail
+			set lf-found = TRUE
+			break
+		end-select
+		if not lf-found
+			PRINT_WARN(concat("Kit item with no bom",stock-code))
+			continue
+		endif
+		for i = 1 to occurence(bws-num)
+			set lf-parent-qty[i] = bws-num[i]
+		endfor
+		set lf-parent-id = bd-id
+		set lf-parent-year = bws-year
+		set lf-parent-type = bws-type
+		select * from bill-of-materials-detail
+			where bomh-id = :bomh-id
+		detail
+			get budget-work-space
+				on index bd-id bws-field-1 bws-field-2 bws-field-3 bws-field-4 bws-field-5 bws-field-6 bws-year bws-type
+				key is lf-parent-id comp-code spaces spaces spaces spaces spaces lf-parent-year lf-parent-type
+			on error
+				initialise budget-work-space
+					leaving bd-id bws-field-1 bws-field-2 bws-field-3 bws-year bws-type
+				for i = 1 to 12
+					set bws-num[i] = lf-parent-qty[i] * bom-quantity
+				end-for
+				insert budget-work-space
+				on error
+					PRINT_ERR(str-concat("Failed to add bom budget for " stock-code "/" comp-code))
+				endon
+			else
+				for i = 1 to 12
+					set bws-num[i] += lf-parent-qty[i] * bom-quantity
+				end-for
+				update budget-work-space
+				on error
+					PRINT_ERR(str-concat("Failed to update bom budget for " stock-code "/" comp-code))
+				endon
+			endon
+		end-select
+	end-select
+end-procedure
+
+procedure create-customers
+local
+	i									type number
+	lf-customer-count					type number
+	lf-parent-qty						like bws-num
+	lf-parent-id						like bd-id
+	lf-parent-year						like bws-year
+	lf-parent-type						like bws-type
+	lf-rounding 						type number
+	lf-cm-ag-count						type number
+	lf-cm-sg-count						type number
+	lf-cm-ot-count						type number
+	lf-marketing-multiplier				type number
+	PRINT_MSG("Counting Customers ")
+	/*
+	dr-marketing-flag contains the groups for allocating the budgets.
+	AG - abels group 35% of sales
+	SG - SD Trading Group 25% sales
+	OT - all others 40% sales
+	INT - Interal accounts 0%
+	*/
+	do setup-marketing
+	select lf-cm-ag-count = count(*)
+		from deb-master
+		where dr-marketing-flag = 'AG'
+		and dr-curr-code = spaces
+		// exclude bill to parents.
+		and not exists (select deb-master-copy.accountcode from deb-master-copy
+			where deb-master-copy.bill-to = deb-master.accountcode
+			and deb-master-copy.bill-to <> deb-master-copy.accountcode)
+	end-select
+	select lf-cm-sg-count = count(*)
+		from deb-master
+		where dr-marketing-flag = 'SG'
+		// exclude bill to parents.
+		and not exists (select deb-master-copy.accountcode from deb-master-copy
+			where deb-master-copy.bill-to = deb-master.accountcode
+			and deb-master-copy.bill-to <> deb-master-copy.accountcode)
+	end-select
+	select lf-cm-ot-count = count(*)
+		from deb-master
+		where dr-marketing-flag = 'OT'
+		// exclude bill to parents.
+		and not exists (select deb-master-copy.accountcode from deb-master-copy
+			where deb-master-copy.bill-to = deb-master.accountcode
+			and deb-master-copy.bill-to <> deb-master-copy.accountcode)
+	end-select
+	//
+	// seed the random number generator:
+	if random(tod()) endif
+	// count the customers
+	select  lf-customer-count = count(*)
+		from deb-master 
+		where deb-master.dr-curr-code = spaces
+		and deb-master.accountcode not like "Z%"
+		and deb-master.accountcode not like "%WHSE%"
+		and deb-master.accountcode not like "%CASH"
+		and deb-master.accountcode not like "CASH%"
+		// exclude bill to parents.
+		and not exists (select deb-master-copy.accountcode from deb-master-copy
+			where deb-master-copy.bill-to = deb-master.accountcode
+			and deb-master-copy.bill-to <> deb-master-copy.accountcode)
+	end-select
+	//
+	PRINT_MSG("Reading Main forecast and applying to customer level " )
+	select * from budget-work-space
+		where bd-id = ws-main-forecast-id
+	detail
+		// capture the forecast details
+		for i = 1 to occurence(bws-num)
+			set lf-parent-qty[i] = bws-num[i]
+		endfor
+		set lf-parent-year = bws-year
+		set lf-parent-type = 0
+		get stock-master 
+			on index stock-code
+			key is bws-field-1
+		on error
+			PRINT_ERR(concat("Invalid stock code",bws-field-1))
+		endon
+		// Now spread across customers
+		select  deb-master.accountcode deb-master.dr-marketing-flag
+			from deb-master 
+			where deb-master.dr-curr-code = spaces
+			and deb-master.accountcode not like "Z%"
+			and deb-master.accountcode not like "%WHSE%"
+			and deb-master.accountcode not like "%CASH"
+			and deb-master.accountcode not like "CASH%"
+			// exclude bill to parents.
+			and not exists (select deb-master-copy.accountcode from deb-master-copy
+				where deb-master-copy.bill-to = deb-master.accountcode
+				and deb-master-copy.bill-to <> deb-master-copy.accountcode)
+		detail
+		//
+			//
+			// insert the new budget records
+			//
+			initialise budget-work-space
+			set bd-id = ws-cust-item-forecast
+			set bws-field-1 = stock-code
+			set bws-field-2 = accountcode
+			set bws-year = lf-parent-year
+			set bws-type = 0
+			//  determine the mulitplier
+			do clibstk-item-rounding 
+				parameters are stk-unit-desc
+				returning lf-rounding
+			for i = 1 to occurrence(bws-num)
+				set bws-num[i] = round((lf-parent-qty[i] / lf-customer-count * RANDOM_BETWEEN(0.9,1.1)),lf-rounding)
+				switch dr-marketing-flag
+				case "AG"
+					set bws-num[i] = round((lf-parent-qty[i] * 0.35 / lf-cm-ag-count * RANDOM_BETWEEN(0.9,1.1)),lf-rounding)
+				case "SG"
+					set bws-num[i] = round((lf-parent-qty[i] * 0.25 / lf-cm-sg-count * RANDOM_BETWEEN(0.9,1.1)),lf-rounding)
+				case "OT"
+					set bws-num[i] = round((lf-parent-qty[i] * 0.40 / lf-cm-ot-count * RANDOM_BETWEEN(0.9,1.1)),lf-rounding)
+				end-switch
+			end-for
+			insert budget-work-space
+			on error
+				PRINT_ERR(str-concat("could not insert budget for " stock-code "/" accountcode ))
+			endon
+		//
+		end-select
+	end-select
+end-procedure
+
+procedure print-heading
+	print company-name 
+		"Audit of Sales History " in col 50
+		today() in col 80
+		tod() in col 95
+		" Page"
+		page-no
+	skip
+end-procedure
+
+procedure print-message
+parameters 
+	lp-text							pic x(100) type string
+	lp-type							type number
+	print tod() no-newline
+	switch lp-type 
+	case ERROR
+		set ws-error-count += 1
+		print "ERROR" col 10
+			no new-line
+	case DEBUG
+		print "DEBUG" col 10
+			no new-line
+	case MSG
+		print "MSG" col 10
+			no new-line
+	case WARNING 
+		set ws-warning-count += 1
+		print "WARNING" col 10
+			no-newline
+	end-switch
+	print lp-text in col 20
+end-procedure
+
+procedure setup-marketing
+	do add-sys-table parameters are "CM" "AG" "Abels Group"
+	do add-sys-table parameters are "CM" "SG" "SD Group"
+	do add-sys-table parameters are "CM" "OT" "Others"
+	do add-sys-table parameters are "CM" "IN" "Internal Accounts"
+	do add-sys-table parameters are "CM" "EX" "Export Accounts"
+	sql-update all deb-master 
+		set dr-marketing-flag = "IN"
+	sql-update deb-master
+		set dr-marketing-flag = "AG"
+		where accountcode like 'C01%'
+	sql-update deb-master
+		set dr-marketing-flag = "SG"
+		where accountcode like 'C02%'
+	sql-update deb-master
+		set dr-marketing-flag = "OT"
+		where accountcode between 'C0001' and 'C0099'
+	sql-update deb-master
+		set dr-marketing-flag = "EX"
+		where dr-curr-code != spaces
+end-procedure
+
+procedure add-sys-table
+parameters
+	lp-type					like sys-tbl-type
+	lp-code					like sys-tbl-code
+	lp-desc					like sys-description
+	get system-table
+		on index sys-tbl-type sys-tbl-code
+		key is lp-type lp-code
+		lock
+	on error ENOREC
+		initialise system-table
+		set sys-tbl-type = lp-type
+		set sys-tbl-code = lp-code
+		set sys-description = lp-desc
+		insert system-table
+			on error
+			endon
+	else
+		set sys-description = lp-desc
+		update system-table
+		on error
+		endon
+	endon
+end-procedure

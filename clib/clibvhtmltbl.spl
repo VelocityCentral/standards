@@ -1,0 +1,438 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : Creates a simple HTML table.  For use in mail apps
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2022
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: clib/clibvhtmltbl.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 27Jan22  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+//
+
+/*
+
+=====================================
+clibvhtmltbl
+=====================================
+
+	This routine will create an html table.  The process is :
+	
+	-	Initialise the table (clibvhtmltbl-initialise)
+	-	Add a heading (optional)  (clibvhtmltbl-add-heading-cell)
+	-	Add 1 or more detail line  (clibvhtmltbl-add-cell)
+	-   close  the table  (clibvhtmltbl-finalise)
+	-	get the databack (clibvhtmltbl-readline)
+
+	The initialisation of the table includes the column count.  It is important for both headings
+	and detail that the correct number of columns are inserted.  The routine will add a new row
+	each time the column count exceeds the number defined in the intialisation routine.
+
+	Note that this routine creates everything from a <table> to a </table> (inclusive).  It
+	does NOT create the <html> nor </html> tags.  This is to allow the calling routine to add
+	any extra content desired.  (see sample in test cases)
+
+	Check exit status of each routine to verify correct execution.  Use -get-last-error to 
+	return last error message.
+
+clibvhtmltbl-get-last-error
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	Returns the text of the last error message
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   Out     |String 1k  |Text of last error message                              |
+	+-----------+-----------+--------------------------------------------------------+
+
+	use rst_paras<t> to add more parameter tables
+
+clibvhtmltbl-initialise
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	Initialises the table 
+
+		+-----------+-----------+--------------------------------------------------------+
+		| Direction | Data Type | Description                                            |
+		+===========+===========+========================================================+
+		|   IN      | Integer   | Number of columns                                      |
+		+-----------+-----------+--------------------------------------------------------+
+		|   IN      | String    | Optional Heading to appear at the top of the table     |
+		+-----------+-----------+--------------------------------------------------------+
+
+clibvhtmltbl-add-heading-cell
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	This routine is optional.  It will add Column headings.
+	If called, then it must be called exactly for the correct number of columns specified 
+	the initialisation routine.  If not, the first row columns will appear in the headings.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String     |The heading content                                     |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |String     |The Alignment.  Must be one of space,left,right,center  |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvhtmltbl-add-cell
+~~~~~~~~~~~~~~~~~~~~~
+
+	This routine is exactly the same as clibvhtmltbl-add-heading-cell but used for the
+	actual data rows.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String     |The Cell content                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |String     |The Alignment.  Must be one of space,left,right,center  |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvhtmltbl-finalise
+~~~~~~~~~~~~~~~~~~~~~
+
+	This routine must be called before trying to access the table data.  It adds the 
+	closing </table> to the file.  
+
+	There are no parameters for this routine.
+
+clibvhtmltbl-readline
+~~~~~~~~~~~~~~~~~~~~~
+
+	Once the table has been finalised, this routine will return the html one line at a time.
+	It should be called within a loop structure and called repititively until it returns
+	an exit status of 2.  (EOF).
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|  Out      | String    | The html line                                          |
+	+-----------+-----------+--------------------------------------------------------+
+
+Example usage
+~~~~~~~~~~~~~
+
+Sample Code::
+
+	procedure mail-customers
+	local
+		lf-error-message						pic x(60)
+		lf-filename								pic x(256) type string
+		lf-line									pic x(1024) type string
+		lf-repeat-brake							type number
+		//
+		do clibvhtmltbl-initialise parameters are 4 "Customer Listing"
+		select *
+			from deb-master
+		before
+			do clibvhtmltbl-add-heading-cell parameters "Accountcode" spaces
+			do clibvhtmltbl-add-heading-cell parameters "Name" spaces
+			do clibvhtmltbl-add-heading-cell parameters "Date Created" "center"
+			do clibvhtmltbl-add-heading-cell parameters "Balance" "right"
+		detail
+			do clibvhtmltbl-add-cell parameters accountcode spaces
+			do clibvhtmltbl-add-cell parameters shortname spaces
+			do clibvhtmltbl-add-cell parameters format-picture(dr-date-created,"dd-mmm-yyyy") "center"
+			do clibvhtmltbl-add-cell parameters str(balance) "right"
+		end-select
+		do clibvhtmltbl-finalise
+		// now read add the table to a text file
+		close test-file and remove
+		set lf-filename = str-concat("/tmp/txt", str(pid), ".html")
+		open test-file create
+			file is lf-filename
+		TESTADD("<HTML>")
+		TESTADD("Below is a table of customers")
+		repeat
+			set lf-repeat-brake += 1
+			do clibvhtmltbl-readline returning lf-line
+		until lf-repeat-brake > 1000 or exit-status() != 0
+			if exit-status = 1
+				do clibvhtmltbl-get-last-error returning lf-error-message
+				message lf-error-message
+				break
+			endif
+			TESTADD(lf-line)
+		end-repeat
+		TESTADD("</html>")
+		// mail it
+		if mail-start("Test email of customer list") endif
+		if mail-attach(lf-filename,"Dummy.html",1,1,0) endif
+		if mail-send(login-id(),TRUE,FALSE) endif
+		close test-file and remove
+		message "Mail Sent"
+	end-procedure
+
+*/
+
+
+#include "../include/i8proglogparam.spl"
+
+#define ADDTEXT(A) \
+	set tf-seq = ws-next-seq \
+	set tf-line = A \
+	set ws-next-seq += 1 \
+	insert textfile \
+	on error endon
+
+#define STATUS_NOTINITIALISED 0
+#define STATUS_INITIALISED 2
+#define STATUS_HEADING_STARTED 3
+#define STATUS_CLOSED 4
+
+field 
+	ws-last-error						pic x(1024) type string
+	ws-status							pic 99  // 1 = table initialised, 2 = table closed.
+	ws-next-seq							type number
+	ws-col-count						type number
+	ws-this-head-count					type number
+	ws-this-data-count					type number
+	ws-read-seq							type number // used to store next line to be returned by -readline
+
+object textfile
+	type memory
+	record
+		tf-seq							type number
+		tf-line							pic x(1024) type string
+	end-record
+	key is tf-seq
+
+procedure library-init
+	get system-control first
+	on error
+		abort "No System Control record"
+	endon
+	do i8proglogparam-write-log parameters are "clibvhtmltbl"
+end-procedure
+
+procedure main
+	get system-control first
+	on error
+		abort "No System Control record"
+	endon
+	do i8proglogparam-write-log parameters are "clibvhtmltbl"
+	do testcases
+end-procedure
+
+
+procedure clibvhtmltbl-get-last-error export
+returning
+	lr-message							like ws-last-error
+	set lr-message = ws-last-error
+end-procedure
+
+//
+//  --------- Exported routines and supporting code goes here ---------
+//
+procedure clibvhtmltbl-initialise export
+parameter
+	lp-col-count						type number
+	lp-caption							type string pic x(1024)
+	if lp-col-count < 1 or lp-col-count > 256
+		set ws-last-error = "Column count must be > 0 and < 256"
+		exit 1
+	endif
+	close textfile
+	open textfile temporary
+	set ws-status = STATUS_INITIALISED
+	set ws-next-seq = 1
+	set ws-col-count = lp-col-count
+	ADDTEXT('<TABLE border="0" style="border: 2px solid;border-color:silver" align=center cellpadding=5 cellspacing=0>')
+	ADDTEXT('<style type="text/css"> th {border-bottom: 1px solid; border-color:silver; background-color:#FFFFE1}</style>')
+	if lp-caption != spaces
+		ADDTEXT(concat('<caption><B><U>' lp-caption '</U></B></CAPTION>'))
+	endif
+end-procedure
+
+procedure clibvhtmltbl-add-heading-cell export
+parameter
+	lp-cell-text						type string
+	lp-align							type string 
+	if lp-align = spaces
+		set lp-align = "left"
+	endif
+	set lp-align = lowercase(lp-align)
+	if lp-align not in ( "left" , "center", "right")
+		set ws-last-error = "Invalid Align Setting, must be spaces, left, right or center"
+		exit 1
+	endif
+	if ws-status != STATUS_INITIALISED
+		set ws-last-error = "Table not yet started or already finished"
+		exit 1
+	endif
+	if ws-this-head-count % ws-col-count = 0
+	or ws-this-head-count = 0
+		// start new row
+		ADDTEXT('<TR>')
+		set ws-this-head-count = 0
+	endif
+	//
+	// Now just add whatever this item is
+	//
+	ADDTEXT(concat("<TH align=", lp-align, ">"))
+	ADDTEXT(lp-cell-text)
+	ADDTEXT("</TH>")
+	set ws-this-head-count += 1
+	//
+	if ws-this-head-count = ws-col-count
+		// close the row
+		ADDTEXT("</TR>")
+		set ws-this-head-count = 0
+	endif
+end-procedure
+
+procedure clibvhtmltbl-add-cell export
+parameter
+	lp-cell-text						type string
+	lp-align							type string 
+	//
+	if lp-align = spaces
+		set lp-align = "left"
+	endif
+	set lp-align = lowercase(lp-align)
+	if lp-align not in ( "left" , "center", "right")
+		set ws-last-error = "Invalid Align Setting, must be spaces, left, right or center"
+		exit 1
+	endif
+	if ws-status != STATUS_INITIALISED
+		set ws-last-error = "Table not yet started or already finished"
+		exit 1
+	endif
+	if ws-this-data-count % ws-col-count = 0
+	or ws-this-data-count = 0
+		// start new row
+		ADDTEXT('<TR bgcolor="#E6FAFF">')
+		set ws-this-data-count = 0
+	endif
+	//
+	// Now just add whatever this item is
+	//
+	ADDTEXT(concat("<TD align=", lp-align, ">"))
+	ADDTEXT(lp-cell-text)
+	ADDTEXT("</TD>")
+	set ws-this-data-count += 1
+	//
+	if ws-this-data-count = ws-col-count
+		// close the row
+		ADDTEXT("</TR>")
+		set ws-this-data-count = 0
+	endif
+end-procedure
+
+procedure clibvhtmltbl-finalise export
+	if ws-status < STATUS_INITIALISED 
+		set ws-last-error = "Table not yet started"
+		exit 1
+	endif
+	if ws-this-data-count != 0
+		ADDTEXT("</TR>")
+	endif
+	ADDTEXT("</TABLE>")
+	set ws-status = STATUS_CLOSED
+	set ws-read-seq = 1
+end-procedure
+
+procedure clibvhtmltbl-readline export
+returning
+	lr-line							pic x(1024)
+	if ws-status < STATUS_CLOSED
+		set ws-last-error = "Table has not been finalised"
+		exit 1
+	endif
+	get textfile
+		on index tf-seq
+		key is ws-read-seq
+	on error
+		exit 2 // EOF
+	endon
+	set lr-line = tf-line
+	set ws-read-seq += 1
+end-procedure
+
+
+//  ---------  Test cases and ssetup code go here -------- 
+//
+//
+
+#define TESTADD(A) \
+	set test-file-text = A \
+	insert test-file \
+	on error endon \
+
+object test-file
+	type is external
+	record is 
+		test-file-text						pic x(1024) type string
+	end-record
+
+menu testcases
+	window no-hide
+detail
+	option "Mail Customer" @1,1
+		do mail-customers
+end-menu
+
+procedure mail-customers
+local
+	lf-error-message						pic x(60)
+	lf-filename								pic x(256) type string
+	lf-line									pic x(1024) type string
+	lf-repeat-brake							type number
+	//
+	do clibvhtmltbl-initialise parameters are 4 "Customer Listing"
+	select *
+		from deb-master
+	before
+		do clibvhtmltbl-add-heading-cell parameters "Accountcode" spaces
+		do clibvhtmltbl-add-heading-cell parameters "Name" spaces
+		do clibvhtmltbl-add-heading-cell parameters "Date Created" "center"
+		do clibvhtmltbl-add-heading-cell parameters "Balance" "right"
+	detail
+		do clibvhtmltbl-add-cell parameters accountcode spaces
+		do clibvhtmltbl-add-cell parameters shortname spaces
+		do clibvhtmltbl-add-cell parameters format-picture(dr-date-created,"dd-mmm-yyyy") "center"
+		do clibvhtmltbl-add-cell parameters str(balance) "right"
+	end-select
+	do clibvhtmltbl-finalise
+	// now read add the table to a text file
+	close test-file and remove
+	set lf-filename = str-concat("/tmp/txt", str(pid), ".html")
+	open test-file create
+		file is lf-filename
+	TESTADD("<HTML>")
+	TESTADD("Below is a table of customers")
+	repeat
+		set lf-repeat-brake += 1
+		do clibvhtmltbl-readline returning lf-line
+	until lf-repeat-brake > 1000 or exit-status() != 0
+		if exit-status = 1
+			do clibvhtmltbl-get-last-error returning lf-error-message
+			message lf-error-message
+			break
+		endif
+		TESTADD(lf-line)
+	end-repeat
+	TESTADD("</html>")
+	// mail it
+	if mail-start("Test email of customer list") endif
+	if mail-attach(lf-filename,"Dummy.html",1,1,0) endif
+	if login-id() = "rayb"
+		if mail-send("ray.burns@velocityglobal.co.nz",TRUE,FALSE) endif
+	else
+		if mail-send(login-id(),TRUE,FALSE) endif
+	endif
+	close test-file and remove
+	message "Mail Sent"
+end-procedure
+
+
+ 
+ 

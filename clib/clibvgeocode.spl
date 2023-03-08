@@ -1,0 +1,1447 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : clib to return lat and long from an address.
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2014
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: clib/clibvgeocode.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 09Apr14  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+//
+/*
+	This documentation is in RST format.  To view this as a nice pdf goto
+	https://overbits.herokuapp.com/rsteditor/ or rst.ninjs.org and paste this content.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|           |           |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+
+	Alternatively
+
+	 =========== =========== ======================================================== 
+	  Direction   Data Type   Description                                             
+	 =========== =========== ======================================================== 
+	 =========== =========== ======================================================== 
+
+============
+clibvgeocode
+============
+
+	This code is intended as a wrapper around google mapping functions.
+	Initially it provided searching by partial address, however in 2019 Google removed this functionality
+	from the standard api (which was free) and moved it to a chargeable API.  (approx .03cUSD per call)
+	The partial matching api can be found in the google documentation in the "text search api"
+	The select-place routine in this clib can be used to use partial address searching.
+
+	At the time of writing, calls to the standard API which return a location and it's accuracy are free 
+	up to 2500 calls in a 24 hour period.  This code keeps track of the number of calls so that you
+	can use them in a batch process to ensure you do not exceed your limit.
+
+	Before you do anything you will need to register with Google.
+	Create a google account for the customer.  You will then need to work out how to register the application.
+	There is some documentation on how to do this (see ray) however, as api vendors tend to change their web
+	sites like they change their socks, it is hard to provide a step by step guide.  Suffice to say you will need 
+	to find your way to the google developer site and register for the API.  You will need to put in a credit card
+	EVEN if you choose to use only the free apis (assumably so they can suddenly start charging you when they
+	change their mind about it being free).
+
+	Once you have registered with Google you will get an API key.  This is stored in SUOT.  This code contains a screen
+	and a procedure to store the api key (and some other parameters) and also to retrieve those parameters for use 
+	in calling programs.
+
+	**Note that the information contained herein is liable to change as google may change how their apis
+	work without notice**
+
+	For further information look for word document "Geocoding System.doc".  
+
+clibvgeocode-maintain-parameters 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	There are no parameters to this code.  Simply call it.  It will display a maintenance screen for entering
+	and maintaining the api key.
+
+	Maintained Parameters
+
+	+-----------------+--------------------------------------------------------------+
+	| Name            |Descrtiption                                                  |
+	+=================+==============================================================+
+	|Api Key          |This is the api key you get from google.                      |
+	+-----------------+--------------------------------------------------------------+
+	|licence limit    |The number of calls you can make in 24 hours                  |
+	+-----------------+--------------------------------------------------------------+
+	|Reset Time       |If you plan to call these api's very frequently (e.g. in a    |
+	|                 |batch program processing lots of addresses).  You need to     |
+	|                 |manually work out when Google resets the 24 hour counter.     |
+	|                 |                                                              |
+	|                 |This is best done using the google dashboard                  |
+	+-----------------+--------------------------------------------------------------+
+	|Restriction      |This is the number of calls that any one instance of the clib |
+	|Count            |can make.  The intention is that this is the number of calls  |
+	|                 |That can be made by interactive sessions.                     |
+	|                 |                                                              |
+	|                 |                                                              |
+	+-----------------+--------------------------------------------------------------+
+	|Restriction      |Once this time has passed the clib can make any number of     |
+	|Release time     |calls.  The intention is that you might have a batch program  |
+	|                 |that is going to geocode all the names and addresses          |
+	|                 |that are in the name-and-address-master.  If there are        |
+	|                 |several thousand then it may take many days of processing     |
+	|                 |if you are to stay withing the 2500 calls per day limit.      |
+	|                 |                                                              |
+	|                 |Therefore write a batch program that runs immediately before  |
+	|                 |this time to process as many records as possible without      |
+	|                 |exceeding the limit but still allowing users to use the api   |
+	|                 |interactively during the day.                                 |
+	|                 |                                                              |
+	+-----------------+--------------------------------------------------------------+
+	|Country code     |Restrict searches to be within this country code              |
+	+-----------------+--------------------------------------------------------------+
+
+clibvgeocode-return-parameters 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	Return the parameters to the calling program
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|  Out      |datetime   |date and time the api counter was last reset            |
+	+-----------+-----------+--------------------------------------------------------+
+	|  Out      |int        |limit to the number of calls in 24 hours                |
+	+-----------+-----------+--------------------------------------------------------+
+	|  Out      |string 60  |The google API licence key                              |
+	+-----------+-----------+--------------------------------------------------------+
+	|  Out      |int        |The number of calls made since last reset               |
+	+-----------+-----------+--------------------------------------------------------+
+	|  Out      |datetime   |date and time the limit was last exceeded               |
+	+-----------+-----------+--------------------------------------------------------+
+	|  Out      |time       |Time of day the limit is reset                          |
+	+-----------+-----------+--------------------------------------------------------+
+	|  Out      |time       |Time of day that that per-instance limit is lifted      |
+	+-----------+-----------+--------------------------------------------------------+
+	|  Out      |string 4   |This country code                                       |
+	+-----------+-----------+--------------------------------------------------------+
+	|  Out      |int        |The number of calls that can be made in a single        | 
+	|           |           |instance of the clib                                    |
+	+-----------+-----------+--------------------------------------------------------+
+	|  Out      |int        |The current number of calls Of this instance            |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvgeocode-get-lat-long 
+~~~~~~~~~~~~~~~~~~~~~~~~~
+	This is the main call that returns the lat and long of a given address
+
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 100 |Array of address lines                                  |
+	|           |occurs 7   |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |number     |Latitude in decimal degrees                             |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |number     |Longitude in decimal degrees                            |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |string 40  |The accuracy of how the lat and long matches the address|
+	|           |           |                                                        |
+	|           |           | - *ROOFTOP*    indicates that the returned result is a |
+	|           |           |   precise geocode for which we have location           |
+	|           |           |   information accurate down to street address precision|
+	|           |           | - *RANGE_INTERPOLATED*      indicates that the returned|
+	|           |           |   result reflects an approximation (usually on a road) |
+	|           |           |   interpolated between two precise points (such as     |
+	|           |           |   intersections). Interpolated results are generally   |
+	|           |           |   returned when rooftop geocodes are unavailable for a |
+	|           |           |   street address.                                      |
+	|           |           | - *GEOMETRIC_CENTER*    indicates that the returned    |
+	|           |           |   result is the geometric center of a result such as a |
+	|           |           |   polyline (for example, a street) or polygon (region).|
+	|           |           | - *APPROXIMATE*    indicates that the returned result  |
+	|           |           |   is approximate.                                      |
+	|           |           |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |String 40  |Postal Code                                             |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |string 1k  |The address returned as a single string with            |
+	|           |           |commas separating their component parts                 |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |String 40  |Address Type indicator                                  |
+	|           |           |                                                        |
+	|           |           | - *street_address* indicates a precise street address. |
+	|           |           | - *route* indicates a named route (such as "US         |
+	|           |           |   101").                                               |
+	|           |           | - *Intersection* indicates a major intersection,       |
+	|           |           |   usually of two major roads.                          |
+	|           |           | - *Political* indicates a political entity.            |
+	|           |           |   Usually, this type indicates a polygon of some       |
+	|           |           |   civil administration.                                |
+	|           |           | - *country* indicates the national political           |
+	|           |           |   entity, and is typically the highest order type      |
+	|           |           |   returned by the Geocoder.                            |
+	|           |           | - *administrative_area_level_1* indicates a            |
+	|           |           |   first-order civil entity below the country           |
+	|           |           |   level. Within the United States, these               |
+	|           |           |   administrative levels are states. Not all            |
+	|           |           |   nations exhibit these administrative levels.         |
+	|           |           | - *administrative_area_level_2* indicates a            |
+	|           |           |   second-order civil entity below the country          |
+	|           |           |   level. Within the United States, these               |
+	|           |           |   administrative levels are counties. Not all          |
+	|           |           |   nations exhibit these administrative levels.         |
+	|           |           | - *administrative_area_level_3* indicates a            |
+	|           |           |   third-order civil entity below the country           |
+	|           |           |   level. This type indicates a minor civil             |
+	|           |           |   division. Not all nations exhibit these              |
+	|           |           |   administrative levels.                               |
+	|           |           | - *colloquial_area* indicates a commonly-used          |
+	|           |           |   alternative name for the entity.                     |
+	|           |           | - *locality* indicates an incorporated city or         |
+	|           |           |   town political entity.                               |
+	|           |           | - *sublocality* indicates a first-order civil          |
+	|           |           |   entity below a locality. For some locations may      |
+	|           |           |   receive one of the additional types:                 |
+	|           |           |   sublocality_level_1 through to                       |
+	|           |           |   sublocality_level_5. Each sublocality level is       |
+	|           |           |   a civil entity. Larger numbers indicate a            |
+	|           |           |   smaller geographic area.                             |
+	|           |           | - *Neighbourhood* indicates a named neighborhood       |
+	|           |           | - *Premise* indicates a named location, usually a      |
+	|           |           |   building or collection of buildings with a           |
+	|           |           |   common name                                          |
+	|           |           | - *Subpremise* indicates a first-order entity          |
+	|           |           |   below a named location, usually a singular           |
+	|           |           |   building within a collection of buildings with       |
+	|           |           |   a common name                                        |
+	|           |           | - *postal_code* indicates a postal code as used        |
+	|           |           |   to address postal mail within the country.           |
+	|           |           | - *natural_feature* indicates a prominent natural      |
+	|           |           |   feature.                                             |
+	|           |           | - *Airport* indicates an airport.                      |
+	|           |           | - *park* indicates a named park.                       |
+	|           |           | - *point_of_interest* indicates a named point of       |
+	|           |           |   interest. Typically, these "POI"s are prominent      |
+	|           |           |   local entities that don't easily fit in another      |
+	|           |           |   category such as "Empire State Building" or          |
+	|           |           |   "Statue of Liberty.                                  |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |int        |Initially this returned the number of addresses that    |
+	|           |           |that matched the partial address entered                |
+	|           |           |                                                        |
+	|           |           |As of 2019 this will only ever return 1                 |
+	+-----------+-----------+--------------------------------------------------------+
+
+
+clibvgeocode-select-place 
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	This is the partial searching routine.  i.e. Parameter one can be a partial address
+	and it will execute the google map search function and return a list of potential 
+	addresses that match.
+
+	** Each call will be charged to your credit card at 0.32USD per call (Jan 2020) **
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |string 1k  |The address returned as a single string with            |
+	|           |           |commas separating their component parts                 |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |String 100 |Array of address lines                                  |
+	|           |occurs 7   |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |The remaining return parameters match exactly those of the          |
+	|           |get-lat-long routine                                                |
+	+-----------+-----------+--------------------------------------------------------+
+	
+clibvgeocode-get-string-from-array 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	Supporting procedure that converts an array into a long string with comma separatiors
+
+	Note that the returned string is formatted for use in a URL
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 100 |Array of address lines                                  |
+	|           |occurs 7   |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |string 1k  |The address returned as a single string with            |
+	|           |           |commas separating their component parts                 |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvgeocode-select-address 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	Initially, a screen to prompt the user to select an address from the a list of 
+	addresses when the return count > 1.  
+
+	Code is left here in case a customer wishs to signup for the partial match api
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |string 1k  |The address returned as a single string with            |
+	|           |           |commas separating their component parts                 |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |String 100 |Array of address lines                                  |
+	|           |occurs 7   |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |The remaining return parameters match exactly those of the          |
+	|           |get-lat-long routine                                                |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvgeocode-prompt 
+~~~~~~~~~~~~~~~~~~~
+	Simple screen to prompt the user for an address
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|    In     |String 1k  |Address in one long line                                |
+	+-----------+-----------+--------------------------------------------------------+
+	|    Out    |String 1k  |Address in one long line                                |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvgeocode-array-to-string 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	Convert an array of address to one long string  (no url formatting)
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 100 |Array of address lines                                  |
+	|           |occurs 7   |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |string 1k  |The address returned as a single string with            |
+	|           |           |commas separating their component parts                 |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvgeocode-get-array-from-string 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	The inverse of array-to-string
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |string 1k  |The address returned as a single string with            |
+	|           |           |commas separating their component parts                 |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |String 100 |Array of address lines                                  |
+	|           |occurs 7   |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvgeocode-display-map 
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+	simply calls google maps and displays the page.
+
+	The array is formatted as an appropriate string for using with google maps.
+
+	Note that there is no need for API registration to use this call
+
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 100 |Array of address lines                                  |
+	|           |occurs 7   |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+
+*/
+
+#include "../include/iwrtevntlog.spl"
+#include "../include/i8proglogparam.spl"
+
+#define ADDRESSLINES 7
+#define ONEDAY ( 24 * 60 * 60 ) 
+// sometimes it can be slow to contact the server.
+// below is the maximum number of seconds before we display a "waiting" screen
+#define MAXELAPSEDB4MESSAGE 2
+
+// #define DEBUG(A) print str-concat(A,":",get-field-value(A))
+//
+link 'clib/clibwrtevntlog'
+
+field
+	// 
+	// Global variables are required to store parameters between one
+	// call and the next
+	//
+	ws-last-reset						type datetime
+	ws-licence-limit					type number
+	ws-licence-key						like suot-description
+	ws-current-count					type number
+	ws-last-overlimit					type datetime
+	ws-reset-time						type time
+	ws-restrict-time					type time
+	ws-country							like suot-alpha-4-1
+	ws-restrict-limit					type number
+	ws-current-limit					type number
+	ws-session-count					type number
+	ws-elapsed-start-time				type time
+	ws-last-error						pic x(1024) type string
+
+object addresses
+	type is memory
+	record is
+		a-seq							pic 9(6)
+		a-lat							pic -999.9999999
+		a-long							pic -999.9999999
+		a-geotype						type string
+		a-postal-code					type string
+		a-formatted-address				type string pic x(1024)
+		a-address-type					type string	
+	end-record
+	key is a-seq
+
+mode md-select
+	prompt "Select"
+	help "Return this address"
+
+object text-file
+	type is text
+	record is
+		text-line						type string pic x(256)
+	end-record
+
+#define ADDLINE(A) \
+	set text-line = A \
+	insert text-file
+
+procedure library-init
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8proglogparam-write-log parameters are "clibvgeocode"
+#ifdef DEBUG
+	report "geocode testing"
+		no-message
+		no-xml
+#endif
+	get system-user-only-table
+		on index suot-tbl-type suot-tbl-code
+		key is "API" "GEOCODE"
+	on error
+	else
+		set ws-last-overlimit = suot-datetime2
+		set ws-last-reset = suot-datetime1
+		set ws-reset-time = time-from-date-time(suot-datetime3,FALSE)
+		set ws-restrict-time = time-from-date-time(suot-datetime4,FALSE)
+		set ws-licence-limit = suot-numeric2
+		set ws-current-count = suot-numeric1
+		set ws-restrict-limit = suot-numeric3
+		set ws-licence-key = suot-description
+		set ws-country = suot-alpha-4-1
+		set ws-current-limit = ws-restrict-limit
+		if tod() between ws-restrict-time and ws-reset-time
+			set ws-current-limit = ws-licence-limit
+		endif
+	endon
+	set ws-session-count = 0
+end-procedure
+
+procedure clibvgeocode-get-last-error export
+returning
+	lr-message							like ws-last-error
+	set lr-message = ws-last-error
+	if lr-message = spaces
+		set lr-message = "A call was made to get-last-error but no error has been recorded."
+	endif
+end-procedure
+
+
+procedure clibvgeocode-return-parameters export
+returning
+	lr-last-reset						type datetime
+	lr-licence-limit					type number
+	lr-licence-key						like suot-description
+	lr-current-count					type number
+	lr-last-overlimit					type datetime
+	lr-reset-time						type time
+	lr-restrict-time					type time
+	lr-country							like suot-alpha-4-1
+	lr-restrict-limit					type number
+	lr-current-limit					type number
+//
+	 set lr-last-reset = ws-last-reset
+	 set lr-licence-limit = ws-licence-limit
+	 set lr-licence-key = ws-licence-key
+	 set lr-current-count = ws-current-count
+	 set lr-last-overlimit = ws-last-overlimit
+	 set lr-reset-time = ws-reset-time
+	 set lr-restrict-time = ws-restrict-time
+	 set lr-country = ws-country
+	 set lr-restrict-limit = ws-restrict-limit
+	 set lr-current-limit = ws-current-limit
+end-procedure
+
+procedure clibvgeocode-maintain-parameters export
+	get system-user-only-table
+		on index suot-tbl-type suot-tbl-code
+		key is "API" "GEOCODE"
+		lock
+	on error
+		initialise system-user-only-table
+			leaving suot-tbl-type suot-tbl-code
+		insert system-user-only-table
+		on error
+		endon
+	endon
+	do maintain-parameters correct parameters are "API" "GEOCODE" 
+end-procedure
+
+screen maintain-parameters 
+parameters
+	lp-type								like suot-tbl-type
+	lp-code								like suot-tbl-code
+local
+	lf-reset-time						type time
+	lf-restrict-time					type time
+	window @1,1 to @15,80
+		title "GeoCoding Parameters"
+	form-entry
+	select *
+		from system-user-only-table
+		where suot-tbl-type = :lp-type
+		and suot-tbl-code = :lp-code
+	allowed correct
+before
+	set lf-reset-time = time-from-date-time( suot-datetime3,false)
+	set lf-restrict-time = time-from-date-time( suot-datetime4,false)
+detail
+	accept suot-description @2,25 pic x(40)
+		title "API Key"
+		help "Key supplied by Google"
+	accept suot-numeric2 @3,25
+		title "Licence Limit:"
+		help "Number of calls you wish to restrict to within a 24 hour period"
+	accept lf-reset-time @4,25 pic "HH:MM:SS"
+		title "Reset Time:"
+		help "Manually determined time the limit is reset by Google"
+		default lf-reset-time
+	validations
+		if date-time(2/1/1970,lf-reset-time,false) = 0
+			message "Invalid Time"
+			re-enter
+		endif
+		set suot-datetime3 = date-time(2/1/1970,lf-reset-time,false)
+	end-validations
+	accept lf-restrict-time @5,25 pic "HH:MM:SS"
+		title "Restriction Release Time:"
+		help "The time of day after which you wish to release any restriction"
+		default lf-restrict-time
+	validations
+		if date-time(2/1/1970,lf-restrict-time,false) = 0
+			message "Invalid Time"
+			re-enter
+		endif
+		set suot-datetime4 = date-time(2/1/1970,lf-restrict-time,false)
+	end-validations
+	accept suot-numeric3 @6,25
+		title "Restriction Count:"
+		help "The limit to the number of calls in any one instance of the clib prior to the restriction time."
+	accept suot-alpha-4-1 @7,25
+		title "Country:"
+		help "The country code to limit searches.  eg. NZ = New Zealand"
+	display suot-datetime1 @9,25
+		title "Last Reset:"
+	display suot-datetime2 @10,25
+		title "Last over limit:"
+	display suot-numeric1 @11,25
+		title "Number of calls:"
+	display "As at Dec 2016 the free daily limit imposed by Google is 2500 per day and 50 calls per seoncd" @13,5 
+		foreground prompts
+	display "For USD0.50/1000 you call up to 100,000 calls per day" @14,25
+		foreground prompts
+	confirm
+	confirmed
+	end-confirm
+end-screen
+
+
+procedure clibvgeocode-get-lat-long export
+parameters
+	lp-address								pic x(100) type string occurs ADDRESSLINES
+returning
+	lr-lat									pic -999.9999999
+	lr-long									pic -999.9999999
+	lr-geotype								type string
+	lr-postal-code							type string
+	lr-formatted-address					type string pic x(1024)
+	lr-address-type							type string
+	lr-result-count							type number
+local
+	lf-url									pic x(1024) type varchar
+	lf-hrtn									type blob
+	lf-brtn									type blob
+	lf-formatted-address					pic x(1024) type varchar
+	lf-ok									type boolean
+	lf-message								pic x(1024) type string
+//
+	if ws-session-count + 1 > ws-current-limit
+		set ws-last-error = "Local Limit Exceeded"
+		exit 1
+	endif
+	set ws-session-count += 1
+	do clibvgeocode-get-string-from-array
+		parameters lp-address 
+		returning lf-formatted-address
+	set lf-url =  "https://maps.googleapis.com/maps/api/geocode/xml?"
+	string lf-url appending str-concat("&address=" lf-formatted-address)
+	if ws-country <> spaces
+		string lf-url appending "&components=country:"
+		string lf-url appending ws-country
+	endif
+//	string lf-url appending "&region=nz"
+//	string lf-url appending "&sensor=false"
+	string lf-url appending str-concat("&key=" ws-licence-key)
+#ifdef DEBUG
+	print "url" lf-url pic x(120)
+#endif
+	call-url lf-url 
+	returning http-body in lf-brtn
+		http-headers in lf-hrtn
+	on error
+		set ws-last-error =  "call to url failed"
+		exit 1
+	endon
+    do check-for-error parameters are lf-brtn
+		returning lf-ok lf-message
+	if not lf-ok
+		set ws-last-error = lf-message
+		exit 1
+	endif
+	do get-data parameters are lf-brtn
+		returning lf-ok lf-message lr-lat lr-long lr-geotype 
+		lr-postal-code lr-formatted-address lr-address-type
+		lr-result-count
+	set ws-last-error = lf-message
+	if not lf-ok
+		exit 1
+	endif
+end-procedure
+
+procedure get-data
+// 
+// returns the first item in the dataset and the count of the number there are
+//
+parameters
+	lp-xml									type blob
+returning
+	lr-ok									type boolean
+	lr-message								type string pic x(1024)
+	lr-lat									pic -999.9999999
+	lr-long									pic -999.9999999
+	lr-geotype								type string
+	lr-postal-code							type string
+	lr-formatted-address					type string pic x(1024)
+	lr-address-type							type string	
+	lr-result-count							type number
+local
+	lf-handle								type xml-handle 
+	lf-root									type xml-handle
+	lf-result								type xml-handle
+	lf-address-component					type xml-handle
+	lf-location								type xml-handle
+	lf-node									type xml-handle
+	//
+	set lr-ok = TRUE
+	//
+	set lf-handle = xml-parse-text(lp-xml)
+	set lf-root = xml-get-root-node(lf-handle)
+	set lf-result = xml-get-child-by-name(lf-root,"result",spaces)
+	set lr-address-type = xml-node-text(xml-get-child-by-name(lf-result,"type",spaces))
+	set lr-formatted-address = xml-node-text(xml-get-child-by-name(lf-result,"formatted_address",spaces))
+	//
+	// find the postal code
+	//
+	set lf-address-component = xml-get-child-by-name(lf-result,"address_component",spaces)
+#ifdef DEBUG
+	DEBUG("lf-address-component")
+#endif
+	while lf-address-component <> 0
+		if xml-node-text(xml-get-child-by-name(lf-address-component,"type",spaces)) = "postal_code"
+			set lr-postal-code = xml-node-text(xml-get-child-by-name(lf-address-component,"short_name",spaces)) 
+			break
+		endif
+		set lf-address-component = xml-get-next-node(lf-address-component)
+		if xml-node-name(lf-address-component) <> "address_component"
+			break
+		endif
+	end-while
+	// 
+	// find the lat and long
+	//
+	set lr-geotype = xml-node-text(xml-get-child-by-name(
+		xml-get-child-by-name(lf-result,"geometry",spaces)
+		,"location_type",spaces))
+	set lf-location = xml-get-child-by-name(xml-get-child-by-name(lf-result,"geometry",spaces),"location",spaces)
+#ifdef DEBUG
+	DEBUG("lf-location")
+#endif
+	set lr-lat = num(xml-node-text(xml-get-child-by-name(lf-location,"lat",spaces)))
+	set lr-long = num(xml-node-text(xml-get-child-by-name(lf-location,"lng",spaces)))
+	//
+	// count the number of results
+	//
+	set lf-node = xml-get-child-by-name(lf-root,"result",spaces)
+	while lf-node
+		set lr-result-count += 1
+		repeat
+			set lf-node = xml-get-next-node(lf-node)
+		until lf-node = 0 or xml-node-name(lf-node) = "result"
+		end-repeat
+	end-while
+end-procedure
+
+procedure get-data-set
+//
+// populates a memory table to allow for selection
+//
+parameters
+	lp-xml									type blob
+returning
+	lr-ok									type boolean
+	lr-result-count							type number
+local
+	lf-handle								type xml-handle 
+	lf-root									type xml-handle
+	lf-result								type xml-handle
+	lf-address-component					type xml-handle
+	lf-location								type xml-handle
+	lf-node									type xml-handle
+	lf-count								type number
+	//
+	open addresses temporary truncate
+	//
+	set lr-ok = TRUE
+	//
+	set lf-handle = xml-parse-text(lp-xml)
+	set lf-root = xml-get-root-node(lf-handle)
+	set lf-result = xml-get-child-by-name(lf-root,"result",spaces)
+	while lf-result
+		set lf-count += 1
+		initialise addresses
+		set a-seq = lf-count
+		set a-address-type = xml-node-text(xml-get-child-by-name(lf-result,"type",spaces))
+		set a-formatted-address = xml-node-text(xml-get-child-by-name(lf-result,"formatted_address",spaces))
+		//
+		// find the postal code
+		//
+		set lf-address-component = xml-get-child-by-name(lf-result,"address_component",spaces)
+		while lf-address-component <> 0
+			if xml-node-text(xml-get-child-by-name(lf-address-component,"type",spaces)) = "postal_code"
+				set a-postal-code = xml-node-text(xml-get-child-by-name(lf-address-component,"short_name",spaces)) 
+				break
+			endif
+			set lf-address-component = xml-get-next-node(lf-address-component)
+			if xml-node-name(lf-address-component) <> "address_component"
+				break
+			endif
+		end-while
+		// 
+		// find the lat and long
+		//
+		set a-geotype = xml-node-text(xml-get-child-by-name(
+			xml-get-child-by-name(lf-result,"geometry",spaces)
+			,"location_type",spaces))
+		set lf-location = xml-get-child-by-name(xml-get-child-by-name(lf-result,"geometry",spaces),"location",spaces)
+		set a-lat = num(xml-node-text(xml-get-child-by-name(lf-location,"lat",spaces)))
+		set a-long = num(xml-node-text(xml-get-child-by-name(lf-location,"lng",spaces)))
+		//
+		// write the record
+		//
+		insert addresses
+		on error
+		endon
+		//
+		// now the loop
+		//
+		set lf-result = xml-get-next-node(lf-result)
+	end-while
+	set lr-result-count = lf-count
+end-procedure
+
+procedure check-for-error
+parameters
+	lp-xml									type blob
+returning
+	lr-ok									type boolean
+	lr-message								type string pic x(1024)
+local
+	lf-handle								type xml-handle 
+	lf-root									type xml-handle
+	lf-status-text							pic x(1024) type string
+	lf-error-text							pic x(1024) type string
+	set lr-ok = TRUE
+	set lf-handle = xml-parse-text(lp-xml)
+	set lf-root = xml-get-root-node(lf-handle)
+	set lf-status-text = xml-node-text(xml-get-child-by-name(lf-root,"status",spaces))
+	set lf-error-text = xml-node-text(xml-get-child-by-name(lf-root,"error_message",spaces))
+	if lf-status-text = "ZERO_RESULTS"
+		set lr-ok = true
+		set lr-message = str-concat(lf-status-text,":",lf-error-text)
+		do counter-update
+	elseif lf-status-text = "OVER_QUERY_LIMIT" 
+		// this should not have happened so our counter has
+		// got out of what 
+		set lr-ok = false
+		set lr-message = str-concat(lf-status-text,":",lf-error-text)
+		if lr-message = spaces
+			set lr-message = "Over query limit error"
+		endif
+		do counter-set-max
+	elseif lf-status-text <> "OK"
+		set lr-ok = false
+		set lr-message = str-concat(lf-status-text,":",lf-error-text)
+		if lr-message = spaces
+			set lr-message = "Status not ok but failed to identify error"
+		endif
+	else
+		do counter-update
+	endif
+/*
+    "OK" indicates that no errors occurred; the address was successfully parsed and at least one geocode was returned.
+    "ZERO_RESULTS" indicates that the geocode was successful but returned no results. 
+			This may occur if the geocoder was passed a non-existent address.
+    "OVER_QUERY_LIMIT" indicates that you are over your quota.
+    "REQUEST_DENIED" indicates that your request was denied, generally because of lack of a sensor parameter.
+    "INVALID_REQUEST" generally indicates that the query (address, components or latlng) is missing.
+    "UNKNOWN_ERROR" indicates that the request could not be processed due to a server error. 
+			The request may succeed if you try again.
+*/
+#ifdef DEBUG
+	print "check-for-error"
+	DEBUG("lf-handle")
+	DEBUG("lf-root")
+	DEBUG("lf-status-text")
+	DEBUG("lf-error-text")
+#endif
+end-procedure
+
+
+procedure counter-update
+	get system-user-only-table
+		on index suot-tbl-type suot-tbl-code
+		key is "API" "GEOCODE"
+		lock
+	on error
+		initialise system-user-only-table
+			leaving suot-tbl-type suot-tbl-code
+		set suot-datetime1 = gmt
+		set suot-numeric1 = 1
+		insert system-user-only-table
+		on error
+		endon
+	else
+		if gmt > suot-datetime2
+		and suot-datetime1 < suot-datetime2
+			set suot-numeric1 = 1
+			set suot-datetime1 = gmt
+			do clibwrtevntlog-write-log parameters are
+				IWRTEVNTLOG_LEVEL_WARNING	
+					'API'
+					'LIMIT RESET'
+					'Query limit reset'
+		else
+			set suot-numeric1 += 1
+		endif
+		update system-user-only-table
+		on error
+		endon
+	endon
+end-procedure
+
+procedure counter-set-max
+	get system-user-only-table
+		on index suot-tbl-type suot-tbl-code
+		key is "API" "GEOCODE"
+		lock
+	on error
+		initialise system-user-only-table
+			leaving suot-tbl-type suot-tbl-code
+		set suot-datetime2 = gmt // last time counter maxed out
+		insert system-user-only-table
+		on error
+		endon
+	else
+		set suot-datetime2 = gmt // last time counter maxed out
+		update system-user-only-table
+		on error
+		endon
+	endon
+	do clibwrtevntlog-write-log parameters are
+		IWRTEVNTLOG_LEVEL_WARNING	
+			'API'
+			'OVER LIMIT'
+			concat("Query over limit occurred after " str(suot-numeric1) " calls")
+end-procedure
+
+procedure clibvgeocode-get-string-from-array export
+parameters
+	lp-address								pic x(100) type string occurs ADDRESSLINES
+returning
+	lr-address								type varchar
+local
+	i										type number
+	j										type number
+//
+	for i = 1 to ADDRESSLINES
+		if lp-address[i] <> spaces
+			string lr-address appending concat(",",lp-address[i])
+		endif
+	endfor
+	do format-address-string 
+		parameters lr-address
+		returning lr-address
+end-procedure
+
+procedure format-address-string
+parameters
+	lp-address								type varchar
+returning
+	lr-address								type varchar
+local
+	i										type number
+	j										type number
+	set lr-address = lp-address
+	// 
+	// remove initial ","
+	//
+	if substring(lr-address,1,1) = ","
+		string lr-address deleting 1 to 1
+	endif
+	//
+	// Replace multiple spaces with single +
+	// 
+	set i = 1
+	while i < str-len(lr-address)
+		set j = pattern(lr-address , ' ')
+		if j > 0
+			if substring(lr-address,j,j) = ' '
+				string lr-address replacing "+" at j
+				if j > 1
+					if substring(lr-address,j - 1,j - 1) = "+"
+						string  lr-address deleting j to j
+					endif
+				endif
+			endif
+		endif
+		set i += 1
+	endwhile
+	//
+	// remove trailing "+"
+	//
+	while substring(lr-address,1,1) = "+"
+		string lr-address deleting 1 to 1
+	endwhile
+end-procedure
+
+procedure clibvgeocode-select-address export
+//
+// This clib will select and address from a list of potenial address
+//
+parameters
+	lp-address								pic x(1024) type string 
+returning
+	lr-address-array						pic x(100) type string occurs ADDRESSLINES
+	lr-lat									pic -999.9999999
+	lr-long									pic -999.9999999
+	lr-geotype								type string
+	lr-postal-code							type string
+	lr-formatted-address					type string pic x(1024)
+	lr-address-type							type string
+local
+	lf-url									pic x(1024) type varchar
+	lf-hrtn									type blob
+	lf-brtn									type blob
+	lf-formatted-address					pic x(1024) type varchar
+	lf-ok									type boolean
+	lf-result-count							type number
+	lf-message								pic x(1024) type string
+//
+	set ws-elapsed-start-time = tod()
+	if ws-session-count + 1 > ws-current-limit
+		set ws-last-error = "Local Limit Exceeded"
+		exit 1
+	endif
+#ifdef DEBUG
+	print "Start of clibgeocode-select-address:" lp-address
+#endif
+	do format-address-string parameters are lp-address returning lp-address
+#ifdef DEBUG
+	print "After Formatting:" lp-address
+#endif
+	set ws-session-count += 1
+	set lf-url =  "https://maps.googleapis.com/maps/api/geocode/xml?"
+	string lf-url appending str-concat("&address=" lp-address)
+	if ws-country <> spaces
+		string lf-url appending "&components=country:"
+		string lf-url appending ws-country 
+	endif
+//	string lf-url appending "&sensor=false"
+	string lf-url appending str-concat("&key=" ws-licence-key)
+#ifdef DEBUG
+	DEBUG(lf-url)
+	do display-elapsed-time-message parameters "O"
+#endif
+	call-url lf-url 
+	returning http-body in lf-brtn
+		http-headers in lf-hrtn
+	on error
+		set ws-last-error =  "call to url failed"
+		exit 1
+	endon
+#ifdef DEBUG
+	print "Returned Blob:"
+	do print-blob parameters lf-brtn
+#endif
+#ifdef DEBUG
+	do display-elapsed-time-message parameters "O"
+#endif
+    do check-for-error parameters are lf-brtn
+		returning lf-ok lf-message
+	if not lf-ok
+#ifdef DEBUG
+		print "Error Detected from check-for-error"
+#endif
+		set ws-last-error = lf-message
+		exit 1
+	endif
+#ifdef DEBUG
+	do display-elapsed-time-message parameters "O"
+#endif
+	do get-data-set  parameters are lf-brtn
+		returning lf-ok 
+		lf-result-count
+	if lf-result-count = 0
+		set ws-last-error = "No Addresses Found"
+	endif
+#ifdef DEBUG
+	print "Result count from get-data-set is " lf-result-count
+	do display-elapsed-time-message parameters "O"
+#endif
+	if lf-result-count = 1
+		get addresses first
+		set lr-lat = a-lat
+		set lr-long = a-long
+		set lr-geotype = a-geotype
+		set lr-postal-code = a-postal-code
+		set lr-formatted-address = a-formatted-address
+		set lr-address-type = a-address-type
+		do clibvgeocode-get-array-from-string
+			parameters are lr-formatted-address
+			returning lr-address-array
+#ifdef DEBUG
+	print "finished select address with " lr-formatted-address
+#endif
+		exit 0
+	endif
+#ifdef DEBUG
+	do display-elapsed-time-message parameters "C"
+#endif
+	do select-address 
+		returning lr-lat lr-long lr-geotype 
+		lr-postal-code lr-formatted-address lr-address-type
+		lf-ok lf-message
+	if lf-ok
+		do clibvgeocode-get-array-from-string
+			parameters are lr-formatted-address
+			returning lr-address-array
+		exit
+	else
+		set ws-last-error = lf-message
+		exit 1
+	endif
+end-procedure
+
+procedure display-elapsed-time-message
+parameters
+	lp-open-close						pic x // O - open C- close
+local
+	lf-file								pic x(100) type string
+//
+	if lp-open-close = "O"
+		if tod() - ws-elapsed-start-time > MAXELAPSEDB4MESSAGE
+			set lf-file =  str-concat("wait",str(pid()),".html")
+			open text-file
+				file is str-concat("/tmp/" lf-file)
+				create truncate permanent
+				ADDLINE("<html>")
+				ADDLINE("<head>")
+				ADDLINE('<script language="javascript">')
+				ADDLINE("   function changeScreenSize(w,h)")
+				ADDLINE("     {")
+				ADDLINE("       window.resizeTo( w,h );")
+				ADDLINE("     }")
+				ADDLINE("</script>")
+				ADDLINE("</head>")
+				ADDLINE('<body>')
+				ADDLINE('<div style="height:100%;" >')
+				ADDLINE('<div style="display:inline-block;text-align:center;margin:auto 10px;" onload="changeScreenSize(200,200);">')
+				ADDLINE('Contacting Google<BR> <img src="\\192.168.110.215\cus\images\progressdots.gif">')
+				ADDLINE('<BR>Please Wait ')
+				ADDLINE('</div>')
+				ADDLINE('<div style="display:inline-block;vertical-align:middle;height:100%"></div>')
+				ADDLINE('</div>')
+				ADDLINE('</body>')
+				ADDLINE("</html>")
+			if not set-web-window("wait",lf-file,str-concat("file://192.168.110.215/tmp/",lf-file),72) endif
+		endif
+	endif
+	if lp-open-close = "C"
+		if set-web-window("wait","wait",spaces,72) endif
+	endif
+end-procedure
+
+screen select-address
+returning
+	lr-lat									pic -999.9999999
+	lr-long									pic -999.9999999
+	lr-geotype								type string
+	lr-postal-code							type string
+	lr-formatted-address					type string pic x(1024)
+	lr-address-type							type string
+	lr-ok									type boolean
+	lr-message								type string pic x(1024)
+	//
+	window @1,1 to @10,80
+	title "Choose address"
+	datagrid occurs 8
+	select * from addresses
+	allowed md-select search
+before 
+	set lr-ok = true
+detail
+	if screenmode = md-select
+		set lr-lat = a-lat
+		set lr-long = a-long
+		set lr-geotype = a-geotype
+		set lr-postal-code = a-postal-code
+		set lr-formatted-address = a-formatted-address
+		set lr-address-type = a-address-type
+		exit
+	endif
+	accept  a-seq @1,1
+		title "Seq"
+		when screen-mode = search
+		show-value
+	display a-formatted-address @1,2 pic x(80)
+		title "Address"
+after
+	set lr-ok = FALSE
+	set lr-message = "No Address Selected"
+end-screen
+
+screen clibvgeocode-prompt export
+parameters
+	lp-address-text						pic x(1024) type string
+returning
+	lr-address-text						pic x(1024) type string
+	do address-prompt entry once
+		parameters are lp-address-text
+		returning lr-address-text
+end-screen
+
+screen address-prompt   //export
+parameters
+	lp-address-text						pic x(1024) type string
+returning
+	lr-address-text						pic x(1024) type string
+	window @1,1 to @3,70
+	title "Enter Address"
+before
+	set lr-address-text = lp-address-text
+detail
+	accept lr-address-text @2,2 pic x(66)
+		default lr-address-text
+end-screen
+
+procedure clibvgeocode-array-to-string export
+parameters
+	lp-address							pic x(256) type string occurs ADDRESSLINES
+returning 
+	lr-address-string					pic x(1024) type string
+local
+	i									type number
+	set lr-address-string = lp-address[1]
+	for i = 2 to ADDRESSLINES
+		if lp-address[i] <> spaces
+			string lr-address-string appending ","
+			string lr-address-string appending lp-address[i]
+		endif
+	endfor
+end-procedure
+
+
+procedure clibvgeocode-get-array-from-string export
+parameters are 
+	lp-address							type varchar
+returning
+	lr-address							pic x(100) type string occurs ADDRESSLINES
+local
+	lf-count							type number
+	lf-offset							type number
+	//
+	set lf-offset = 1
+	while lp-address <> spaces
+		set lf-count += 1
+		if lf-count > 200 // just to make sure we don't loop infinitely
+			break
+		endif
+		if not pattern(lp-address,",")
+			set lr-address[lf-offset] = ltrim(lp-address)
+		else
+			set lr-address[lf-offset] = ltrim(substring(lp-address,1,pattern(lp-address,",") - 1))
+			set lf-offset += 1
+			string lp-address deleting 1 to pattern(lp-address,",")
+		endif
+	endwhile
+end-procedure
+
+procedure clibvgeocode-display-map export
+parameters
+	lp-address								pic x(100) type string occurs ADDRESSLINES
+local
+	lf-string								pic x(1000) type string
+	//
+	do clibvgeocode-get-string-from-array 
+		parameters are lp-address returning lf-string
+	command str-concat("https://www.google.co.nz/maps/place/" lf-string)
+		external 
+		no-wait
+end-procedure
+
+//------------------------------------------------------------------------------
+//  Places processing
+//------------------------------------------------------------------------------
+/*
+	Big Hairy note:  As of june 2020:
+	The above geocoding used to return multiple results.
+	It now only ever returns one, and therefore, useless for searching.
+	To return multiple results you now must use a "text search"
+
+	This is found at this api:
+
+	https://maps.googleapis.com/maps/api/place/textsearch/output?parameters
+
+	This is NO LONGER FREE.  This api will cost 0.032 USD per call.
+
+*/
+//
+
+
+procedure clibvgeocode-select-place export
+//
+// This clib will select and address from a list of potenial address
+//
+parameters
+	lp-address								pic x(1024) type string 
+returning
+	lr-address-array						pic x(100) type string occurs ADDRESSLINES
+	lr-lat									pic -999.9999999
+	lr-long									pic -999.9999999
+	lr-geotype								type string
+	lr-postal-code							type string
+	lr-formatted-address					type string pic x(1024)
+	lr-address-type							type string
+local
+	lf-url									pic x(1024) type varchar
+	lf-hrtn									type blob
+	lf-brtn									type blob
+	lf-formatted-address					pic x(1024) type varchar
+	lf-ok									type boolean
+	lf-result-count							type number
+	lf-message								type string pic x(1024)
+//
+	set ws-elapsed-start-time = tod()
+	if ws-session-count + 1 > ws-current-limit
+		set ws-last-error = "Local Limit Exceeded"
+		exit 1
+	endif
+#ifdef DEBUG
+	print lp-address
+#endif
+	do format-address-string parameters are lp-address returning lp-address
+#ifdef DEBUG
+	print lp-address
+#endif
+	set ws-session-count += 1
+	set lf-url =  "https://maps.googleapis.com/maps/api/place/textsearch/xml?"
+	string lf-url appending str-concat("&query=" lp-address)
+	string lf-url appending "&region=nz"
+//	string lf-url appending "&inputtype=textquery"
+//	string lf-url appending "&locationbias=rectangle:-34,166|-47,179"
+//	string lf-url appending "&fields=geometry,formatted_address,types,business_status,name,place_id,plus_code"
+//	if ws-country <> spaces
+//		string lf-url appending "&components=country:"
+//		string lf-url appending ws-country 
+//	endif
+	string lf-url appending str-concat("&key=" ws-licence-key)
+#ifdef DEBUG
+	DEBUG(lf-url)
+	do display-elapsed-time-message parameters "O"
+#endif
+	call-url lf-url 
+	returning http-body in lf-brtn
+		http-headers in lf-hrtn
+	on error
+		set ws-last-error =  "call to url failed"
+		exit 1
+	endon
+#ifdef DEBUG
+	do print-blob parameters lf-brtn
+#endif
+#ifdef DEBUG
+	do display-elapsed-time-message parameters "O"
+#endif
+    do check-for-error parameters are lf-brtn
+		returning lf-ok lf-message
+	if not lf-ok
+		set ws-last-error = lf-message
+		exit 1
+	endif
+#ifdef DEBUG
+	do display-elapsed-time-message parameters "O"
+#endif
+	do get-data-set  parameters are lf-brtn
+		returning lf-ok 
+		lf-result-count
+	if lf-result-count = 0
+		set ws-last-error = "No Addresses Found"
+	endif
+#ifdef DEBUG
+	do display-elapsed-time-message parameters "O"
+#endif
+	if lf-result-count = 0
+		message-box param-text("<<P1>><<BR>><<p2>>"
+			,"Sorry, No Addresses found for this string"
+			,"Please try a different address")
+			title is "Google Address Finder"
+			message-buttons  MSG_BOX_CANCEL
+			icon MSG_BOX_STOP
+		exit
+	elseif lf-result-count = 1
+		get addresses first
+		set lr-lat = a-lat
+		set lr-long = a-long
+		set lr-geotype = a-geotype
+		set lr-postal-code = a-postal-code
+		set lr-formatted-address = a-formatted-address
+		set lr-address-type = a-address-type
+		do clibvgeocode-get-array-from-string
+			parameters are lr-formatted-address
+			returning lr-address-array
+		exit
+	endif
+#ifdef DEBUG
+	do display-elapsed-time-message parameters "C"
+#endif
+	do select-address 
+		returning lr-lat lr-long lr-geotype 
+		lr-postal-code lr-formatted-address lr-address-type
+		lf-ok lf-message
+	if lf-ok
+		do clibvgeocode-get-array-from-string
+			parameters are lr-formatted-address
+			returning lr-address-array
+		exit
+	else
+		set ws-last-error = lf-message
+		exit 1
+	endif
+end-procedure
+
+
+#ifdef DEBUG
+
+procedure print-blob
+parameters 
+	lp-blob									type blob
+local
+	lf-filename								type string
+	lf-handle								type xml-handle
+	lf-root									type xml-handle
+	lf-bigtext								type varchar pic x(4096)
+	set lf-filename = "/tmp/thisblob.xml"
+	set lf-handle = xml-parse-text(lp-blob)
+	if lf-handle = 0
+		print "no handle"
+		exit
+	endif
+	set lf-root = xml-get-root-node(lf-handle)
+	if xml-save-as-file(lf-handle,lf-filename,xml-get-doc-encoding(lf-handle),2) 
+		open text-file file is lf-filename
+		select * from text-file
+		detail
+			print text-line
+		end-select
+	else
+		print "Could not save file" error-description(file-status())
+	endif
+	if xml-save-as-text(lf-handle,lf-bigtext,"UTF-8")
+		do print-varchar parameters are "xml" lf-bigtext
+	endif
+	do traverse-xml-tree parameters are lf-root 1
+end-procedure
+
+procedure traverse-xml-tree
+parameters
+	lp-node						type xml-handle
+	lp-level					pic 999
+local
+	lf-this-node				type xml-handle
+	lf-child-node				type xml-handle
+	lf-print-line				pic x(100) type string
+	i						type number
+	print "traverse:" lp-node lp-level
+	set lf-this-node = lp-node
+	while lf-this-node <> 0
+		set lf-print-line = spaces
+		for i = 1 to lp-level
+			set lf-print-line = concat(lf-print-line,chr(9))
+		end-for
+		set lf-print-line = concat(lf-print-line
+			,str(xml-node-type(lf-this-node)),"."
+			"<"
+			,xml-node-name(lf-this-node),":"
+			">"
+			,xml-node-text(lf-this-node),":"
+			,xml-node-string(lf-this-node))
+		print lf-print-line
+		set lf-child-node = xml-get-first-child-node(lf-this-node)
+		if lf-child-node <> 0
+			do traverse-xml-tree parameters are lf-child-node, lp-level + 1
+		endif
+		set lf-this-node = xml-get-next-node(lf-this-node)
+	end-while
+	if xml-free-node-handle(lf-this-node) endif
+end-procedure 
+
+procedure print-varchar
+parameters
+	lp-title						type string
+	lp-in							pic x(4096) type varchar
+local
+	i								type number
+//
+	print lp-title "len:" str-len(lp-in) "Poss" size-of(lp-in)
+	while str-len(lp-in) > 80
+		print substring(lp-in,1,80)
+		string lp-in deleting 1 to 80
+	end-while
+	print lp-in
+	print 80"-"
+end-procedure
+
+#endif

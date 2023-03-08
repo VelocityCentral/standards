@@ -1,0 +1,622 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : Order Enquiry
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2011
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: vglrf/vglrfenq.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 01Aug11  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+//
+ 
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+#include "../include/i5sostatii.spl"
+#include "../include/i5sodesc.spl"
+
+#define EXITCODE '9'
+
+
+link 'vglrf/vglrfclib'
+ 
+field
+	ws-function-title					type string
+	ws-max-rows							type number
+	ws-max-cols							type number
+
+mode md-select
+	prompt "1)Select"
+mode md-exit
+	prompt "9)Exit"
+
+procedure main
+local
+	lf-enq-count						type number
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8secabt-check-abort
+		parameters are sys-consolidation-division login-id() "ZVRF" "E002"
+		returning ws-function-title 
+	do i8proglog-write-log
+	do vglrfclib-screen-size returning ws-max-cols ws-max-rows 
+	// how many enquiries are defined
+	set lf-enq-count = 0
+	do scan-order entry
+end-procedure
+
+screen scan-order
+//
+//  This routine allows the user to scan the bar code of an order number.
+//  The scanned number is a string that includes any suffix 
+//  The program extracts the order number and suffix from the string.
+//
+local
+	lf-order							pic x(10) type string
+	lf-order-no							like so-order-no
+	lf-bo-suffix						like so-bo-suffix
+	lf-ok								type boolean
+	lf-non-notes						pic 9999
+	lf-scanned							pic 9999
+	lf-not-scanned						pic 9999
+//
+	lf-pick-date						type date
+	lf-pick-complete-time				type time
+	lf-pick-duration-secs				type number
+	lf-picker							like ordlog-login-id
+//
+	window @1,1 to @ws-max-rows,ws-max-cols
+	no-ok-cancel
+//
+before
+	clear
+detail
+	accept lf-order @1,10
+		title "Order:"
+		default lf-order
+		help "1)Addr 9)Exit"
+	validations
+		if lf-order = "9"
+			exit
+		endif
+		if lf-order = "1"
+			do del-addr show once parameters are lf-order-no lf-bo-suffix
+			re-enter lf-order
+		endif
+		do vglrfclib-validate-order-no
+			parameters are lf-order "-archive"
+			returning lf-ok lf-order-no lf-bo-suffix
+		if not lf-ok
+			do vglrfclib-display-message parameters "Invalid Order Number" 3
+			re-enter lf-order
+		endif
+		get sales-order
+			on index so-order-no so-bo-suffix
+			key is lf-order-no lf-bo-suffix
+		on error
+			get sales-order-archive
+				on index so-order-no so-bo-suffix
+				key is lf-order-no lf-bo-suffix
+			on error
+				do vglrfclib-display-message parameters "Invalid Order Number" 3
+				re-enter lf-order
+			endon
+		endon
+		get deb-master
+			on index accountcode
+			key is so-cust-code
+		on error
+		endon
+//		if so-order-status <> "40"
+//			do vglrfclib-display-message parameters "Order not ready to pick" 5
+//			re-enter lf-order
+//		endif
+	end-validations
+	confirm auto
+	confirmed
+		display so-cust-code @2,10
+			title "Cust:"
+		get deb-master
+			on index accountcode
+			key is so-cust-code
+		on error
+		endon
+		display shortname @3,1
+		do i5sodesc-get-status-desc
+		display i5sodesc-so-status-desc @4,1
+		if so-order-status = I5SO_ENTERED_ON_HOLD
+			get system-table 
+				on index sys-tbl-type sys-tbl-code
+				key is "HR" so-order-reason-code
+			on error
+			else 
+				display sys-description @5,1
+			endon
+		endif
+		if so-order-status <> I5SO_UPDATED
+			do count-lines
+				parameters are so-order-no so-bo-suffix
+				returning lf-non-notes lf-scanned lf-not-scanned				
+			display str-concat("Lines to Pick:",str(lf-non-notes)) @6,1
+			display str-concat("Lines Scanned:",str(lf-scanned)) @7,1
+			display str-concat("Lines To Scan:",str(lf-not-scanned)) @8,1
+		else
+			display str-concat("Order despatched:", format-picture(so-delivery-date,"ddmmmyy")) @6,1
+			do vglrfclib-get-picking-data
+			parameters
+				so-order-no	so-bo-suffix						
+			returning
+				lf-ok		
+				lf-pick-date					
+				lf-pick-complete-time		
+				lf-pick-duration-secs	
+				lf-picker			
+			display str-concat("Picker:" lf-picker) @7,1
+			display str-concat("Pick Date:"  format-picture(lf-pick-date,"ddmmmyy")) @8,1
+			display str-concat("Pick Time:"  format-picture(lf-pick-complete-time,"HH:MM:SS")) @9,1
+		endif
+	end-confirm
+end-screen
+
+screen del-addr
+parameters
+	lp-order-no							like so-order-no
+	lp-bo-suffix						like so-bo-suffix
+	window @1,1 to @ws-max-rows,ws-max-cols
+local
+	lf-addr								pic x(30) occurs 6
+	i									type number	
+//
+before
+	for i = 3 to ws-max-rows
+		clear  @i,1 to @i,ws-max-cols
+	endfor
+	get sales-order-delivery
+		on index so-order-no so-bo-suffix so-text-type
+		key is lp-order-no lp-bo-suffix "DA"
+	on error
+		get sales-order-delivery-archive
+			on index so-order-no so-bo-suffix so-text-type
+			key is lp-order-no lp-bo-suffix "DA"
+		on error
+			get name-and-address-master
+				on index accountcode na-type
+				key is so-cust-code "DA"
+			on error
+				get name-and-address-master
+					on index accountcode na-type
+					key is so-cust-code "C"
+				on error
+					set lf-addr[*] = spaces
+				else
+					set lf-addr[1] = na-company
+					set lf-addr[2] = na-street
+					set lf-addr[3] = na-suburb
+					set lf-addr[4] = na-country
+					set lf-addr[5] = na-address-6
+					set lf-addr[6] = na-address-7
+				endon
+			else
+				set lf-addr[1] = na-company
+				set lf-addr[2] = na-street
+				set lf-addr[3] = na-suburb
+				set lf-addr[4] = na-country
+				set lf-addr[5] = na-address-6
+				set lf-addr[6] = na-address-7
+			endon
+		else
+			for i = 1 to  occurence(lf-addr)
+				set lf-addr[i] = so-dl-text[i]
+			endfor
+		endon
+	else
+		for i = 1 to  occurence(lf-addr)
+			set lf-addr[i] = so-dl-text[i]
+		endfor
+	endon
+detail
+	for i = 1 to  occurence(lf-addr)
+		display lf-addr[i] @(i + 2),2
+	endfor
+end-screen
+
+procedure count-lines
+parameters are 
+	lp-order-no							like so-order-no
+	lp-bo-suffix						like so-bo-suffix
+returning
+	lr-non-notes						pic 9999
+	lr-scanned							pic 9999
+	lr-not-scanned						pic 9999
+	//
+	select * from sales-order-line
+		where so-order-no = :lp-order-no
+		and so-bo-suffix = :lp-bo-suffix
+	detail
+		if sol-line-type != 'DN'
+			set lr-non-notes += 1
+			if sol-user-only-num1 = 0
+				set lr-not-scanned += 1
+			else
+				set lr-scanned += 1
+			endif
+		endif
+	end-select
+end-procedure
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/*
+procedure get-currency
+parameters
+	lp-stock-code								like stock-code
+	lp-whse-code								like whse-code
+//
+//  Note : this program uses get-field-value function.  It is not enough to
+//  have currency on the record if you want to use the function.  You must
+//  also have referred to the field.  To ensure all fields are referenced we
+//  us the if "1=0 insert" trick.  If in doubt read the manual
+// 
+	get stock-master
+		on index stock-code 
+		key is lp-stock-code
+	on error
+	endon
+	if 1 = 0 insert stock-master endif
+	get stock-warehouse-detail
+		on index stock-code whse-code
+		key is lp-stock-code lp-whse-code
+	on error
+	endon
+	if 1 = 0 insert stock-warehouse-detail endif
+	select * from stock-supplier
+		where stock-code = lp-stock-code
+		order by stock-code,sup-priority,cre-accountcode
+	detail
+		break
+	end-select
+	if 1 = 0 insert stock-supplier endif
+	select * from stock-price
+		where stock-code = :lp-stock-code
+		and prc-region-code = spaces
+	detail
+		break
+	end-select
+	if 1 = 0 insert stock-price endif
+end-procedure
+
+screen get-stock-code
+parameters
+	lp-enquiry							like sys-tbl-code
+local
+	lf-stock-code						like stock-code
+	lf-ok								type boolean
+	lf-warehouse						like whse-code
+	lf-enter-warehouse					type boolean
+	window @1,1 to @ws-max-rows,ws-max-cols
+	allowed entry
+	no-ok-cancel
+before
+	clear
+	do vglrfclib-get-default-warehouse 
+		returning lf-warehouse
+	set lf-enter-warehouse = FALSE
+	get system-table
+		on index sys-tbl-type sys-tbl-code
+		key is "WH" lf-warehouse
+	on error
+		set lf-enter-warehouse = true
+	endon
+	display lp-enquiry @1,1
+	display "Scan Stock Code" @2,1
+detail
+	accept lf-warehouse @1,10
+		title "Whse:"
+		when lf-enter-warehouse
+		show-value
+	validations
+		get system-table
+			on index sys-tbl-type sys-tbl-code
+			key is "WH" lf-warehouse
+		on error
+			do vglrfclib-display-message parameters
+				"Invalid Warehouse" 2
+			set lf-enter-warehouse = true
+			re-enter lf-warehouse
+		endon
+		set lf-enter-warehouse = FALSE
+	end-validations
+	accept lf-stock-code @3,1
+		help concat(EXITCODE "-Quit 1-Whse 2-Type")
+		uppercase
+	validations
+		if lf-stock-code = EXITCODE
+			exit
+		endif
+		if lf-stock-code = "1"
+			set lf-enter-warehouse = TRUE
+			re-enter lf-warehouse
+		endif
+		if lf-stock-code = "2"
+			do choose-enq returning lp-enquiry
+			refresh
+			re-enter lf-stock-code
+		endif
+		do vglrfclib-validate-product
+			parameters are lf-stock-code spaces
+			returning lf-ok lf-stock-code
+		if not lf-ok
+			do vglrfclib-display-message 
+				parameters are "Invalid stock code" 2
+			re-enter
+		endif
+	end-validations
+	confirm auto
+	confirmed
+		get system-table
+			on index sys-tbl-type sys-tbl-code
+			key is "WH" lf-warehouse
+		on error
+			do vglrfclib-display-message parameters
+				"Invalid Warehouse" 2
+			set lf-enter-warehouse = true
+			re-enter lf-warehouse
+		endon
+		do get-currency parameters are lf-stock-code lf-warehouse
+		do display-screen parameters are lp-enquiry 
+		refresh
+	end-confirm
+end-screen
+
+screen display-screen
+// requires currency on all files
+parameters
+	lp-enquiry							like sys-tbl-code
+//	window @1,1 to @ws-max-rows,ws-max-cols
+	review occurs MAXREVIEW
+	select * from screenlines
+	allowed next prev md-exit
+before
+	clear
+	do build-lines parameters are lp-enquiry 
+detail
+	if screenmode = md-exit
+		exit
+	endif
+	display sl-line @1,2
+end-screen
+
+procedure build-lines
+parameters
+	lp-code								like sys-tbl-code
+local
+	i									type number
+	lf-field-start						type number
+	lf-field-end						type number
+	lf-work								type string pic x(MAXCOL)
+	lf-line								type string pic x(MAXCOL)
+	lf-fld								type string pic x(MAXCOL)
+//
+	open screenlines truncate temporary
+	select * from system-messages
+		where sys-message-type = ENQCODE
+		and sys-message-code = lp-code
+		order by sys-message-type sys-message-code sys-message-line
+	detail
+		set i += 1
+		//
+		set lf-work = sys-message-text
+		set lf-line = spaces
+		set lf-field-start = pattern(lf-work,"{") 
+		while lf-field-start > 0
+			string lf-line appending substring(lf-work,1,lf-field-start - 1)
+			string lf-work deleting 1 to lf-field-start
+			set lf-field-end = pattern(lf-work,"}")
+			do format-field parameters are substring(lf-work,1,lf-field-end - 1)
+				returning lf-fld
+			string lf-line appending lf-fld // get-field-value(substring(lf-work,1,lf-field-end - 1))
+			string lf-work deleting 1 to lf-field-end
+			set lf-field-start = pattern(lf-work,"{") 
+		end-while
+		string lf-line appending lf-work
+		initialise screenlines
+		set sl-seq = i
+		set sl-line  = lf-line
+		insert screenlines
+		on error
+		endon
+		set i += 1
+	end-select
+end-procedure
+
+procedure format-field
+// Input into this routine is the field optionally followed by a command and a
+// picture clause.  Note that the leading and trailing "{" have been stripped.
+parameters 
+	lp-fld								type string pic x(MAXCOL)
+returning
+	lr-fld								type string pic x(MAXCOL)
+local
+	lf-comma							type number
+	lf-work-date						type date
+	lf-pic								type string pic x(MAXCOL)
+	lf-fld								type string pic x(MAXCOL)
+//
+	set lf-comma = pattern(lp-fld,",")
+	if lf-comma = 0
+		set lr-fld = get-field-value(lp-fld)
+		exit
+	endif
+	// the rules are: if there is a "d" or "D" in the pattern - it must be a
+	// date, if there is an x in the pattern it must be an alpha, if there is
+	// a U in the pattern then get the pic cluse from the unit of measure.
+	// anything else must be a numeric
+	set lf-fld = substring(lp-fld,1,lf-comma - 1)
+	set lf-pic = substring(lp-fld,lf-comma + 1, strlen(lp-fld))
+	if pattern(lf-pic,"U")
+		do vglrfclib-get-pic-clause 
+			parameters sup-unit-desc
+			returning lf-pic
+		set lr-fld = format-picture(get-field-value-numeric(lf-fld),lf-pic)
+	elseif pattern(lf-pic,"x")
+		set lr-fld = format-picture(get-field-value(lp-fld),lf-pic)
+	elseif pattern(lf-pic,"x")
+		set lf-work-date = date2julian(get-field-value(lf-fld))
+		set lr-fld = format-picture(lf-work-date,lf-pic)
+	else
+		set lr-fld = format-picture(get-field-value-numeric(lf-fld),lf-pic)
+	endif
+end-procedure
+
+menu choose-enq
+	window @1,1 to @ws-max-rows,ws-max-cols
+returning
+	lr-code						like sys-tbl-code
+local
+	lf-option-text				pic x(20) occurs 20
+	lf-option-value				pic x(20) occurs 20
+	i							type number
+before
+	select * from system-table
+		where sys-tbl-type = ENQCODE
+	detail
+		set i += 1
+		set lf-option-value[i] = sys-tbl-code
+		set lf-option-text[i] = concat(str(i) "." sys-description)
+	end-select
+	clear
+detail
+	option lf-option-text[1] @1,1
+		when i >= 1
+		set lr-code = lf-option-value[1]
+	option lf-option-text[2] @2,1
+		when i >= 2
+		set lr-code = lf-option-value[2]
+	option lf-option-text[3] @3,1
+		when i >= 3
+		set lr-code = lf-option-value[3]
+	option lf-option-text[4] @4,1
+		when i >= 4
+		set lr-code = lf-option-value[4]
+	option lf-option-text[5] @5,1
+		when i >= 5
+		set lr-code = lf-option-value[5]
+	option lf-option-text[6] @6,1
+		when i >= 6
+		set lr-code = lf-option-value[6]
+	option lf-option-text[7] @7,1
+		when i >= 7
+		set lr-code = lf-option-value[7]
+	option "9. Exit" @8,1
+		set lr-code = EXITCODE
+	confirm auto
+	confirmed
+		exit
+	end-confirm
+end-menu
+
+
+// Create sample screens--------------------------------------------------
+//
+procedure create-samples
+	select * from system-table
+		where sys-tbl-type = ENQCODE
+	detail
+		// there must be at least one so exit
+		exit
+	end
+	get system-table
+		on index sys-tbl-type sys-tbl-code
+		key is "ZZ" ENQCODE
+	on error
+		initialise system-table
+		set sys-tbl-type = "ZZ"
+		set sys-tbl-code = ENQCODE
+		set sys-description = "RF enquiries"
+		insert system-table
+		on error
+		endon
+	endon
+	// if we got here then aren't any
+	do insert-header parameters are "BASIC" "Standard"
+	do insert-header parameters are "SUPP"	"Supplier"
+	do insert-header parameters are "PRICE"	"Price"
+	do insert-header parameters are "WHSE"	"Warehouse"
+//
+	do insert-detail parameters are "BASIC" 1 "{stk-description}"
+	do insert-detail parameters are "BASIC" 2 "UOM : {stk-unit-desc}"
+	do insert-detail parameters are "BASIC" 3 "QOH : {whse-qty-on-hand}"
+	do insert-detail parameters are "PRICE" 1 "{stk-description}"
+	do insert-detail parameters are "PRICE" 2 "per : {stk-unit-desc}"
+	do insert-detail parameters are "PRICE" 3 "STD:{prc-wholesale-price}"
+	do insert-detail parameters are "WHSE" 1 "{stk-description}"
+	do insert-detail parameters are "WHSE" 2 "QOH:{whse-qty-on-hand,U}"
+	do insert-detail parameters are "WHSE" 3 "QOO:{whse-qty-on-order,U}"
+	do insert-detail parameters are "WHSE" 4 "QIT:{whse-qty-in-transit,U}"
+	do insert-detail parameters are "WHSE" 5 "WAC:{whse-avg-cost,$(9).99}"
+	do insert-detail parameters are "SUPP" 1 "{stk-description}"
+	do insert-detail parameters are "SUPP" 2 "Supp:{cre-accountcode}"
+	do insert-detail parameters are "SUPP" 3 "Last:{sup-last-buy-date,dd/mmm/yy}"
+	do insert-detail parameters are "SUPP" 4 "P:{sup-last-buy-price,$s(4).99}{sup-currency-code}"
+	do insert-detail parameters are "SUPP" 5 "Lead:{sup-actual-lead-time,zzz} Days"
+	do insert-detail parameters are "SUPP" 6 "QTY:{sup-economic-order-qty,U}{sup-unit-desc}"
+end-procedure
+
+procedure insert-header
+parameters are
+	lp-code							like sys-tbl-code
+	lp-desc							like sys-description
+//
+	get system-table
+		on index sys-tbl-type sys-tbl-code
+		key is ENQCODE lp-code
+	on error
+		initialise system-table
+		set sys-tbl-type = ENQCODE
+		set sys-tbl-code = lp-code
+		set sys-description = lp-desc
+		insert system-table
+		on error
+		endon
+	endon
+end-procedure
+
+procedure insert-detail
+parameters
+	lp-code							like sys-message-code
+	lp-line							like sys-message-line
+	lp-text							like sys-message-text
+//
+	initialise system-messages
+	set sys-message-type = ENQCODE
+	set sys-message-code = lp-code
+	set sys-message-line = lp-line
+	set sys-message-text = lp-text
+	insert system-messages
+	on error
+	endon
+end-procedure
+
+*/
+
+// -----End of Sample insert---------------------------------------------

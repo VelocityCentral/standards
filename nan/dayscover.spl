@@ -1,0 +1,51 @@
+
+procedure main
+	get system-control
+		first
+	confirm
+		prompt "OK to set days cover?"
+	confirmed
+		do setdc
+	end-confirm
+end-procedure
+
+procedure setdc
+	select *
+		from stock-warehouse-detail
+		for update
+	detail
+		get stock-master
+			on index stock-code
+			key is stock-code
+		on error
+		else
+			switch stk-abc-class
+			case "A"
+				set whse-min-days-cover = 90
+				set whse-max-days-cover = 120
+			case "B"
+				set whse-min-days-cover = 30
+				set whse-max-days-cover = 90
+			case "C"
+				set whse-min-days-cover = 30
+				set whse-max-days-cover = 60
+			end-switch
+			// Now check if manufactured
+			if stk-stock-status = 'M'
+				// then we control how and when we make stuff so we can have a
+				// shorter lead time
+				// Factors:  Min stock, lead time, reorder review
+				switch stk-reorder-review
+				case "D"
+					set whse-min-days-cover = 3
+					set whse-max-days-cover = 6
+				case "W"
+					set whse-min-days-cover = 6
+					set whse-max-days-cover = 12
+				end-switch
+			endif
+			update stock-warehouse-detail
+		endon
+	end-select
+end-procedure
+

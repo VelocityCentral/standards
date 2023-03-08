@@ -1,0 +1,201 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program :  main menu that steps you through the flow
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2016
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: nan/mainmenu.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 28Sep16  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/bmsdef.spl"
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+ 
+field
+	ws-function-title						type string
+
+
+procedure main
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8secabt-check-abort
+		parameters are sys-consolidation-division login-id() "ZUSR" "T099"
+		returning ws-function-title 
+	do mainmenu
+end-procedure
+
+menu mainmenu
+	window @1,1 to @30,130
+	tree-menu
+	title ws-function-title
+detail
+	option "Fix Sequence objects" @1,1
+		icon transaction-icon
+		when sys-bms-version-no < 770
+		spl "nan/crtseqfiles"
+		spl "sys/m8utilfixseqid"
+//		spl 'nan/fixseqid'
+	option "Set dates" @1,1
+		icon TRANSACTION-ICON
+		spl "nan/setdates"
+	option "Stock and Sales" @1,1
+		do stock-and-sales
+	option "Retail Setup" @1,1
+		icon SCREEN-ICON
+		spl "nan/retailsetup"
+	option "update warehouse records" @1,1
+		icon TRANSACTION-ICON
+		spl "stk/m4stkconv"
+	option "Review Stock Warehouse Details" @1,1
+		icon SCREEN-ICON
+		spl "nan/stkwhsedg"
+	option "Create KPI Data" @1,1
+		icon TRANSACTION-ICON
+		spl "nan/crtkpidata"
+	option "GL History" @1,1
+		icon FOLDER-ICON
+		spl "nan/glhist"
+//	option "Rebuild Keyword Search" @17,1 to @17,50
+//		icon TRANSACTION-ICON
+//		spl "sys/m8searchrebuild" 
+	option "Customised Enterprise search" @1,1
+		icon FOLDER-ICON
+		do ent-search-menu
+	option "Misc" @1,1
+		icon FOLDER-ICON
+		do miscmenu
+	option "Forecasts" @1,1
+		icon TRANSACTION-ICON
+		spl "nan/budg2fcast"
+	option "MRP Setup" @1,1
+		icon TRANSACTION-ICON
+		spl 'nan/mrpsetup'
+	option "Project & Resource Management" @1,1
+		icon TRANSACTION-ICON
+		spl "nan/resources"
+	option "Service Management" @1,1
+		icon TRANSACTION-ICON
+		spl "nan/service"
+	/*
+	Oct 22 - now done in setdates
+	option "Change dates on recurring sales orders" @24,1 to @24,50
+		icon TRANSACTION-ICON
+		spl "nan/recurrsales"
+	*/
+	option "Project Management" @1,1
+		icon TRANSACTION-ICON
+		spl "nan/project"
+	option "Reset Speical Accounts" @1,1
+		icon TRANSACTION-ICON
+		spl "nan/glspecacc"
+	option "Maintain Sys Modules and Functions" @1,1
+		icon screen-icon
+		spl "nan/mntsysmodfunc"
+endmenu
+
+menu stock-and-sales
+	window
+	tree-menu
+detail
+	option "Storage Details (adv whse)" @1,1
+		icon SCREEN-ICON
+		spl "nan/advwhse"
+	option "initialise budgets and stock movements from forecasts" @1,1
+		icon FOLDER-ICON
+		do configbudg
+	option "Build Sales-order-archive records from stock movements" @1,1
+		icon TRANSACTION-ICON
+		spl "nan/crtstkmovso"
+	option "rebuild sales history" @1,1
+		icon TRANSACTION-ICON
+		spl "deb/m1fixsale2" parameters "-all"
+	option "rebuild EIS" @1,1
+		icon TRANSACTION-ICON
+		spl "deb/m10sumupd"
+	option "update monthly average usage" @1,1
+		icon TRANSACTION-ICON
+		spl "nan/updmthavgu"
+	option "set abc's" @1,1
+		icon TRANSACTION-ICON
+		spl "stk/m4stkconv"
+	option "set days cover" @1,1
+		icon TRANSACTION-ICON
+		spl "nan/dayscover"
+	option "set min/max qtys" @1,1
+		icon TRANSACTION-ICON
+		spl "nan/updminmax"
+	option "Stock on hand" @1,1
+		icon FOLDER-ICON
+		do sohmenu
+end-menu
+
+menu ent-search-menu
+	window 
+//	no-hide
+	tree-menu
+detail
+	option "Setup" @1,1
+		help "Already done in SAB/SAS/SAT but might be needed in a new machine"
+		spl 'nan/entsrchsetup'
+		message "setup complete"
+	option "Rebuild" @2,1
+		help "will need to run this after everything else is done and right before demo"
+//		spl 'nan/entrbldkwrd'
+		spl "sys/m8searchrebuild" 
+		message "rebuild complete"
+end-menu
+
+
+menu configbudg
+	window 
+	tree-menu
+detail
+	option "Build forecasts and budgets from CSV" @1,2
+		spl "nan/configbudg"
+	option "Design Budgets" @2,2
+		spl "deb/m1custom_budgets"
+	option "Maintain Budgets" @3,2
+		spl "deb/m1custom_budgets" parameters are "-data"
+	option "Create Stock Movements" @4,2
+		spl "nan/configstkmov"
+end-menu
+
+menu sohmenu
+	window
+	tree-menu
+detail
+	option "step 1 create stock take" @1,1
+		icon TRANSACTION-ICON
+		spl "stk/m48prepar" parameters "-prepare"
+	option "step 2 update stocktake with soh" @2,1
+		icon TRANSACTION-ICON
+		spl "nan/stktakqty"
+	option "step 3 post" @3,1
+		icon TRANSACTION-ICON
+		spl "stk/m48update"
+end-menu
+
+menu miscmenu
+	window
+	tree-menu
+	option "Post Some Stock" @1,1
+		acknowledge "This program needs reviewing before using it"
+		acknowledge "It should be changed for each demo to allow "
+		acknowledge "the presenter to easily add some stock to the system"
+		acknowledge "inbetween demo sessions or topics"
+		spl "nan/postsomestock"
+	option "Create some sales orders" @2,1
+		spl "nan/createsos"
+	option "Import Generated orders" @3,1
+		spl "so/m50loadso" parameters are "-std" "test1" "N" "S"
+end-menu	

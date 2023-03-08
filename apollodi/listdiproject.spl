@@ -1,0 +1,350 @@
+mode
+	md-list
+	prompt "list"
+
+procedure main
+	do diprojects
+end-procedure
+
+screen diprojects
+	allowed search  md-list
+	primary data-intel-master
+	data-grid occurs 16
+	window
+	title "diprjects"
+before
+detail
+	if screenmode = md-list
+		do listit parameters are dim-project-id
+	endif
+	accept dim-project-id @4,2
+		title "dim-project-id"
+	display dim-description @4,4
+		title "dim-description"
+	confirm auto
+	end-confirm
+end-screen
+
+procedure pagehead
+	print today()
+		"Page " in col 80
+		page-no in col 85
+	skip
+end-procedure
+
+procedure listit
+parameters
+	lp-project					like dim-project-id
+local
+	i							type number
+	//
+	report concat("di project:" lp-project)
+		header pagehead
+	page
+	//
+	select * from data-intel-master
+		where dim-project-id  = lp-project
+	before
+		skip
+		print "Data-intel-master"
+		print 100"-"
+		skip
+	detail
+		print "dim-project-id: "  dim-project-id
+		print "dim-description: "  dim-description
+		print "dim-project-type: "  dim-project-type
+		print "dim-protection: "  dim-protection
+		print "dim-created-by-user: "  dim-created-by-user
+		print "dim-created-date-time: "  dim-created-date-time
+		print "dim-bms-version: "  dim-bms-version
+		print "dim-last-mod-date-time: "  dim-last-mod-date-time
+		print "dim-last-mod-user: "  dim-last-mod-user
+		print "dim-deployment-type: "  dim-deployment-type
+		print "dim-project-module: "  dim-project-module
+		print "dim-project-function: "  dim-project-function
+		print "dim-generate-4gl-code: "  dim-generate-4gl-code
+		print "dim-project-run-option: "  dim-project-run-option
+		print "dim-generate-dg-project: "  dim-generate-dg-project
+		print "dim-app-serv-id: "  dim-app-serv-id
+		print "dim-report-sequence-name: "  dim-report-sequence-name
+		print "dim-report-sequence-no: "  dim-report-sequence-no
+		print "dim-output-screen-title: "  dim-output-screen-title
+		print "dim-report-title: "  dim-report-title
+		print "dim-ss-project-status: "  dim-ss-project-status
+		print "dim-ss-object-name: "  dim-ss-object-name
+		print "dim-ss-object-description: "  dim-ss-object-description
+		print "dim-ss-db-table-version: "  dim-ss-db-table-version
+		print "dim-ss-project-version: "  dim-ss-project-version
+		print "dim-ss-company-code: "  dim-ss-company-code
+		print "dim-ss-cus-dictionary: "  dim-ss-cus-dictionary
+		print "dim-ss-db-method: "  dim-ss-db-method
+		print "dim-ss-key-prefix-type: "  dim-ss-key-prefix-type
+		print "dim-ss-object-physical-name: "  dim-ss-object-physical-name
+		print "dim-ss-population-option: "  dim-ss-population-option
+		print "dim-ss-create-attempts: "  dim-ss-create-attempts
+		print "dim-di-business-whse: "  dim-di-business-whse
+		print "dim-remote-host: "  dim-remote-host
+		print "dim-remote-port: "  dim-remote-port
+		print "dim-post-process-option: "  dim-post-process-option
+		print "dim-post-process-script: "  dim-post-process-script
+		print "dim-ss-audit-table: "  dim-ss-audit-table
+		print "dim-spare-alpha10: "  dim-spare-alpha10
+		print "dim-spare-alpha40: "  dim-spare-alpha40
+		print "dim-spare-num1: "  dim-spare-num1
+		skip
+	end-select
+	//
+	// fields
+	//
+	select * from data-intel-fields
+		where dim-project-id = :lp-project 
+		order by dim-project-id
+			dif-object-name 
+			dif-field-name
+	before
+		skip
+		print "Data-intel-fields"
+		print 100"-"
+		skip
+	detail
+		print "dim-project-id: "  dim-project-id
+		print "dif-object-name: "  dif-object-name
+		print "dif-field-name: "  dif-field-name
+		print "dif-custom-title: "  dif-custom-title
+		print "dif-custom-seq: "  dif-custom-seq
+		print "dif-total-on-me: "  dif-total-on-me
+		print "dif-subtotal-on-me: "  dif-subtotal-on-me
+		print "dif-listing-unique: "  dif-listing-unique
+		print "dif-suppress: "  dif-suppress
+		print "dif-display-pic: "  dif-display-pic
+		print "dif-accumulate: "  dif-accumulate
+		print "dif-occurences: "  dif-occurences
+		print "dif-aggregate-function: "  dif-aggregate-function
+		print "dif-snapshot-field-name: "  dif-snapshot-field-name
+		print "dif-field-audit: "  dif-field-audit
+		print "dif-default-value: "  dif-default-value
+		print "dif-allowed-values: "  dif-allowed-values
+		print "dif-create-unique-field: "  dif-create-unique-field
+		print "dif-drillback: "  dif-drillback
+		print "dif-help-chm: "  dif-help-chm
+		print "dif-help-text: "  dif-help-text
+		print "dif-no-of-decimals: "  dif-no-of-decimals
+		print "dif-signed: "  dif-signed
+		print "dif-total-digits: "  dif-total-digits
+		print "dif-spare-alpha2: "  dif-spare-alpha2
+		print "dif-spare-alpha10: "  dif-spare-alpha10
+		print "dif-return-field-seq: "  dif-return-field-seq
+		print "diff-spare-alpha40: "  diff-spare-alpha40
+		skip
+	end-select
+	//
+	// calculations
+	//
+	select * from data-intel-calculations
+		where dim-project-id = :lp-project 
+		order by dim-project-id
+			dic-field-sequence
+	before
+		skip
+		print "Data-intel-calculations"
+		print 100"-"
+		skip
+	detail
+		print "dim-project-id: "  dim-project-id
+		print "dic-field-sequence: "  dic-field-sequence
+		print "dic-field-name: "  dic-field-name
+		print "dic-column-title: "  dic-column-title
+		print "dic-type: "  dic-type
+		print "dic-picture: "  dic-picture
+		print "dic-expression: "  dic-expression
+		print "dic-field-selected: "  dic-field-selected
+		print "dic-date-macro: "  dic-date-macro
+		print "dic-spare-alpha2: "  dic-spare-alpha2
+		print "dic-spare-alpha10: "  dic-spare-alpha10
+		print "dic-spare-alpha40: "  dic-spare-alpha40
+		print "dic-custom-seq: "  dic-custom-seq
+		skip
+	end-select
+	//
+	// group-bu
+	//
+	select * from data-intel-group-by
+		where dim-project-id = :lp-project 
+		order by dim-project-id
+			digb-sequence 
+	before
+		skip
+		print "Data-intel-group-by"
+		print 100"-"
+		skip
+	detail
+		print "dim-project-id: "  dim-project-id
+		print "digb-sequence: "  digb-sequence
+		print "digb-object-name: "  digb-object-name
+		print "digb-field-name: "  digb-field-name
+		print "digb-spare-alpha2: "  digb-spare-alpha2
+		print "digb-spare-alpha10: "  digb-spare-alpha10
+		print "digb-spare-alpha40: "  digb-spare-alpha40
+		print "digb-spare-num1: "  digb-spare-num1
+		skip
+	end-select
+	//
+	// objects
+	//
+	select * from data-intel-objects
+		where dim-project-id = :lp-project 
+		order by dim-project-id
+			dio-table-type
+			dio-table-name
+	before
+		skip
+		print "Data-intel-objects"
+		print 100"-"
+		skip
+	detail
+		print "dim-project-id: "  dim-project-id
+		print "dio-table-type: "  dio-table-type
+		print "dio-table-name: "  dio-table-name
+		print "dio-table-join-type: "  dio-table-join-type
+		print "dio-spare-alpha2: "  dio-spare-alpha2
+		print "dio-spare-alpha10: "  dio-spare-alpha10
+		print "dio-spare-alpha40: "  dio-spare-alpha40
+		print "dio-spare-num1: "  dio-spare-num1
+		skip
+	end-select
+	//
+	// order-by
+	//
+	select * from data-intel-order-by
+		where dim-project-id = :lp-project 
+		order by dim-project-id
+			diob-sequence
+	before
+		skip
+		print "Data-intel-order-by"
+		print 100"-"
+		skip
+	detail
+		print "dim-project-id: "  dim-project-id
+		print "diob-sequence: "  diob-sequence
+		print "diob-field-name: "  diob-field-name
+		print "diob-spare-alpha2: "  diob-spare-alpha2
+		print "diob-spare-alpha10: "  diob-spare-alpha10
+		print "diob-spare-alpha40: "  diob-spare-alpha40
+		print "diob-spare-num1: "  diob-spare-num1
+		skip
+	end-select
+	//
+	// filters
+	//
+	select * from data-intel-project-filters
+		where dim-project-id = :lp-project 
+		order by dim-project-id
+			dipf-object-name
+			dipf-field-name
+	before
+		skip
+		print "Data-intel-project-filters"
+		print 100"-"
+		skip
+	detail
+		print "dim-project-id: "  dim-project-id
+		print "dipf-object-name: "  dipf-object-name
+		print "dipf-field-name: "  dipf-field-name
+		print "dipf-field-type: "  dipf-field-type
+		print "dipf-comparison-type: "  dipf-comparison-type
+		print "dipf-expression: "  dipf-expression
+		print "dipf-match-case: "  dipf-match-case
+		print "dipf-date-macro-used: "  dipf-date-macro-used
+		print "dipf-filter-id: "  dipf-filter-id
+		print "dipf-filter-operator: "  dipf-filter-operator
+		print "dipf-spare-alpha2: "  dipf-spare-alpha2
+		print "dipf-spare-alpha10: "  dipf-spare-alpha10
+		print "dipf-spare-alpha40: "  dipf-spare-alpha40
+		print "dipf-spare-num1: "  dipf-spare-num1
+		skip
+	end-select
+	//
+	// notes
+	//
+	select * from data-intel-project-notes
+		where dim-project-id = :lp-project 
+		order by dim-project-id
+			dipn-note-type
+			dipn-seq-no
+	before
+		skip
+		print "Data-intel-project-notes"
+		print 100"-"
+		skip
+	detail
+		print "dim-project-id: "  dim-project-id
+		print "dipn-note-type: "  dipn-note-type
+		print "dipn-seq-no: "  dipn-seq-no
+		print "dipn-note-line: "  dipn-note-line
+		print "dipn-change-date-time: "  dipn-change-date-time
+		print "dipn-user-id: "  dipn-user-id
+		print "dipn-spare-alpha2: "  dipn-spare-alpha2
+		print "dipn-spare-alpha10: "  dipn-spare-alpha10
+		print "dipn-spare-alpha40: "  dipn-spare-alpha40
+		print "dipn-spare-num1: "  dipn-spare-num1
+		skip
+	end-select
+	//
+	// snapshot-keys
+	//
+	select * from data-intel-snapshot-keys
+		where dim-project-id = :lp-project 
+		order by dim-project-id
+			disk-key-seq
+	before
+		skip
+		print "Data-intel-snapshot-keys"
+		print 100"-"
+		skip
+	detail
+		print "dim-project-id: "  dim-project-id
+		print "disk-key-seq: "  disk-key-seq
+		print "disk-unique: "  disk-unique
+		for i = 1 to occurence(disk-field)
+			print "disk-field " str(i) ":"  disk-field[i]
+		end-for
+		for i = 1 to occurence(disk-descending)
+			print "disk-descending " str(i) ":"  disk-descending[i]
+		end-for
+		print "disk-spare-alpha2: "  disk-spare-alpha2
+		print "disk-spare-alpha10: "  disk-spare-alpha10
+		print "disk-spare-alpha40: "  disk-spare-alpha40
+		print "disk-spare-num1: "  disk-spare-num1
+		skip
+	end-select
+	//
+	// table-joins
+	//
+	select * from data-intel-table-joins
+		where dim-project-id = :lp-project 
+		order by dim-project-id
+				ditj-dld-id
+	before
+		skip
+		print "Data-intel-table-joins"
+		print 100"-"
+		skip
+	detail
+		print "dim-project-id: "  dim-project-id
+		print "ditj-dld-id: "  ditj-dld-id
+		print "ditj-join-sequence: "  ditj-join-sequence
+		print "ditj-from-table: "  ditj-from-table
+		print "ditj-from-field: "  ditj-from-field
+		print "ditj-to-table: "  ditj-to-table
+		print "ditj-to-field: "  ditj-to-field
+		print "ditj-join-selected: "  ditj-join-selected
+		print "ditj-link-type: "  ditj-link-type
+		print "ditj-spare-alpha2: "  ditj-spare-alpha2
+		print "ditj-spare-alpha10: "  ditj-spare-alpha10
+		print "ditj-spare-alpha40: "  ditj-spare-alpha40
+		print "ditj-spare-num1: "  ditj-spare-num1
+		skip
+	end-select
+end-procedure
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                

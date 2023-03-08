@@ -1,0 +1,1009 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : 
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2013
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: c:\usr\pronto\cus\sample\po\vglpoimp.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 3Sep13	rayb		written
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/i8secabt.spl" 
+#include "../include/i8proglog.spl" 
+#include "../include/bmsdef.spl" 
+#include "../include/i6postatii.spl" 
+#define I6GENERAL_ASSIGN_NEXT_ORDER_NUMBER
+#define I6GENERAL_CHECK_ORDER_UNIQUE
+#include "../po/i6general.spl" 
+#define I6AMOUNT_CALCULATE_LINE_AMOUNT
+#include "../include/i6amount.spl"
+#include "../po/i60headpo.spl"
+#include "../include/i8gparam.spl"									
+#include "../include/i4strupd.spl"									
+
+#define JOB_FROM_GL(A) \
+	substring(A,1,pattern(A,'.')-1)
+#define CAT_FROM_GL(A) \
+	substring(A,pattern(A,'.')+1,str-len(A))
+
+#define MSGTYPEINFO 0
+#define MSGTYPEERROR 5
+#define MSGTYPEROLLBACK 9
+ 
+link "clib/clibvcvt"
+link "clib/clibjobcat"
+
+object po-text
+	type is text
+	record 
+		pt-record						pic x(1024) type string
+	end-record
+
+
+field 
+	ws-filename								pic x(512) type string
+	ws-separator							pic x
+	ws-function-title						type string
+	ws-transaction-ok						type boolean
+	ws-current-record-no					type number
+	ws-current-po-order-no					like po-order-no
+	ws-current-po-backorder-flag			like po-backorder-flag
+ 
+procedure main 
+local
+	lf-flag-set								type boolean
+	get system-control first 
+	on error
+		abort "No Control Record"
+	endon
+	do i8secabt-check-abort
+		parameters are sys-consolidation-division login-id() "ZUSR" "T007"
+		returning ws-function-title 
+	do i8proglog-write-log
+	I8GPARAM_ALPHA("-filename",spaces,ws-filename)
+	I8GPARAM_FLAG("-pipe",FALSE,lf-flag-set)
+	if lf-flag-set 
+		set ws-separator = "|"
+	endif
+	I8GPARAM_FLAG("-comma",FALSE,lf-flag-set)
+	if lf-flag-set 
+		set ws-separator = ","
+	endif
+	if not file-exists(ws-filename,false)
+	or ws-separator = spaces
+		do get-params entry once
+	endif
+	// if still not set then exit
+	if not file-exists(ws-filename,false)
+	or ws-separator = spaces
+		exit
+	endif
+	do open-report
+	do read-file
+	if ws-transaction-ok = FALSE
+		exit 1
+	endif
+end-procedure
+
+screen get-params
+	window @1,1 to @8,70
+		title "Purchase Order Import"
+	form-entry
+before
+	if login-id() = "rayb"
+		set ws-filename = "/tmp/po.txt"
+		set ws-separator = ","
+	endif
+detail
+	accept ws-filename @2,5 pic x(60)
+		title "File:"
+		default ws-filename
+		help concat("Full path to file relative to current directory (" dir() ")")
+	box @4,10 to @6,50
+		title "Separator"
+	radio-button ws-separator
+		@5,20 "," title  "Comma (,)"
+		@5,35 "|" title  "Pipe (|)"
+//		right-coordinate
+		default ws-separator
+		before-radio-button
+			if ws-separator not in { ',' '|' }
+				set ws-separator = "|"
+			endif
+		end-before-radio-button
+		/*
+		validations
+			//
+		end-validations
+		on change
+			//
+		end-on-change
+		*/
+	end-radio-button 
+end-screen
+
+procedure report-header
+	print company-name in col 1
+		"PO Import Audit" in col 40
+		today() in col 60
+		tod() in col 75
+		"Page " in col 100
+		page-no in col 106
+	skip
+	print "File:" ws-filename
+	skip
+end-procedure
+
+procedure open-report
+	report concat("PO Import Audit",ws-filename)
+		no-message
+		header report-header
+	page
+end-procedure
+
+procedure read-file
+local
+	lf-po-ok							type boolean
+	open po-text
+		file is ws-filename
+	set ws-current-record-no = 0
+	select * from po-text
+	detail
+		set ws-current-record-no += 1
+		switch substring(pt-record,1,1)
+		case "H"
+			// there is an open transaction for each po update or entry
+			// this needs closing before we start the next po
+			do check-for-open-trans
+			do process-header parameters are pt-record ws-separator
+				returning lf-po-ok
+		case "L"
+			if lf-po-ok 
+				do process-line parameters are pt-record ws-separator
+			endif
+		case "S"
+			if lf-po-ok
+				do process-special parameters are pt-record ws-separator
+			endif
+		case "C"
+			if lf-po-ok
+				do process-charge parameters are pt-record ws-separator
+			endif
+		end-switch
+	end-select
+	do check-for-open-trans
+end-procedure
+
+procedure check-for-open-trans
+	if transaction-active
+		do i60headpo-header-total-calc
+			parameters are ws-current-po-order-no ws-current-po-backorder-flag
+		if ws-transaction-ok
+			print "Database Updated"
+			transaction commit
+		else
+			print "Transaction Rolled Back - Database not updated"
+			transaction rollback
+		endif
+	endif
+end-procedure
+
+procedure process-header
+parameters
+	lp-line									pic x(1024) type string
+	lp-sep									pic x 
+returning
+	lr-ok-to-processs						type boolean
+local
+	lf-type									pic x
+	lf-cre-accountcode						like cre-accountcode
+	lf-warehouse							like warehouse
+	lf-eta-date								type date
+	lf-notes								pic x(30) type string
+	lf-work									type string
+	lf-ok									type boolean
+	lf-failed								type boolean
+//
+	set lr-ok-to-processs = true
+	do clibvcvt-extract-via-delimiter 
+		parameters lp-line lp-sep
+		returning lf-type lp-line 
+// po
+	do clibvcvt-extract-via-delimiter 
+		parameters lp-line lp-sep
+		returning lf-work lp-line 
+	set ws-current-po-order-no = num(lf-work)
+//		
+	do clibvcvt-extract-via-delimiter 
+		parameters lp-line lp-sep
+		returning ws-current-po-backorder-flag lp-line 
+	// check PO
+	if ws-current-po-order-no <> 0 
+		get purchase-order
+			on index po-order-no po-backorder-flag
+			key is ws-current-po-order-no ws-current-po-backorder-flag
+		on error
+			do record-message parameters are 
+				concat(str(ws-current-po-order-no) ws-current-po-backorder-flag " is not a valid purchase order")
+				MSGTYPEERROR
+			set lr-ok-to-processs = false
+			exit
+		else
+			if po-order-status <> I6PO_ON_ORDER
+				do record-message parameters are 
+					concat(str(ws-current-po-order-no) ws-current-po-backorder-flag " is not at a valid status")
+					MSGTYPEERROR
+				set lr-ok-to-processs = false
+				exit
+			endif
+		endon
+	endif
+// cre-code
+	do clibvcvt-extract-via-delimiter 
+		parameters lp-line lp-sep
+		returning lf-cre-accountcode lp-line 
+	get cre-master 
+		on index cre-accountcode
+		key is lf-cre-accountcode
+	on error
+		do record-message parameters are 
+			concat(lf-cre-accountcode " is not a valid supplier") MSGTYPEERROR
+		set lr-ok-to-processs = false
+		exit
+	endon
+//		
+// whse
+//
+	do clibvcvt-extract-via-delimiter 
+		parameters lp-line lp-sep
+		returning lf-warehouse lp-line 
+	get system-table
+		on index sys-tbl-type sys-tbl-code
+		key is "WH" lf-warehouse
+	on error
+		do record-message parameters are 
+			concat(lf-warehouse " is not a valid Warehouse") MSGTYPEERROR
+		set lr-ok-to-processs = false
+		exit
+	endon
+//
+// ETA
+//
+	do clibvcvt-extract-via-delimiter 
+		parameters lp-line lp-sep
+		returning lf-work lp-line 
+	do clibvcvt-date parameters are lf-work '4'
+		returning lf-eta-date
+	// don't really care whether the ETA date is valid or not.
+	if lf-eta-date = 0 
+		do record-message parameters are 
+			concat(format-picture(lf-eta-date,"ddmmmyy") " is not an invalid eta date") MSGTYPEERROR
+			set lr-ok-to-processs = false
+		exit
+	endif
+	do record-message parameters are 
+		concat("Arrival Date:" format-picture(lf-eta-date, "dd-mmm-yyyy") ) MSGTYPEINFO
+//
+	do clibvcvt-extract-via-delimiter 
+		parameters lp-line lp-sep
+		returning lf-notes lp-line 
+//
+	set ws-transaction-ok = TRUE
+	transaction begin
+	if ws-current-po-order-no = 0 
+		set ws-current-po-backorder-flag = spaces
+		// get a new po number
+		set po-whse-code = lf-warehouse
+		do i6general-assign-next-order-no
+			returning
+				ws-current-po-order-no
+				po-whse-code
+				lf-failed
+		if lf-failed
+			do record-message parameters are 
+				"Could not allocate next po no" MSGTYPEROLLBACK
+			set lr-ok-to-processs = false
+			exit
+		endif
+	endif
+	print "Processing Purchase order " ws-current-po-order-no ws-current-po-backorder-flag
+	get purchase-order 
+		on index po-order-no po-backorder-flag
+		key is ws-current-po-order-no ws-current-po-backorder-flag
+		lock
+	on error
+		// create new one
+		initialise purchase-order leaving 
+			po-order-no po-backorder-flag
+		set po-whse-code = lf-warehouse
+		set cre-accountcode = lf-cre-accountcode
+		set po-user-name = login-id
+		set po-order-terms = cr-order-terms
+		set po-order-status = I6PO_ON_ORDER
+		set po-order-date = today()
+		set po-arrival-date = today()
+		set po-action-date = today()
+		set po-currency-code = cr-curr-code
+		set po-initial-currency-rate = 1
+		set po-revision-no = 1
+		if lf-eta-date  <> 0
+			set po-arrival-date = lf-eta-date
+		endif
+		set po-notes = lf-notes
+		insert purchase-order
+		on error
+			do record-message parameters are "Failed to insert PO" MSGTYPEROLLBACK
+		endon
+	else
+		if lf-eta-date  <> 0
+			set po-arrival-date = lf-eta-date
+		endif
+		set po-notes = lf-notes
+		set po-revision-no += 1
+		update purchase-order
+		on error
+			do record-message parameters "Failed to update PO" MSGTYPEROLLBACK
+		endon
+	endon
+endprocedure
+
+procedure record-message
+parameters
+	lp-error-message			pic x(512) type string
+	lp-type						pic 9 
+	// type : 0) just a message 9) message causing rollback
+	switch lp-type
+	case MSGTYPEINFO
+		print "INFO:" str(ws-current-record-no) ":" lp-error-message
+	case MSGTYPEERROR
+		print "ERROR:" str(ws-current-record-no) ":" lp-error-message
+	case MSGTYPEROLLBACK
+		print "ROLLBACK:" str(ws-current-record-no) ":" lp-error-message
+		set ws-transaction-ok = FALSE
+	end-switch
+end-procedure
+
+procedure process-line
+parameters
+	lp-line								pic x(1024)
+	lp-sep								pic x type string
+local
+	lf-type								pic x
+	lf-stock-code						like stock-code
+	lf-l-seq							like po-l-seq
+	lf-qty								type number
+	lf-price-alpha						pic x(20) type string // a blank price triggers use of current price
+	lf-net-change						type number
+	lf-sup-stock-code					like sup-stock-code
+	lf-po-unit-of-measure				like sup-unit-of-measure
+	lf-work								type string
+	lf-ok								type boolean
+	lf-found							type boolean
+	lf-line-amount						like po-order-line-total
+	//
+	lf-uom								like po-supplier-unit-description
+	lf-unit								like po-supplier-unit-of-measure
+	lf-conversion						like po-supplier-unit-conversion
+	// 
+	// Following lines are dummys - we don't use them but they are returned
+	// 
+	lf-dummy-line-amount				like po-order-line-total
+	lf-dummy-tax-amount					like pol-ordered-tax-amt
+//
+// file layout is item,qty,price
+//
+	do clibvcvt-extract-via-delimiter 
+		parameters lp-line lp-sep
+		returning lf-type lp-line 
+// 
+	do clibvcvt-extract-via-delimiter 
+		parameters lp-line lp-sep
+		returning lf-stock-code lp-line 
+	set lf-stock-code = uppercase(lf-stock-code)
+	get stock-master 
+		on index stock-code
+		key is lf-stock-code
+	on error
+		do record-message parameters
+			str-concat(lf-stock-code " is not a valid stock code") MSGTYPEROLLBACK
+		exit
+	else
+		if stk-stock-status not in { 'S' 'I' 'R' }
+			do record-message parameters
+				str-concat(lf-stock-code " is not a valid stock type (must be status S,I or R)")  MSGTYPEROLLBACK
+			exit
+		endif
+		if stk-condition-code in { 'P','C','O','T' }
+			do record-message parameters
+				str-concat(lf-stock-code " is not available for purchase (Condition Code)")  MSGTYPEROLLBACK
+			exit
+		endif
+	endon
+	do record-message parameters str-concat(
+		"Processing: " lf-stock-code ":" stk-description) 
+		MSGTYPEINFO
+//		
+	do clibvcvt-extract-via-delimiter 
+		parameters lp-line lp-sep
+		returning lf-work lp-line 
+	if not valid-number(lf-work) 
+		do record-message parameters str-concat(
+			"Invalid qty: " lf-stock-code ":" lf-work) 
+			MSGTYPEROLLBACK
+		exit
+	endif
+	set lf-qty = num(lf-work)
+//
+	do clibvcvt-extract-via-delimiter 
+		parameters lp-line lp-sep
+		returning lf-work lp-line 
+	if not valid-number(lf-work)  and lf-work <> spaces
+		do record-message parameters str-concat(
+			"Invalid Price: " lf-stock-code ":" lf-work) 
+			MSGTYPEROLLBACK
+		exit
+	endif
+	set lf-price-alpha = lf-work
+//
+	do clibvcvt-extract-via-delimiter 
+		parameters lp-line lp-sep
+		returning lf-sup-stock-code lp-line 
+//
+	do clibvcvt-extract-via-delimiter 
+		parameters lp-line lp-sep
+		returning lf-work lp-line 
+	if not valid-number(lf-work)  and lf-work <> spaces
+		do record-message parameters str-concat(
+			"Invalid purchase unit qty: " lf-stock-code ":" lf-work) 
+			MSGTYPEROLLBACK
+		exit
+	endif
+	set lf-po-unit-of-measure = num(lf-work)
+	if lf-po-unit-of-measure = 0
+		set lf-po-unit-of-measure = 1
+	endif
+//		
+// find the stock item on the po
+//
+	set lf-found = FALSE
+	set lf-l-seq = 0
+	select * from purchase-order-line
+		where po-order-no = :ws-current-po-order-no
+		and po-backorder-flag = :ws-current-po-backorder-flag
+		order by po-order-no po-backorder-flag po-l-seq
+	detail
+		set lf-l-seq = po-l-seq
+		if stock-code = lf-stock-code
+			set lf-found = true
+			break
+		endif
+	end-select
+	if lf-found then
+		do record-message parameters are 
+			concat(lf-stock-code, " found on line ", str(po-l-seq), " updating ")
+			MSGTYPEINFO
+	else
+		do record-message parameters are 
+			concat(lf-stock-code, " being added (last line " str(lf-l-seq) ")")
+			MSGTYPEINFO
+	endif
+	//
+	// re-get the stockmaster because the cycle through the po lines will
+	// reset stock-code
+	get stock-master
+		on index stock-code
+		key is lf-stock-code
+	on error
+		do record-message parameters are 
+			concat("Re-get on " str-concat(lf-stock-code), " failed")
+			MSGTYPEROLLBACK
+	endon
+	//
+	// Get current on the po
+	//
+	get purchase-order lock
+		on index po-order-no po-backorder-flag
+		key is ws-current-po-order-no ws-current-po-backorder-flag
+	on error
+		do record-message parameters "Failed to reget currency on purchase order" MSGTYPEROLLBACK
+	endon
+	//
+	// get current on the supplier stock
+	//
+	get stock-supplier
+		on index stock-code cre-accountcode
+		key is stock-code cre-accountcode
+		lock
+	on error
+		do record-message parameters str-concat(stock-code "/" cre-accountcode 
+			" is not a valid stock / supplier combination") MSGTYPEROLLBACK
+		exit
+	endon
+	if sup-stock-code <> lf-sup-stock-code and lf-sup-stock-code <> spaces
+		set sup-stock-code = lf-sup-stock-code
+		update stock-supplier
+		on error
+			do record-message parameters str-concat("Warning :Cannot update Stock supplier stock code:"
+				error-description(file-status())) MSGTYPEINFO
+		endon
+	endif
+	set lf-unit = sup-unit-of-measure
+	if lf-unit <> lf-po-unit-of-measure
+		set lf-unit = lf-po-unit-of-measure
+	endif
+	set lf-uom = sup-unit-desc
+	set lf-conversion = sup-unit-conversion-factor
+	if lf-unit = 0 
+		set lf-unit = 1
+	endif
+	if lf-uom = spaces
+		set lf-uom = stk-unit-desc
+	endif
+	if lf-conversion = 0
+		set lf-conversion = 1
+	endif
+	if lf-found
+		// update the current line
+		get purchase-order-line lock
+			on index po-order-no po-backorder-flag po-l-seq
+			key is ws-current-po-order-no ws-current-po-backorder-flag lf-l-seq
+		on error
+			do record-message parameters "Failed to reget currency on purchase order line" MSGTYPEROLLBACK
+		else
+			// 
+			do record-message parameters 
+				concat( "Old Qty and Price were " str(po-order-qty) "/" str(po-item-price))
+				MSGTYPEINFO
+			set po-supplier-stock-code = lf-sup-stock-code
+			if lf-price-alpha = spaces
+				set po-item-price = sup-last-buy-price
+			else
+				set po-item-price = num(lf-price-alpha)
+			endif
+			set lf-net-change = po-order-qty - lf-qty
+			set po-order-qty = lf-qty
+			do record-message parameters
+				concat( "New Qty and Price were " str(po-order-qty) "/" str(po-item-price))
+				MSGTYPEINFO
+			//
+			do i6amount-calculate-line-amount
+				parameters
+					po-item-price
+					po-order-qty
+					po-disc-rate
+					pol-tax-rate
+					po-supplier-unit-of-measure
+				returning
+					po-order-line-total
+					pol-ordered-tax-amt
+					po-supplier-unit-of-measure
+			//
+			update purchase-order-line
+			on error
+				do record-message parameters "Failed to update po line" MSGTYPEROLLBACK
+			endon
+		endon
+	else
+		// add a new line
+		set lf-l-seq += 1
+		initialise purchase-order-line 
+			leaving po-order-no po-backorder-flag 
+		set po-l-seq = lf-l-seq
+		set po-line-type = "SN"
+		set stock-code = lf-stock-code
+		set po-supplier-stock-code = lf-sup-stock-code
+		set po-line-description = sup-stk-description
+		if lf-price-alpha = spaces
+			set po-item-price = sup-last-buy-price
+		else
+			set po-item-price = num(lf-price-alpha)
+		endif
+		set po-order-qty = lf-qty
+		set lf-net-change = lf-qty
+		set po-line-date-expected = po-arrival-date
+		set lf-line-amount = po-item-price * po-order-qty
+		set po-supplier-unit-of-measure = lf-unit
+		set po-supplier-unit-description = lf-uom
+		set po-supplier-unit-conversion = lf-conversion
+		insert purchase-order-line
+		on error
+			do record-message parameters 
+				concat("Failed to insert po line:" error-description(file-status) 
+				"(" str(ws-current-po-order-no) ws-current-po-backorder-flag "/" str(po-l-seq) ")" ) 
+				MSGTYPEROLLBACK
+			exit
+		endon
+		// reget after insert
+		get purchase-order-line lock
+			on index po-order-no po-backorder-flag po-l-seq
+			key is ws-current-po-order-no ws-current-po-backorder-flag po-l-seq
+		on error
+			do record-message parameters "Failed to reget currency on purchase order line after insert" MSGTYPEROLLBACK
+			exit
+		endon
+		do i6amount-calculate-line-amount
+			parameters
+				po-item-price
+				po-order-qty
+				po-disc-rate
+				pol-tax-rate
+				po-supplier-unit-of-measure
+			returning
+				po-order-line-total
+				pol-ordered-tax-amt
+				po-supplier-unit-of-measure
+		update purchase-order-line
+		on error
+			do record-message parameters 
+			concat("Failed to update po line after insert:" error-description(file-status()))
+				MSGTYPEROLLBACK
+			exit
+		endon
+	endif
+	// now update inventory
+	do i4strupd-stream-update parameters
+		stock-code , po-whse-code
+		str(po-order-no) po-backorder-flag po-l-seq
+		I4STRDEF_WHSE_QTY_ON_ORDER
+		lf-net-change
+end-procedure
+
+procedure process-charge
+parameters
+	lp-line								pic x(1024)
+	lp-sep								pic x type string
+local
+	lf-type								pic x
+	lf-desc								pic x(30) type string
+	lf-l-seq							like po-l-seq
+	lf-amount							type number
+	lf-work								type string
+	lf-ok								type boolean
+	lf-found							type boolean
+	// 
+	// Following lines are dummys - we don't use them but they are returned
+	// by i6amount-calculate-line-amount
+	// 
+	lf-dummy-line-amount				like po-order-line-total
+	lf-dummy-tax-amount					like pol-ordered-tax-amt
+	//
+//
+// file layout is item,qty,price
+//
+	do clibvcvt-extract-via-delimiter 
+		parameters lp-line lp-sep
+		returning lf-type lp-line 
+// 
+	do clibvcvt-extract-via-delimiter 
+		parameters lp-line lp-sep
+		returning lf-desc lp-line 
+	do record-message parameters str-concat(
+		"Processing Charge: " lf-desc ) 
+		MSGTYPEINFO
+//		
+	do clibvcvt-extract-via-delimiter 
+		parameters lp-line lp-sep
+		returning lf-work lp-line 
+	set lf-amount = num(lf-work)
+//
+//		
+// find the item on the po
+//
+	set lf-found = FALSE
+	set lf-l-seq = 0
+	select * from purchase-order-line
+		where po-order-no = :ws-current-po-order-no
+		and po-backorder-flag = :ws-current-po-backorder-flag
+		order by po-order-no po-backorder-flag po-l-seq
+	detail
+		set lf-l-seq = po-l-seq
+		if po-line-type = 'SC' and stock-code = "Charge Line" and po-line-description = lf-desc
+			set lf-found = true
+			break
+		endif
+	end-select
+	if lf-found then
+		do record-message parameters are 
+			concat(lf-desc, " found on line ", str(po-l-seq), " updating ")
+			MSGTYPEINFO
+	else
+		do record-message parameters are 
+			concat(lf-desc, " being added (last line " str(lf-l-seq) ")")
+			MSGTYPEINFO
+	endif
+	//
+	// Get current on the po
+	//
+	get purchase-order lock
+		on index po-order-no po-backorder-flag
+		key is ws-current-po-order-no ws-current-po-backorder-flag
+	on error
+		do record-message parameters "Failed to reget currency on purchase order" MSGTYPEROLLBACK
+	endon
+	//
+	if lf-found
+		// update the current line
+		get purchase-order-line lock
+			on index po-order-no po-backorder-flag po-l-seq
+			key is ws-current-po-order-no ws-current-po-backorder-flag lf-l-seq
+		on error
+			do record-message parameters "Failed to reget currency on purchase order line" MSGTYPEROLLBACK
+		else
+			// 
+			do record-message parameters 
+				concat( "Old Charge was " str(lf-amount) )
+				MSGTYPEINFO
+			do record-message parameters
+				concat( "New Charge is " str(lf-amount))
+				MSGTYPEINFO
+			//
+			set po-item-price = lf-amount
+			set po-supplier-unit-conversion = 1
+			set po-order-qty = 1
+			set po-order-line-total = lf-amount
+//			set po-item-tax-amount = lf-amount * (pol-tax-rate / 100)
+			//
+			update purchase-order-line
+			on error
+				do record-message parameters "Failed to update po line" MSGTYPEROLLBACK
+			endon
+		endon
+	else
+		// add a new line
+		set lf-l-seq += 1
+		initialise purchase-order-line 
+			leaving po-order-no po-backorder-flag 
+		set po-l-seq = lf-l-seq
+		set po-line-type = "SC"
+		set stock-code = "Charge Line"
+		set po-line-description = lf-desc
+		set po-supplier-unit-of-measure = 1
+		set po-item-price = lf-amount
+		set po-supplier-unit-conversion = 1
+		set po-order-qty = 1
+		set po-order-line-total = lf-amount
+		insert purchase-order-line
+		on error
+			do record-message parameters 
+				concat("Failed to insert po line:" error-description(file-status) 
+				"(" str(ws-current-po-order-no) ws-current-po-backorder-flag "/" str(po-l-seq) ")" ) 
+				MSGTYPEROLLBACK
+			exit
+		endon
+		// reget after insert
+		get purchase-order-line lock
+			on index po-order-no po-backorder-flag po-l-seq
+			key is ws-current-po-order-no ws-current-po-backorder-flag po-l-seq
+		on error
+			do record-message parameters "Failed to reget currency on purchase order line after insert" MSGTYPEROLLBACK
+			exit
+		endon
+		do i6amount-calculate-line-amount
+			parameters
+				po-item-price
+				po-order-qty
+				po-disc-rate
+				pol-tax-rate
+				po-supplier-unit-of-measure
+			returning
+				lf-dummy-line-amount
+				lf-dummy-tax-amount
+				po-supplier-unit-of-measure
+		update purchase-order-line
+		on error
+			do record-message parameters 
+			concat("Failed to update po line after insert:" error-description(file-status()))
+				MSGTYPEROLLBACK
+			exit
+		endon
+	endif
+end-procedure
+
+
+procedure process-special
+parameters
+	lp-line								pic x(1024)
+	lp-sep								pic x type string
+local
+	lf-type								pic x
+	lf-desc								pic x(30) type string
+	lf-l-seq							like po-l-seq
+	lf-amount							type number
+	lf-work								type string
+	lf-ok								type boolean
+	lf-message							pic x(256) type string
+	lf-found							type boolean
+	lf-supplier-stock-code				like po-supplier-stock-code
+	lf-dummy-gl							type string
+	lf-dummy-job						type string
+	lf-dummy-cost						type string
+	lf-qty								type number
+	lf-rate								type number
+	lf-acct								type string
+	//
+//
+// file layout is Desc, GL Code, Supplier stock Code, qty, rate
+//
+	do clibvcvt-extract-via-delimiter 
+		parameters lp-line lp-sep
+		returning lf-type lp-line 
+// 
+// Desc
+//
+	do clibvcvt-extract-via-delimiter 
+		parameters lp-line lp-sep
+		returning lf-desc lp-line 
+	do record-message parameters str-concat(
+		"Processing Charge: " lf-desc ) 
+		MSGTYPEINFO
+//		
+// accountcode 
+//
+	do clibvcvt-extract-via-delimiter 
+		parameters lp-line lp-sep
+		returning lf-work lp-line 
+	//
+	// lf-work is either a gl code or a job/cost category
+	//
+	do clibjobcat-validate-account
+		parameters are FALSE, lf-work,YES,FALSE,FALSE,TRUE,FALSE,spaces,spaces,365
+		returning lf-dummy-gl,lf-dummy-gl,lf-dummy-job,lf-dummy-cost,lf-message,lf-ok
+	if not lf-ok
+		do record-message parameters 
+			lf-message
+			MSGTYPEROLLBACK
+		exit
+	endif
+	set lf-acct = lf-work
+//		
+// supplier stock code
+//
+	do clibvcvt-extract-via-delimiter 
+		parameters lp-line lp-sep
+		returning lf-work lp-line 
+	set lf-supplier-stock-code = lf-work
+//		
+// qty
+//
+	do clibvcvt-extract-via-delimiter 
+		parameters lp-line lp-sep
+		returning lf-work lp-line
+	if not valid-number(lf-work)	
+		do record-message parameters str-concat(
+			"Invalid purchase unit qty: " lf-desc ":" lf-work) 
+			MSGTYPEROLLBACK
+		exit
+	endif
+	set lf-qty = num(lf-work)
+//
+// rate
+//
+	do clibvcvt-extract-via-delimiter 
+		parameters lp-line lp-sep
+		returning lf-work lp-line 
+	if not valid-number(lf-work)	
+		do record-message parameters str-concat(
+			"Invalid purchase rate: " lf-desc ":" lf-work) 
+			MSGTYPEROLLBACK
+		exit
+	endif
+	set lf-rate = num(lf-work)
+//
+//		
+// find the item on the po
+//
+	set lf-found = FALSE
+	set lf-l-seq = 0
+	select * from purchase-order-line
+		where po-order-no = :ws-current-po-order-no
+		and po-backorder-flag = :ws-current-po-backorder-flag
+		order by po-order-no po-backorder-flag po-l-seq
+	detail
+		set lf-l-seq = po-l-seq
+		if po-line-type = 'SC' and stock-code = "Charge Line" and po-line-description = lf-desc
+			set lf-found = true
+			break
+		endif
+	end-select
+	if lf-found then
+		do record-message parameters are 
+			concat(lf-desc, " found on line ", str(po-l-seq), " updating ")
+			MSGTYPEINFO
+	else
+		do record-message parameters are 
+			concat(lf-desc, " being added (last line " str(lf-l-seq) ")")
+			MSGTYPEINFO
+	endif
+	//
+	// Get current on the po
+	//
+	get purchase-order lock
+		on index po-order-no po-backorder-flag
+		key is ws-current-po-order-no ws-current-po-backorder-flag
+	on error
+		do record-message parameters "Failed to reget currency on purchase order" MSGTYPEROLLBACK
+	endon
+	//
+	if lf-found
+		// update the current line
+		get purchase-order-line lock
+			on index po-order-no po-backorder-flag po-l-seq
+			key is ws-current-po-order-no ws-current-po-backorder-flag lf-l-seq
+		on error
+			do record-message parameters "Failed to reget currency on purchase order line" MSGTYPEROLLBACK
+		else
+			// 
+			set po-item-price = lf-rate
+			set po-supplier-unit-of-measure = 1
+			set po-supplier-unit-conversion = 1
+			set po-order-qty = lf-qty
+			set po-order-line-total = lf-rate * lf-qty
+			set pol-gl-accountcode = lf-acct
+			set po-line-description = lf-desc
+			set po-supplier-stock-code = lf-supplier-stock-code
+			//
+			update purchase-order-line
+			on error
+				do record-message parameters "Failed to update po line" MSGTYPEROLLBACK
+			endon
+		endon
+	else
+		// add a new line
+		set lf-l-seq += 1
+		initialise purchase-order-line 
+			leaving po-order-no po-backorder-flag 
+		set po-l-seq = lf-l-seq
+		set po-line-type = "SS"
+		set stock-code = "Special Item"
+		set po-item-price = lf-rate
+		set po-supplier-unit-conversion = 1
+		set po-order-qty = lf-qty
+		set po-order-line-total = lf-rate * lf-qty
+		set pol-gl-accountcode = lf-acct
+		set po-line-description = lf-desc
+		set po-supplier-stock-code = lf-supplier-stock-code
+		set po-supplier-unit-of-measure = 1
+		insert purchase-order-line
+		on error
+			do record-message parameters 
+				concat("Failed to insert po line:" error-description(file-status) 
+				"(" str(ws-current-po-order-no) ws-current-po-backorder-flag "/" str(po-l-seq) ")" ) 
+				MSGTYPEROLLBACK
+			exit
+		endon
+		// reget after insert
+		get purchase-order-line lock
+			on index po-order-no po-backorder-flag po-l-seq
+			key is ws-current-po-order-no ws-current-po-backorder-flag po-l-seq
+		on error
+			do record-message parameters "Failed to reget currency on purchase order line after insert" MSGTYPEROLLBACK
+			exit
+		endon
+		do i6amount-calculate-line-amount
+			parameters
+				po-item-price
+				po-order-qty
+				po-disc-rate
+				pol-tax-rate
+				po-supplier-unit-of-measure
+			returning
+				po-order-line-total
+				pol-ordered-tax-amt
+				po-supplier-unit-of-measure
+		update purchase-order-line
+		on error
+			do record-message parameters 
+			concat("Failed to update po line after insert:" error-description(file-status()))
+				MSGTYPEROLLBACK
+			exit
+		endon
+	endif
+end-procedure
+		

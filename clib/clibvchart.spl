@@ -1,0 +1,2598 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : Create an object styyle interface to the new graphing component
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2022
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: clib/clibvgraph.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 22Dec22  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+/*
+
+	This documentation is in RST format.  To view this as a nice pdf goto
+	https://overbits.herokuapp.com/rsteditor/ or rst.ninjs.org and paste this content.
+
+
+==========
+clibvchart
+==========
+
+	The purpose of this clib is to provide a wrapper around the Pronto JSON functions that are
+	used to create charts.  Some of the JSON functions must be called in a specific sequence.
+	Some functions require data items to be the same in two different places (e.g. series names 
+	and the first item in the data array MUST be the same)
+
+	This routine will allow the programmer, as much as possible, to be protected from these
+	kinds of issues.
+	
+	It will also validate the data supplied and provide some kind of meaningful messages.
+	There are some errors that cannot be avoided.
+
+	User should start by calling clibvchart-initialise-chart.  This will inititialise all the
+	variables used in the clib.  The final call should be to clibvchart-get-chart which will return
+	the chart blob to be used in any ole expression.  Inbetween these two calls, the only REQUIRED
+	call is to clibvchart-add-data-point.  This is the ONLY required call.  Everything else is
+	optional.
+
+	Check exit status of each routine to verify correct execution.  Use -get-last-error to 
+	return last error message.
+
+Some general notes about the chart structure
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	A chart is made up of :
+
+    *    Some general information about the chart such as the title
+    *    Some information about the Axes
+         There are three potential axes:  X axis, Y axis and an additional y axis using a scale on the RHS.
+         This is knows as the y2 axis.
+    *    Some information about the Series
+    *    The data points
+
+
+Some general notes about key data items
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Series Names
+------------
+
+	An axes may have multiple series.  The object supports LHS and RHS series.
+	Any added data point checks if the series exists or not, and if not, adds it.
+	If a series is to use the RHS y axis, then the series must be added the the axis set to y2.
+
+Axes names
+----------
+	
+	As with Series, each axis has a name.  However they can only be one of "x", "y" and "y2"
+
+Index Numbers
+-------------
+
+	A key parameter to some of the routines is the "index".  The index number is the number of an item
+	starting on the LHS of the graph.  Generally speaking, these should start at 1 and increment in 1
+	for each x axis value.
+
+Using the RHS Y Axis
+--------------------
+
+	To use the RHS Y axis, all that needs to happen is to make a call to clibvchart-set-series-axis and 
+	set the axis to "y2". 
+
+
+Code samples
+~~~~~~~~~~~~
+
+	The test rig is at the bottom of the code and contains 5 charts.  Charts 1 and 2 show the simplest possible
+	Bar and donut charts.
+
+	Chart 3 is one that uses most of the bells and whistles and was the primary test bed.
+
+	Chart 4 is a index series.  Chart 5 is a timeseries.  Chart 6 is Stacked Bar Chart.
+
+	As each chart is produced, the test rig prints the chart listing from the clib and saves the chart as
+	json in /tmp.  These can be opened and inspected.
+
+Simplest possible code::
+
+	do clibvchart-initialise-chart
+	set lf-index = 0
+	select t1.sctd-year t1.sctd-period lf-sales-value = sum(t0.stk-trans-value)
+		from stock-movements as t0
+		inner join system-control-time-dimension as t1
+			on t1.sctd-type = spaces and t1.sctd-date = t0.stk-trans-date
+		where t0.stock-code = :stock-code
+			and t0.stk-trans-type = "SO"
+		group by 1,2
+		order by 1,2
+	detail
+		set lf-index += 1
+		do clibvchart-add-data-point parameters are "Sales" lf-index lf-sales-value 
+	end-select
+	do clibvchart-get-chart returning lf-chart-blob
+
+
+Once a chart blob has been created the chart can be displayed using the following code.
+
+Chart display::
+
+	
+	lf-ole-1							type ole-interface
+	...
+	if not lf-ole-1
+		set lf-ole-1 = ole-create-control("Pronto.Chart",0,0,15,80)
+	endif
+	if ole-put-property(lf-ole-1,'config',lf-chart-blob)
+	endif
+
+
+Note that the last two parameters in the ole-create-control command determined the size of 
+the chart in rows and columns respectively.  15,80 is a good size to use for a screenlet on bmsmenu.
+
+It is possible to capture the user clicking on an element in the chart.  The is done by creating an "event-section"
+in your code.  In that section the ole-get-property function is used.  This returns some xml as a blob.  A sample of the retreturned xml follows:
+
+.. code-block:: xml
+
+	<root>
+	<id>1100037</id>
+	<eventType>clickOnDataItem</eventType>
+	<value>
+		<index>6</index>
+		<series>Other Product Groups</series>
+	</value>
+	</root>
+
+
+To process this use some code similar to the following::
+
+	lf-event-value						type blob
+	...
+	window
+	event-section
+		on event 1
+		//
+		if ole-get-property(0,0,lf-event-value) endif
+		//
+		set lx-doc = xml-parse-text(lf-event-value)
+		set lx-root = xml-get-root-node(lx-doc)
+		set lf-selected-class =  xml-node-string(
+						xml-get-child-by-name( 
+							xml-get-child-by-name(lx-root,"value",spaces),
+							"series",spaces))
+		// now do something with the selected series
+		message lf-selected-class
+	end-event-section
+	before
+	...
+
+	
+
+Generic clib procedures
+~~~~~~~~~~~~~~~~~~~~~~~
+
+
+clibvgraph-get-last-error
+------------------------------------------
+
+	Returns the text of the last error message
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   Out     |String 1k  |Text of last error message                              |
+	+-----------+-----------+--------------------------------------------------------+
+
+
+Chart intialise and return procedures
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+clibvchart-initialise-chart
+---------------------------
+
+	Mandatory.  Must be called at the beginning of each chart.  There are no parameters.
+
+clibvchart-get-chart
+--------------------
+
+	Mandatory.  Returns the chart blob ready for use in ole.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|  Out      | blob      | the chart blob.                                        |
+	+-----------+-----------+--------------------------------------------------------+
+
+Data Point procedures
+~~~~~~~~~~~~~~~~~~~~~
+
+clibvchart-add-data-point
+-------------------------
+
+	This is a key item.  This adds a single data point.  If a the datapoint already
+	exists then the passed value will be added to the current value.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |  String   | The Series Name                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |  Number   | Index Number                                           |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |  Number   | Data point value                                       |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvchart-set-guage-percentage 
+-------------------------------
+
+	The purpose of this routine is to re-calculate the data in the mem-data table as a percentage 
+	to used in a guage chart.
+
+	This routine can be called at any time but it does not make sense to do so until all the data 
+	points have been added.   Any attempt to add a data point after calling this routine will fail
+	and and error will be produced.
+
+	If the max-value parameter is zero, then all other series will be calculated as a percentage of the largest value
+	in all series.
+
+	The return value is the largest value used for the percentage.  If a non-zero value was passed 
+	in parameter one then this same value is returned.  Otherwise the calculated value is used.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      | Number    | Either 0 ( a value will be calculated for you) or a    |
+	|           |           | value in which the sum of all series data will be      |
+	|           |           | calculated as a percentage                             |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     | Number    | Either the input value or the calcualted value if zero |
+	|           |           | was passed as the input value                          |
+	+-----------+-----------+--------------------------------------------------------+
+
+Chart Level Procedures
+~~~~~~~~~~~~~~~~~~~~~~
+
+clibvchart-set-chart-type
+-------------------------
+
+	Sets the chart type.  A particular series can override the chart type provided it is not
+	a pie or donut.
+	If a pie or donut chart is defined the cllib will process only the FIRST series (alphabetically
+	by name).
+
+	Note that a stacked bar chart is still defined here as a "bar".  To create a stacked bar
+	Add data points to series in the normal manner.  Then make a call to -set-series-group
+	for each series and pass the name of the series.  All series in the group will be stacked.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|  In       | String    | Must be one of: pie, donut, line, bar, spline, step    |
+	|           |           | area, area-spline, area-step, scatter, gauge           |
+	|           |           |                                                        |
+	|           |           | If no type is specified a bar chart is produced        |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvchart-set-title
+--------------------
+
+	Creates a title at the top of the chart
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      | String    | The title to appear                                    |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvchart-set-subtitle
+-----------------------
+
+	Create a second title line under the main title
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      | String    | The sub title to appear                                |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvchart-set-show-legend
+--------------------------
+
+	The legend is the series names.  The default value is TRUE.  i.e. legends will be shown.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |  Boolean  | If true legends are shown                              |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvchart-set-legend-position
+------------------------------
+
+	The position of the legend.  Three possible positions are available.
+	if no position is specfied, legends appear on the RHS.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      | String    | One of: bottom, right, inset                           |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvchart-set-show-data-points
+-------------------------------
+
+	When this option is set to true a small dot will appear at each position of the 
+	data point on the chart.  The default is False - no data points
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      | Boolean   | True to show the data point.                           |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvchart-set-show-data-point-labels
+-------------------------------------
+
+	When this option is set to true values of the data points are displayed in the chart.
+	The default is false.  Setting this to true will also set show-data-points to true.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |  Boolean  | True to show the values of each data point floating    |
+	|           |           | Floating above the data point                          |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvchart-set-data-point-radius 
+--------------------------------
+
+	This value is the size of the dot that marks the datapoint.  The default is 2.5.
+	5 will be a point double that size.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |  Number   | The size of the datapoint radius.  Less that 10 is good|
+	+-----------+-----------+--------------------------------------------------------+
+
+
+clibvchart-set-allow-zoom
+-------------------------
+
+	When this option is set a very small (veritically) copy of the chart is shown below
+	the chart that allows the user to zoom in the main portion of the chart.
+
+	The default is no zoom chart
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|  In       | Boolean   | True to display the zoom chart below the main chart.   |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvchart-set-rotated
+----------------------
+
+	When this option is set the chart will be rotated through 90 degrees.  The x axis
+	will be vertical and the two y axes will be horizontal.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|  In       | Boolean   | True to display the chart rotated through 90 degrees.  |
+	+-----------+-----------+--------------------------------------------------------+
+
+Axes related procedures
+~~~~~~~~~~~~~~~~~~~~~~~
+
+clibvchart-set-category-value
+-----------------------------
+
+	It is most likely that you will want to set the x axis values.  These are the items
+	that will appear along the x axis.  For example, a sales graph may show the period
+	names along the x axis.
+
+	If no x axis values are defined the graph will set the x axis values to the index numbers.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      | Number    | The index number                                       |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      | String    | The value to use for that index number                 |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvchart-get-index-from-category
+----------------------------------
+
+	This function is supplied to ease development in the calling application.  If an
+	application is wading through a lot of records it may only have the category labels
+	and will need to keep track of the index numbers for each label.  This function 
+	removes that need by returning an index number for a given label.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      | String    | The value to use for that index number                 |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     | Number    | The index number                                       |
+	+-----------+-----------+--------------------------------------------------------+
+
+
+clibvchart-set-default-category-colour
+--------------------------------------
+
+	Use with bar charts.  Each bar (a category) can be coloured individually with -set-category-colour.
+	When using this facility it is import to set the default category colour.  When -set-category-colour
+	is used, it is to distinguish one category from another.  For example a barchart of sales values
+	may have individual bar a different colour if their GP falls below a certain point.  Thus the user's 
+	attention is drawn to an individual bar. THEREFORE, the programmer needs to set ALL the other bars to 
+	some default value.  Using -set-category-colour without a default category will cause an error.
+
+	Note that it is best to catgory colouring when there is only one data series as the legend
+	will lose the colour definitions and all series will be set to the same colour.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|  In       | Colour    | An Pronto Colour variable for the default colour       |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvchart-set-category-colour
+------------------------------
+
+	see the notes for -set-default-category-colour.  This will set a particular colour a particular value.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      | Number    | An index number for the category                       |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      | Colour    | A pronto colour variable for the colour                |
+	+-----------+-----------+--------------------------------------------------------+
+
+
+clibvchart-set-axis-label 
+-------------------------
+
+	Set the label for the axes as a whole.  For the x axis this might be something
+	like "period" for a time based graph.  Or "product group" if the chart was showing
+	some values of product groups.
+	For the Y axis this might be something like "$ Sales" or "Sales Qty"
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      | String    | The Axis.  Must be one of "x" "y" or "Y2" (for the RHS |
+	|           |           | y axis)                                                |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      | String    | The value to appear along the axis                     |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvchart-set-axis-show
+------------------------
+
+	Predominantly this will be used for hiding the y axis.  (For example you
+	could hide the axis but show the data point values - or alternatively just let the 
+	user hover to get the values).  By default an x and y axis are added automatically
+	and set to show. 
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      | String    | The Axis.  Must be one of "x" "y" or "Y2" (for the RHS |
+	|           |           | y axis)                                                |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      | Boolean   | True will display the axis.  False will hide it.       |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvchart-set-axis-datatype
+----------------------------
+
+	This setting applies mainly to the x axis.  The default datatype will spread the x
+	axis values evently across the scale.  There are two other possibilities.  They
+	are both used when there are missing values in the x axis data.
+
+	For "timeseries" data the x axis values must be dates and the data points will be 
+	spread apportionately to the dates. x axis values (i.e. categories) MUST MUST MUST
+	be in dd-mmm-yyyy format.
+
+	For "indexed" data the x axis values must be numeric and the data points will be
+	spread apportionabely to the x axis values.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      | String    | The Axis.  Must be one of "x" "y" or "Y2" (for the RHS |
+	|           |           | y axis)                                                |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      | String    | must be one of either spaces, "timeseries" or          |
+	|           |           | "indexed"                                              |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvchart-set-axis-tick-rotate
+-------------------------------
+
+	Used mainly for the x axis it will rotate the labels so they easier fit on a thin graph.
+	The default is no rotation.  75 is a good value to see what happens.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      | String    | The Axis.  Must be one of "x" "y" or "Y2" (for the RHS |
+	|           |           | y axis)                                                |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      | Number    | The rotation amount in degrees.                        |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvchart-set-axis-tick-count
+------------------------------
+
+	Determines the number of tick marks on the axis.  
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      | String    | The Axis.  Must be one of "x" "y" or "Y2" (for the RHS |
+	|           |           | y axis)                                                |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      | Number    | The number of tick marks.                              |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvchart-set-axis-tick-culling
+--------------------------------
+
+	Tick Cullling is the practice of removing uncessary tick marks in order to fit
+	the axis description value (such as the date).  Be default there is no tick 
+	culling.  You must explicitly set this value to cause culling.
+
+	If a tick count is defined (i.e. non-zero) then culling will occur irrespective
+	of this value.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      | String    | The Axis.  Must be one of "x" "y" or "Y2" (for the RHS |
+	|           |           | y axis)                                                |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      | Boolean   | True - tick culling will occur                         |
+	|           |           | False - no Tick Culling (default)                      |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvchart-set-axis-min
+-----------------------
+
+	Sets the minimum value for an axis.  Values lower than this will not appear.
+	Line style charts will show a line coming from a point off the chart.
+	(see also -set-min-non-zero)
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      | String    | The Axis.  Must be one of "x" "y" or "Y2" (for the RHS |
+	|           |           | y axis)                                                |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      | Number    | The Minimum value for the axis                         |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvchart-set-axis-max
+-----------------------
+	Sets the maximum value for an axis.  Values higher than this will not appear.
+	Line style charts will show a line coming from a point off the chart.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      | String    | The Axis.  Must be one of "x" "y" or "Y2" (for the RHS |
+	|           |           | y axis)                                                |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      | Number    | The Maximum value for the axis                         |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvchart-set-axis-min-non-zero
+--------------------------------
+
+	This is similar to the -set-axis-min except that the routine will read through
+	the data sent to the clib and set the minimum value for the chart to the lowest
+	non-zero value in the chart.  Useful for sales style charts where the values are
+	significantly above zero but fall with a relatively short range.
+
+	Clearly, while it is possible to execute this procedure at any time, it only makes
+	sense to do so when all the data has already been recorded via -add-data-point.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      | String    | The Axis.  Must be one of "x" "y" or "Y2" (for the RHS |
+	|           |           | y axis)                                                |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvchart-swap-series-for-x-axis 
+---------------------------------
+
+	This function only applies to gauges.  Imagine a bar chart of total sales by
+	warehouse.  When displayed as a gauge you do not see the x axis.  Simply a
+	total value of sales.  To show this graph as a gauge it might make more
+	sense to have the warehouses as a series.
+
+	This function will swap those values.
+
+	It will only under the folllowing circumstances:
+	
+	*	The chart must be a gauge
+	*	Calculating gauge percentages must not have already been executed
+	*	There must only 1 series (the value that is being charted)
+	*	There must be more than one index in the data points
+
+Series Related Procedures
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+clibvchart-set-series-chart-type
+--------------------------------
+
+	Sets the type of chart for the series.  Only available if the chart level type
+	is neither pie nor donut,gauge .  Must be one of the remainging types.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      | String    | The series name.                                       |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      | String    | The Chart type.  Must be one of line,bar,spline,step,  |
+	|           |           | Area, area-spline, area-step,scatter                   |
+	|           |           |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvchart-set-series-axis
+--------------------------
+
+	Sets the axis this series will occur on
+
+	There can only be on series for an x axis.  To make a Y axis use a RHS scale
+	set the series axis to "y2"
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      | String    | The series name.                                       |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      | String    | The Axis.  Must be one of "x" "y" or "Y2" (for the RHS |
+	|           |           | y axis)                                                |
+	|           |           |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvchart-set-series-colour
+----------------------------
+
+	Sets the colour of a series.  The colour must be specifed as a pronto colour
+	variable.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      | String    | The series name.                                       |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      | Colour    | The colour in Pronto number format.                    |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvchart-set-series-group
+---------------------------
+
+	Adds the series to a group for displaying in a stacked bar.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      | String    | The series name.                                       |
+	+-----------+-----------+--------------------------------------------------------+
+*/
+
+//
+#include "../include/ijsondef.spl"
+#include "../include/stddef.spl"
+
+#define VALID_CHART_TYPES ( "bar","line", "spline", "step", "area",  \
+							"area-spline", "area-step", "scatter",  \
+							"pie", "donut", "gauge")
+
+#define DEBUG
+
+// RANDOM_BETWEEN used in the test cases					
+#define RANDOM_BETWEEN(A,B) \
+	(((RANDOM(0) / 32767) * (B - A)) + A)
+
+#define HEX_COLOUR(X) concat("#",PRONTO_COLOUR_TO_HEX(X))
+
+#include "../include/i8proglogparam.spl"
+
+field 
+	ws-last-error						pic x(1024) type string
+
+/*
+A chart is made up of :
+	Some information about the chart such as a title
+		- held in global scope fields
+	Some axis 
+		x - the llabells
+		y - LHS y axis
+		y2 - RHS y axis
+		- held in the mem-axis table
+	some Series
+		- held in the mem-series table
+	some data
+		- held in the mem-data table
+
+The axis, series and data are stored in three memory tables.
+*/
+
+field
+	//
+	// Public chart level properties
+	//
+	ws-chart-type						pic x(20) type string
+	ws-allow-zoom						type boolean
+	ws-show-data-points					type boolean
+	ws-show-data-point-labels			type boolean
+	ws-data-point-radius				type number
+	ws-show-legend						type boolean
+	ws-rotated							type boolean
+	ws-legend-position					pic x(20) type string
+	ws-chart-title						pic x(256) type string
+	ws-chart-subtitle					pic x(256) type string
+	ws-show-tooltips					type boolean
+	ws-default-category-colour			type colour
+	ws-gauge-percentage-calculated		type boolean
+	ws-report-title						pic x(100) type string
+
+#ifdef DEBUG
+	// in debug mode I want to keep the generated json for each
+	// chart generated by each instance of this run
+	// so I need a variable to keep the number, incremeent the number during 
+	// initialisation and then use that number to export the chart during 
+	// the print routine (clibvchart-print-object)
+	ws-chart-instance					type number
+#endif
+
+// The code has many places in which it does a get by index followed by a
+// insert / update operation.  To simplify, make this a #define
+// This is a simple case of doing a get/insert/update sequence on a table and
+// setting a single value on that table.
+//
+// T,K,F,V = table, key field, value
+#define SET_ATTRIBUTE(T,KF,KV,F,V) \
+	get T \
+		on index KF \
+		key is KV \
+		lock \
+	on error ENOREC \
+		initialise T \
+		set KF = KV \
+		set F = V \
+		insert T \
+	else \
+		set F = V \
+		update T \
+	endon
+
+//  All of the axis functions require validation of the axis, so we just make
+//  this a a #define to spare us of rekeying it on every function.
+//  F = field name, R= routine that is making the call.
+#define VALIDATE_AXIS(F,R) \
+	if lowercase(F) not in ( "x" "y" "y2") \
+		do add-message parameters str-concat("Invalid axis (" F ")") R \
+		exit 1 \
+	endif \
+	if lowercase(F) = "y2" \
+		do check-and-initialise-y2-axis \
+	endif
+
+#define VALIDATE_FORMAT_OBJECT(F,R) \
+	if lowercase(F) not in ( "datalabel" "yaxis" "y2axis" "ytooltip" "y2tooltip") \
+		do add-message parameters str-concat("Invalid format Object (" F ")") R \
+		exit 1 \
+	endif 
+
+
+object mem-axis
+	type is memory
+	record is
+		ma-name							pic xx // must be one of x,y and y2
+		ma-show							type boolean
+		ma-label						pic x(50) type string
+		ma-minimum						type number
+		ma-maximum						type number
+		ma-tick-culling					type boolean
+		ma-tick-rotate					type number
+		ma-tick-count					type number // ie. show value every n items
+		ma-dataType						pic x(20) type string // timeseries, indexed, log (y)
+		ma-format						pic x(50) type string
+	end-record
+	key is ma-name unique
+
+object mem-series
+	type is memory
+	record is 
+		ms-name							pic x(50) type string
+		ms-axis							pic xx
+		ms-type							pic x(20) type string
+		ms-colour						type colour
+	end-record
+	key is ms-name unique
+
+object mem-data
+	type is memory
+	record
+		md-series						like ms-name
+		md-index						type number
+		md-value						type number
+	end-record
+	key is md-series, md-index unique
+
+object mem-gauge-percentages
+	type is memory
+	record 
+		mgp-series						like ms-name
+		mgp-value						type number
+	end-record
+	key is mgp-series
+
+object mem-x-series
+	type is memory
+	record
+		mx-index						type number
+		mx-label						pic x(50) type string
+		mx-colour						type colour
+	end-record
+	key is mx-index unique
+	key is mx-label
+
+object mem-int-messages
+	type is memory
+	record
+		mim-seq							type number
+		mim-text						pic x(1024) type string
+		mim-routine						pic x(256) type string // routine creating message
+	end-record
+	key is mim-seq unique
+
+object mem-format-object
+	type is memory
+	record 
+		mfo-object						pic x(20) // datalabel,yaxis,y2axis,ytooltip,y2tooltip
+		mfo-style						pic x(20) // spaces,currency, percent
+		mfo-sign						pic x(20) // spaces,never,always,exceptzero
+		mfo-notation					pic x(20) // spaces,compact,scientific,engineering
+		mfo-grouping					type boolean
+		mfo-min-dp						type number
+		mfo-max-dp						type number
+	end-record
+	key is mfo-object unique
+
+object mem-group // for stacked bars
+	type is memory
+	record
+		mg-seq							type number
+		mg-series						like ms-name
+	end-record
+	key is mg-seq mg-series unique
+
+object text-file
+	type is text
+	record is
+		tf-line							pic x(1024) type string
+	end-record
+
+
+// 
+// ---------------Generic Chart Procedures----------------------
+
+procedure library-init
+	get system-control first
+	on error
+		abort "No System Control record"
+	endon
+	do i8proglogparam-write-log parameters are "clibvgraph"
+end-procedure
+
+procedure main
+	get system-control first
+	on error
+		abort "No System Control record"
+	endon
+	do i8proglogparam-write-log parameters are "clibvgraph"
+	do testcases
+end-procedure
+
+procedure clibvgraph-get-last-error export
+returning
+	lr-message							like ws-last-error
+	set lr-message = ws-last-error
+end-procedure
+
+//
+//  --------- Exported routines and supporting code goes here ---------
+//
+//
+// ---------- Chart level Properties
+
+procedure clibvchart-set-chart-type export
+// public property
+parameters
+	lp-chart-type						like ws-chart-type
+	//
+	if lowercase(lp-chart-type) not in VALID_CHART_TYPES
+		do add-message parameters "Chart type must be one of bar,line,spline,step,area,area-spline,area-step,scatter,pie,donut, gauge"
+			"set-chart-type"
+		exit 1
+	endif
+	set ws-chart-type = lowercase(lp-chart-type)
+end-procedure
+
+
+procedure clibvchart-set-allow-zoom export
+// public property
+parameters
+	lp-zoom								type boolean
+	if ws-rotated
+		do add-message parameters "Cannot zoom a rotated chart" "set-allow-zoom"
+		exit 1
+	endif
+	set ws-allow-zoom = lp-zoom
+end-procedure
+
+procedure clibvchart-set-show-data-points export
+// public property
+parameters
+	lp-datapoints						type boolean
+	set ws-show-data-points = lp-datapoints
+end-procedure
+
+
+procedure clibvchart-set-show-data-point-labels export
+// public property
+parameters
+	lp-datapoints						type boolean
+	// TODO: verify this rule.  Does it really only apply to these types?
+	if ws-chart-type not in ( "line" "bar" , "spline", "area", "area-spline") and ws-chart-type != spaces
+		do add-message parameters "Either the chart type is not set, or is not valid for this chart type" "show-data-point-labels"
+		exit 1
+	endif
+	// if you want the labels then you must thave the points...
+	set ws-show-data-points = TRUE
+	set ws-show-data-point-labels = lp-datapoints
+end-procedure
+
+procedure clibvchart-set-data-point-radius export
+// public property
+parameters
+	lp-radius						like ws-data-point-radius
+	// if you want the labels then you must thave the points...
+	set ws-show-data-points = TRUE
+	set ws-data-point-radius = lp-radius
+end-procedure
+
+procedure clibvchart-set-show-legend export
+// public property
+parameters
+	lp-legend						like ws-show-legend
+	set ws-show-legend = lp-legend
+end-procedure
+
+procedure clibvchart-set-legend-position export
+// public property
+parameters
+	lp-legend-position				like ws-legend-position
+	if lowercase(lp-legend-position) not in ("bottom", "right", "inset")
+		do add-message parameters "Legend position must be one of bottom, right or inset" "legend-position"
+		exit 1
+	endif
+	set ws-legend-position = lowercase(lp-legend-position)
+end-procedure
+
+procedure clibvchart-set-title export
+// public property
+parameters
+	lp-title						like ws-chart-title
+	set ws-chart-title = lp-title
+end-procedure
+
+procedure clibvchart-set-subtitle export
+// public property
+parameters
+	lp-subtitle						like ws-chart-subtitle
+	set ws-chart-subtitle = lp-subtitle
+end-procedure
+
+procedure clibvchart-set-rotated export
+parameters 
+	lp-rotate						like ws-rotated
+	if ws-allow-zoom
+		do add-message parameters "Cannot rotate a zoomed chart" "set-rotated"
+		exit 1
+	endif
+	set ws-rotated = lp-rotate
+end-procedure
+
+procedure clibvchart-set-show-tooltips export
+parameters
+	lp-show							like ws-show-tooltips
+	set ws-show-tooltips = lp-show
+end-procedure
+
+//
+// ---------------  axis definitions
+//
+
+procedure clibvchart-set-category-value export
+parameters
+	lp-index						like mx-index
+	lp-label						like mx-label
+	SET_ATTRIBUTE(mem-x-series, mx-index, lp-index, mx-label , lp-label)
+end-procedure
+
+procedure clibvchart-get-index-from-category export
+parameters
+	lp-label						like mx-label
+returning
+	lr-index						like mx-index
+	//
+	select lr-index = max(mx-index) from mem-x-series	
+		where mx-label = :lp-label
+	end-select
+end-procedure
+
+procedure clibvchart-set-default-category-colour export
+parameters
+	lp-colour						type colour
+	set ws-default-category-colour = lp-colour
+end-procedure
+
+procedure clibvchart-set-category-colour export
+parameters
+	lp-index						like mx-index
+	lp-colour						type colour
+	if ws-default-category-colour = 0
+		do add-message parameters "Cannot set category colour if default colour not set" "set-category-colour"
+		exit 1
+	endif
+	SET_ATTRIBUTE(mem-x-series, mx-index, lp-index, mx-colour , lp-colour)
+end-procedure
+
+procedure clibvchart-set-axis-show export
+parameters
+	lp-axis							like ma-name
+	lp-show							like ma-show
+	//
+	VALIDATE_AXIS(lp-axis,"set-axis-show")
+	SET_ATTRIBUTE(mem-axis,ma-name, lp-axis, ma-show, lp-show)
+end-procedure
+
+procedure clibvchart-set-axis-label export
+parameters
+	lp-axis							like ma-name
+	lp-label						like ma-label
+	//
+	VALIDATE_AXIS(lp-axis,"set-axis-label")
+	SET_ATTRIBUTE(mem-axis, ma-name, lp-axis, ma-label, lp-label)
+end-procedure
+
+procedure clibvchart-set-axis-datatype export
+parameters
+	lp-axis							like ma-name
+	lp-datatype						like ma-dataType
+	//
+	if lowercase(lp-datatype) not in ( spaces, "timeseries", "indexed")
+		do add-message parameters "Data type not one of spaces, timeseries or indexed", "set-axis-datatype"
+		exit 1
+	endif
+	VALIDATE_AXIS(lp-axis,"set-axis-datatype")
+	SET_ATTRIBUTE(mem-axis, ma-name, lp-axis, ma-dataType, lowercase(lp-datatype))
+end-procedure
+
+procedure clibvchart-set-axis-tick-rotate export
+parameters
+	lp-axis							like ma-name
+	lp-rotate						like ma-tick-rotate
+	VALIDATE_AXIS(lp-axis,"set-axis-tick-rotate")
+	SET_ATTRIBUTE(mem-axis, ma-name, lp-axis, ma-tick-rotate, lp-rotate)
+end-procedure
+
+procedure clibvchart-set-axis-tick-count export
+parameters
+	lp-axis							like ma-name
+	lp-count						like ma-tick-count
+	VALIDATE_AXIS(lp-axis,"set-axis-tick-count")
+	SET_ATTRIBUTE(mem-axis, ma-name, lp-axis, ma-tick-count, lp-count)
+end-procedure
+
+procedure clibvchart-set-axis-tick-culling export
+parameters
+	lp-axis							like ma-name
+	lp-culling						like ma-tick-culling
+	VALIDATE_AXIS(lp-axis,"set-axis-tick-culling")
+	SET_ATTRIBUTE(mem-axis, ma-name, lp-axis, ma-tick-culling, lp-culling)
+end-procedure
+
+procedure clibvchart-set-axis-min export
+parameters
+	lp-axis							like ma-name
+	lp-min						like ma-tick-culling
+	VALIDATE_AXIS(lp-axis,"set-axis-min")
+	SET_ATTRIBUTE(mem-axis, ma-name, lp-axis, ma-minimum, lp-min)
+end-procedure
+
+procedure clibvchart-set-axis-max export
+parameters
+	lp-axis							like ma-name
+	lp-max							like ma-maximum
+	VALIDATE_AXIS(lp-axis,"set-axis-max")
+	SET_ATTRIBUTE(mem-axis, ma-name, lp-axis, ma-maximum, lp-max)
+end-procedure
+
+procedure clibvchart-set-axis-min-non-zero export
+parameters
+	lp-axis							like ma-name
+local
+	lf-min							like md-value
+	VALIDATE_AXIS(lp-axis,"set-axis-min-non-zero")
+	select lf-min =  min(md-value)
+		from mem-data
+		inner join mem-series on md-series = md-series
+		where ms-axis = :lp-axis
+		and md-value > 0
+	end-select
+	SET_ATTRIBUTE(mem-axis, ma-name, lp-axis, ma-minimum, lf-min)
+end-procedure
+
+//
+// ---------------  series defintions
+//
+
+procedure clibvchart-set-series-chart-type export
+parameters
+	lp-series						like ms-name
+	lp-type							like ms-type
+	if ws-chart-type in ("pie","donut","gauge")
+		do add-message parameters "Chart type definition not permitted for pie, donut, gauge", "set-series-chart-type"
+		exit 1
+	endif
+	if ws-chart-type not in VALID_CHART_TYPES
+		do add-message parameters "Invalid Chart type", "set-series-chart-type"
+		exit 1
+	endif
+	SET_ATTRIBUTE(mem-series,ms-name,lp-series,ms-type,lp-type)
+end-procedure
+
+procedure clibvchart-set-series-axis export
+parameters
+	lp-series						like ms-name
+	lp-axis							like ms-axis
+	VALIDATE_AXIS(lp-axis,"set-series-axis")
+	SET_ATTRIBUTE(mem-series,ms-name,lp-series,ms-axis,lowercase(lp-axis))
+end-procedure
+
+procedure clibvchart-set-series-colour export
+parameters
+	lp-series						like ms-name
+	lp-colour						like ms-colour
+	SET_ATTRIBUTE(mem-series,ms-name,lp-series,ms-colour,lp-colour)
+end-procedure
+
+procedure clibvchart-set-series-group
+parameters
+	lp-series						like ms-name
+local
+	lf-last-seq						type number
+	lf-count						type number
+	select lf-count = count(*)
+		from mem-group 
+		where mg-series = :lp-series
+	end-select
+	if lf-count > 0
+		do add-message parameters "Series already defined in group" , "set-series-group"
+		exit 1
+	endif
+	select lf-last-seq = max(mg-seq) 
+		from mem-group
+	end-select
+	initialise mem-group
+	set mg-seq = lf-last-seq + 1
+	set mg-series = lp-series
+	insert mem-group
+	on error
+		do add-message parameters "Unable to add series to group" , "set-series-group"
+		exit 1
+	endon
+end-procedure
+
+//
+// ---------------  format objects
+//
+
+procedure clibvchart-set-format-style export
+parameters
+	lp-format-object				like mfo-object
+	lp-style 						like mfo-style
+	set lp-style = lowercase(lp-style)
+	VALIDATE_FORMAT_OBJECT(lp-format-object, "set-format-style")
+	if lp-style not in ("currency" "percent")
+		do add-message parameters concat("Invalid Style name:" lp-style), "set-format-style"
+		exit 1
+	endif
+	SET_ATTRIBUTE(mem-format-object,mfo-object,lp-format-object,mfo-style,lp-style)
+end-procedure
+
+procedure clibvchart-set-format-notation export
+parameters
+	lp-format-object				like mfo-object
+	lp-notation 					like mfo-notation
+	set lp-notation = lowercase(lp-notation)
+	VALIDATE_FORMAT_OBJECT(lp-format-object, "set-format-notation")
+	if lp-notation not in ("compact", "scientific", "engineering")
+		do add-message parameters concat("Invalid notation name:" lp-notation), "set-format-notation"
+		exit 1
+	endif
+	SET_ATTRIBUTE(mem-format-object,mfo-object,lp-format-object,mfo-notation,lp-notation)
+end-procedure
+
+procedure clibvchart-set-format-sign export
+parameters
+	lp-format-object				like mfo-object
+	lp-sign 					like mfo-notation
+	set lp-sign = lowercase(lp-sign)
+	VALIDATE_FORMAT_OBJECT(lp-format-object, "set-format-sign")
+	if lp-sign not in ("never", "always", "exceptzero")
+		do add-message parameters concat("Invalid sign:" lp-sign), "set-format-sign"
+		exit 1
+	endif
+	SET_ATTRIBUTE(mem-format-object,mfo-object,lp-format-object,mfo-sign,lp-sign)
+end-procedure
+
+procedure clibvchart-set-format-grouping export
+parameters
+	lp-format-object				like mfo-object
+	lp-grouping 					like mfo-grouping
+	VALIDATE_FORMAT_OBJECT(lp-format-object, "set-format-grouping")
+	SET_ATTRIBUTE(mem-format-object,mfo-object,lp-format-object,mfo-grouping,lp-grouping)
+end-procedure
+
+procedure clibvchart-set-format-min-dp export
+parameters
+	lp-format-object				like mfo-object
+	lp-min		 					like mfo-min-dp
+	VALIDATE_FORMAT_OBJECT(lp-format-object, "set-format-min-dp")
+	SET_ATTRIBUTE(mem-format-object,mfo-object,lp-format-object,mfo-min-dp,lp-min)
+end-procedure
+
+procedure clibvchart-set-format-max-dp export
+parameters
+	lp-format-object				like mfo-object
+	lp-max		 					like mfo-max-dp
+	VALIDATE_FORMAT_OBJECT(lp-format-object, "set-format-max-dp")
+	SET_ATTRIBUTE(mem-format-object,mfo-object,lp-format-object,mfo-max-dp,lp-max)
+end-procedure
+
+//
+// ---------------  data defintions
+//
+
+procedure clibvchart-add-data-point export
+parameters
+	lp-series						like md-series
+	lp-index						like md-index
+	lp-value						like md-value
+	//
+	// check the series
+	//
+	if ws-gauge-percentage-calculated 
+		do add-message parameters "Data point added after gauge percentage calculated" "add-data-point"
+		exit 1
+	endif
+	get mem-series
+		on index ms-name
+		key is lp-series
+	on error ENOREC
+		initialise mem-series
+		set ms-name = lp-series
+		set ms-axis = "y"
+		insert mem-series
+	endon
+	// 
+	get mem-data
+		on index md-series md-index 
+		key is lp-series lp-index 
+		lock
+	on error ENOREC
+		initialise mem-data
+		set md-series = lp-series
+		set md-index = lp-index
+		set md-value = lp-value
+		insert mem-data
+	else
+		set md-value += lp-value //  YES !! it is cumulative
+		update mem-data
+	endon
+end-procedure
+
+procedure clibvchart-swap-series-for-x-axis export
+local
+	lf-series-to-be-removed					like ms-name
+	lf-total								type number
+	//
+	// check if the data makes sense for swapping....
+	//
+	// .. must be a gauge
+	if ws-chart-type != "gauge"
+		do add-message parameters are "Axis swapping only applies to gauges"
+			"set-swap-series-for-x-axis"
+		exit 1
+	endif
+	// .. cannot have set percentages
+	if ws-gauge-percentage-calculated
+		do add-message parameters are "You cannot swap axes when gauge parameters have already been calculated"
+			"set-swap-series-for-x-axis"
+		exit 1
+	endif
+	// .. only one series
+	select distinct md-series
+		from mem-data
+	detail
+		set lf-total += 1
+	end-select
+	if lf-total != 1
+		do add-message parameters are "You cannot swap axes when there is more than one series" "set-swap-series-for-x-axis"
+		exit 1
+	else
+		set lf-series-to-be-removed = md-series
+		//  .. more than one index
+		set lf-total = 0
+		select distinct md-index
+			from mem-data
+		detail
+			set lf-total += 1
+		end-select
+		if lf-total <= 1
+			do add-message parameters are "You cannot swap axes when there is only one data point" 
+				"set-swap-series-for-x-axis"
+			exit 1
+		endif
+	endif
+	//
+	// ok to swap
+	//
+	select md-index, lf-total = sum(md-value)
+		from mem-data
+		group by md-index
+	detail
+		get mem-x-series
+			on index mx-index
+			key is md-index
+		on error
+			initialise mem-x-series
+			set mx-label = "Unknown"
+		endon
+		do clibvchart-add-data-point parameters are mx-label 1 lf-total
+	end-select
+	// and remove the old one
+	select *
+		from mem-data
+		where md-series = :lf-series-to-be-removed
+	detail
+		delete mem-data
+	end-select
+	select * 
+		from mem-series
+		where ms-name = :lf-series-to-be-removed
+	detail
+		delete mem-series
+	end-select
+end-procedure
+
+procedure clibvchart-set-gauge-percentage export
+parameters
+	lp-max-value					type number
+returning
+	lr-max-value					type number
+local
+	lf-total						type number
+	/*
+	The purpose of this routine is to re-calculate the data
+	in the mem-data table as a percentage to used in a gauge chart.
+
+	This routine can be called at any time but it does not make sense
+	to do so until all the data points have been added.
+
+	If the max-value parameter is zero, then all other series will
+	be calculated as a percentage of the largest value
+
+	The return value is the largest value used for the percentage.
+	*/
+	//
+	// deal with calculating the maximum value that things are to be shown as
+	// a percenage
+	//
+	if lp-max-value = 0
+		select md-series lf-total = sum(md-value)
+			from mem-data
+			group by md-series
+		detail
+			if lf-total > lp-max-value
+				set lp-max-value = lf-total
+			endif
+		end-select
+	endif
+	set lr-max-value = lp-max-value
+	// Calculate each number as a percentage of that
+	// and add to mem-gauge-perecentages
+	close mem-gauge-percentages 
+	open mem-gauge-percentages temporary truncate
+	select md-series lf-total = sum(md-value)
+		from mem-data
+		group by md-series
+	detail
+		initialise mem-gauge-percentages
+		set mgp-series = md-series
+		set mgp-value = lf-total / lp-max-value * 100
+		insert mem-gauge-percentages
+	end-select
+	// now drop the mem-data and replace with the gauge percentages
+	close mem-data 
+	open mem-data temporary truncate
+	// now delete all the non-zero values
+	select * 
+		from mem-gauge-percentages
+	detail
+		initialise mem-data
+		set md-series = mgp-series
+		set md-index = 1
+		set md-value = mgp-value
+		insert mem-data
+	end-select
+	set ws-gauge-percentage-calculated =  TRUE
+end-procedure
+
+//
+// ---------------  Chart initialisation
+//
+
+procedure clibvchart-initialise-chart export
+// public method
+	set ws-chart-type = "bar"
+	set ws-allow-zoom = FALSE
+	set ws-show-data-points  = FALSE
+	set ws-show-data-point-labels  = FALSE
+	set ws-rotated = FALSE
+	set ws-data-point-radius  = 0
+	set ws-show-legend = True
+	set ws-legend-position = spaces
+	set ws-chart-title = spaces
+	set ws-chart-subtitle = spaces
+	set ws-show-tooltips = true
+	set ws-gauge-percentage-calculated = FALSE
+	close mem-axis and remove
+	open mem-axis temporary
+	close mem-series and remove
+	open mem-series temporary
+	close mem-data and remove
+	open mem-data temporary
+	close mem-x-series and remove
+	open mem-x-series temporary
+	close mem-int-messages and remove
+	open mem-int-messages temporary 
+	close mem-format-object and remove
+	open mem-format-object temporary
+	close mem-group and remove
+	open mem-group temporary
+	// There must be an x axis so add it
+	initialise mem-axis
+	set ma-name  = 'x'
+	set ma-show = true
+	insert mem-axis
+	// There must be one y axis so add it.
+	initialise mem-axis
+	set ma-name = 'y'
+	set ma-show = true
+	insert mem-axis
+#ifdef DEBUG
+	set ws-chart-instance += 1
+#endif
+end-procedure
+
+procedure check-and-initialise-y2-axis
+	get mem-axis
+		on index ma-name
+		key is "y2"
+	on error ENOREC
+		initialise mem-axis
+		set ma-name = "y2"
+		set ma-show = true
+		insert mem-axis
+	endon
+end-procedure
+
+//
+// -------------- Get the chart
+//
+
+procedure clibvchart-get-chart export
+returning
+	lr-chart							type blob
+local
+	//
+	// Chart Stuff
+	//
+	lx-doc								type xml-handle
+	lx-root								type xml-handle
+	lx-chart							type xml-handle
+	lx-legend							type xml-handle
+	lx-datapoint						type xml-handle
+	lx-datalabel						type xml-handle
+	lx-axis								type xml-handle
+	lx-category							type xml-handle
+	lx-one-axis							type xml-handle
+	lx-axis-tick						type xml-handle
+	lx-data-array						type xml-handle
+	lx-tooltip							type xml-handle
+	lx-axis-tooltip						type xml-handle
+	lx-series							type xml-handle
+	lx-one-series						type xml-handle
+	lx-group							type xml-handle
+	do validate-chart
+	if exit-status > 0
+		do add-message parameters "The internal variables of the clib indicate the chart is not correctly defined" "get-chart"
+		do no-data-chart returning lr-chart
+		exit 1
+	endif
+	set lx-doc = xml-new-document("1.0",spaces)
+	set lx-root = xml-get-root-node(lx-doc)
+	//
+	IJSONDEF_ADD_CHILDNODE(lx-root,'prontoChart', lx-chart)
+	//
+	// deal with the type
+	//
+	if ws-chart-type = spaces
+		IJSONDEF_ADD_TEXT(lx-chart,'chartType','line')
+	else
+		IJSONDEF_ADD_TEXT(lx-chart,'chartType',ws-chart-type)
+	endif
+	//
+	// deal with the title
+	//
+	if ws-chart-title != spaces
+		IJSONDEF_ADD_TEXT(lx-chart,'title',ws-chart-title)
+	endif
+	if ws-chart-subtitle != spaces
+		IJSONDEF_ADD_TEXT(lx-chart,'subTitle',ws-chart-subtitle)
+	endif
+	//
+	// Deal with the legend
+	//
+	if ws-show-legend 
+		IJSONDEF_ADD_CHILDNODE(lx-chart,'legend',lx-legend)
+		if ws-legend-position = spaces
+			IJSONDEF_ADD_TEXT(lx-legend,'position','right')
+		else
+			IJSONDEF_ADD_TEXT(lx-legend,'position',ws-legend-position)
+		endif
+	else
+		IJSONDEF_ADD_CHILDNODE(lx-chart,'legend',lx-legend)
+		IJSONDEF_ADD_TEXT_NO_QUOTES(lx-legend,'show','false')
+	endif
+	// 
+	// show data points
+	//
+	if ws-show-data-points
+		IJSONDEF_ADD_CHILDNODE(lx-chart,'dataPoint',lx-datapoint)
+		IJSONDEF_ADD_TEXT_NO_QUOTES(lx-datapoint,'show','true') 
+	else
+		IJSONDEF_ADD_CHILDNODE(lx-chart,'dataPoint',lx-datapoint)
+		IJSONDEF_ADD_TEXT_NO_QUOTES(lx-datapoint,'show','false') 
+	endif
+	// 
+	// Data point radius
+	//
+	if ws-data-point-radius != 0
+		IJSONDEF_ADD_NUMBER(lx-datapoint,'radius',ws-data-point-radius,2) 
+	endif
+	//
+	// show data labels
+	//
+	if ws-show-data-point-labels
+		IJSONDEF_ADD_CHILDNODE(lx-chart,'dataLabel',lx-dataLabel)
+		IJSONDEF_ADD_TEXT_NO_QUOTES(lx-dataLabel,'show','true')
+		do add-format-node parameters are lx-dataLabel, "datalabel"
+	endif
+	//
+	// Zooming
+	//
+	if ws-allow-zoom
+		IJSONDEF_ADD_TEXT_NO_QUOTES(lx-chart,'allowZoom','true')
+	endif
+	//
+	// Tool tips
+	//
+	IJSONDEF_ADD_CHILDNODE(lx-chart,"tooltip", lx-tooltip)
+	IJSONDEF_ADD_TEXT_NO_QUOTES(lx-tooltip,"show",if-then-else(ws-show-tooltips,"true","false"))
+	get mem-format-object
+		on index mfo-object
+		key is "ytooltip"
+	on error ENOREC
+	else
+		IJSONDEF_ADD_CHILDNODE(lx-tooltip,"y",lx-axis-tooltip)
+		do add-format-node parameters are lx-axis-tooltip "ytooltip"
+	endon
+	if xml-free-node-handle(lx-axis-tooltip) endif
+	get mem-format-object
+		on index mfo-object
+		key is "y2tooltip"
+	on error ENOREC
+	else
+		IJSONDEF_ADD_CHILDNODE(lx-tooltip,"y2",lx-axis-tooltip)
+		do add-format-node parameters are lx-axis-tooltip "y2tooltip"
+	endon
+	if xml-free-node-handle(lx-axis-tooltip) endif
+	// 
+	// category colours
+	//
+	if ws-default-category-colour != 0
+		IJSONDEF_ADD_CHILDNODE(lx-chart,'category',lx-category)
+		select * from mem-x-series
+		detail
+			IJSONDEF_ADD_ARRAY_ELEMENT(lx-category,'color',HEX_COLOUR(mx-colour))
+		end-select
+	endif
+	//
+	// grouped series
+	//
+	select * 
+		from mem-group
+		order by mg-seq
+	before
+		IJSONDEF_ADD_CHILDNODE(lx-chart,'groups',lx-group)
+		IJSONDEF_ADD_ARRAY(lx-group)
+	detail
+		IJSONDEF_ADD_ARRAY_ELEMENT(lx-group,'groups',mg-series)
+	end-select
+	// 
+	// Add the axes
+	//
+	select * from mem-axis
+	before
+		IJSONDEF_ADD_CHILDNODE(lx-chart,'axis',lx-axis)
+		if ws-rotated
+			IJSONDEF_ADD_TEXT_NO_QUOTES(lx-axis,'rotated','true')
+		endif
+	detail
+		IJSONDEF_ADD_CHILDNODE(lx-axis,ma-name,lx-one-axis)
+		if ma-show
+			IJSONDEF_ADD_TEXT_NO_QUOTES(lx-one-axis,"show","true")
+		else
+			IJSONDEF_ADD_TEXT_NO_QUOTES(lx-one-axis,"show","false")
+		endif
+		if ma-label != spaces
+			IJSONDEF_ADD_TEXT(lx-one-axis,"label",ma-label)
+		endif
+		if ma-dataType != spaces
+			IJSONDEF_ADD_TEXT(lx-one-axis,"dataType",ma-dataType)
+		endif
+		// min and max values
+		if ma-minimum != 0
+			IJSONDEF_ADD_NUMBER(lx-one-axis,"min",ma-minimum,0)
+		endif
+		if ma-maximum != 0
+			IJSONDEF_ADD_NUMBER(lx-one-axis,"max",ma-maximum,0)
+		endif
+		if ma-name = "y"
+			do add-format-node parameters are lx-one-axis "yaxis"
+		endif
+		if ma-name = "y2"
+			do add-format-node parameters are lx-one-axis "y2axis"
+		endif
+		//
+		// We always have a value for culling (T or F) therefore always add
+		// the tick node
+		IJSONDEF_ADD_CHILDNODE(lx-one-axis,"tick",lx-axis-tick)
+		IJSONDEF_ADD_TEXT_NO_QUOTES(lx-axis-tick,"culling",if-then-else(ma-tick-culling,'true','false'))
+		if ma-tick-rotate != 0
+			IJSONDEF_ADD_NUMBER(lx-axis-tick,"rotate",ma-tick-rotate,0)
+		endif
+		if ma-tick-count != 0
+			IJSONDEF_ADD_NUMBER(lx-axis-tick,"count",ma-tick-count,0)
+		endif
+		if xml-free-node-handle(lx-one-axis) endif
+	end-select
+	//
+	// Add the series
+	//
+	select * from mem-series
+	before
+		IJSONDEF_ADD_CHILDNODE(lx-chart,'series',lx-series)
+	detail
+		IJSONDEF_ADD_CHILDNODE(lx-series,ms-name,lx-one-series)
+		IJSONDEF_ADD_TEXT(lx-one-series,'axis',ms-axis)
+		if ms-type != spaces
+			IJSONDEF_ADD_TEXT(lx-one-series,'type',ms-type)
+		endif
+		if ms-colour != 0
+			IJSONDEF_ADD_TEXT(lx-one-series,'color',HEX_COLOUR(ms-colour))
+		endif
+		if xml-free-node-handle(lx-one-series) endif
+	end-select
+	if xml-free-node-handle(lx-series) endif
+	//
+	// Add the data
+	//
+	if ws-chart-type in ( "pie" "donut" )
+		// Only one series can be graphed with a pie or donut and the json is
+		// slightly different
+		//
+		// Irrespective of what data has been passed, process the first series
+		// only.
+		select *
+			from mem-series
+			order by ms-name
+		detail 
+			IJSONDEF_ADD_CHILDNODE(lx-chart,'data',lx-data-array)
+			IJSONDEF_ADD_ARRAY(lx-data-array)
+			IJSONDEF_ADD_ARRAY_ELEMENT(lx-data-array,'data','Items')
+			// Add the x axis names
+			//
+			select *
+				from mem-x-series
+			detail
+				IJSONDEF_ADD_ARRAY_ELEMENT(lx-data-array,'data',mx-label)
+			end-select
+			// prepare the data value items
+			IJSONDEF_ADD_CHILDNODE(lx-chart,'data',lx-data-array)
+			IJSONDEF_ADD_ARRAY(lx-data-array)
+			IJSONDEF_ADD_ARRAY_ELEMENT(lx-data-array,'data','Items')
+			// add the values
+			select *
+				from mem-data
+				where md-series = :ms-name
+				order by md-index
+			detail
+				IJSONDEF_ADD_ARRAY_NUMERIC_ELEMENT(lx-data-array,'data',md-value,0)
+			end-select
+			BREAK // process only the first series
+		end-select
+	else
+		select * from mem-data
+			order by md-index md-series
+		before 
+			// add the node
+			IJSONDEF_ADD_CHILDNODE(lx-chart,'data',lx-data-array)
+			// Make it an array
+			IJSONDEF_ADD_ARRAY(lx-data-array)
+			//  Add the series names
+			select * from mem-series
+			before
+				// add the x axis
+				IJSONDEF_ADD_ARRAY_ELEMENT(lx-data-array,'data','x axis') 
+			detail
+				// Add the series names
+				IJSONDEF_ADD_ARRAY_ELEMENT(lx-data-array,'data',ms-name)
+			end-select
+		before md-index
+			get mem-x-series
+				on index mx-index
+				key is md-index
+			on error
+				// should never happen
+				set mx-label = str(md-index)
+			endon
+			// add the node
+			IJSONDEF_ADD_CHILDNODE(lx-chart,'data',lx-data-array)
+			// Make it an array
+			IJSONDEF_ADD_ARRAY(lx-data-array)
+			// Add the label and the data
+			get mem-axis 
+				on index ma-name
+				key is "x"
+			on error endon
+//			if ma-dataType = "indexed"
+//				IJSONDEF_ADD_ARRAY_NUMERIC_ELEMENT(lx-data-array,'data',num(mx-label),0)
+//			else
+				IJSONDEF_ADD_ARRAY_ELEMENT(lx-data-array,'data',mx-label)
+//			endif
+		detail
+			IJSONDEF_ADD_ARRAY_NUMERIC_ELEMENT(lx-data-array,'data',md-value,0)
+		end-select
+	endif
+	//
+	// complete the JSON
+	//
+	IJSONDEF_SAVE_AS_JSON(lx-doc,lr-chart)
+	IJSONDEF_CLOSE_DOCUMENT(lx-doc)
+end-procedure
+
+procedure add-format-node
+parameters
+	lx-parent							type xml-handle
+	lf-object							like mfo-object
+local
+	lx-format							type xml-handle
+	//
+	select * from mem-format-object
+		where mfo-object = :lf-object
+	before
+		IJSONDEF_ADD_CHILDNODE(lx-parent,'format',lx-format)
+	detail
+		IJSONDEF_ADD_TEXT_NO_QUOTES(lx-format,'useGrouping',if-then-else(mfo-grouping,"true","false"))
+		if mfo-notation != spaces
+			IJSONDEF_ADD_TEXT(lx-format,'notation',mfo-notation)
+		endif
+		if mfo-style != spaces
+			IJSONDEF_ADD_TEXT(lx-format,'style',mfo-style)
+			if mfo-style = "currency"
+				IJSONDEF_ADD_TEXT(lx-format,"currency",sys-local-currency-code)
+			endif
+		endif
+		if mfo-sign != spaces
+			IJSONDEF_ADD_TEXT(lx-format,'signDisplay',mfo-sign)
+		endif
+		if mfo-min-dp != 0
+			IJSONDEF_ADD_NUMBER(lx-format,"minimumFractionDigits",mfo-min-dp,0)
+		endif
+		if mfo-max-dp != 0
+			IJSONDEF_ADD_NUMBER(lx-format,"maximumFractionDigits",mfo-max-dp,0)
+		endif
+	end-select
+	if xml-free-node-handle(lx-format) endif
+end-procedure
+
+procedure no-data-chart
+returning
+	lr-blob								type blob
+local
+	lx-doc								type xml-handle
+	lx-root								type xml-handle
+	lx-chart							type xml-handle
+	set lx-doc = xml-new-document("1.0",spaces)
+	set lx-root = xml-get-root-node(lx-doc)
+	//
+	IJSONDEF_ADD_CHILDNODE(lx-root,'prontoChart', lx-chart)
+	IJSONDEF_ADD_TEXT(lx-chart, 'chartType', 'label')
+	IJSONDEF_SAVE_AS_JSON(lx-doc,lr-blob)
+	IJSONDEF_CLOSE_DOCUMENT(lx-doc)
+end-procedure
+
+// 
+//  clib private chart methods
+//
+//
+
+#define VALIDATE_CHART_MESSAGE(A) \
+	do add-message parameters A "validate-chart" \
+	set lf-ok = FALSE
+
+
+procedure validate-chart
+local
+	lf-ok 						type boolean
+	lf-count 					type number
+	lf-total 					type number
+	set lf-ok = TRUE
+	// this routine checks that all mandatory items required for a chart have
+	// been specified.  It is called before building the JSON.
+	//
+	select lf-count = count(*)
+		from mem-data
+	end-select
+	if lf-count = 0
+		VALIDATE_CHART_MESSAGE("There are no data items")
+	endif
+	//
+	// If an x axis has not been defined then add one using just the index
+	// numbers
+	select lf-count = count(*)
+		from mem-x-series
+	end-select
+	if lf-count = 0
+		select distinct md-index
+			from mem-data
+			order by md-index
+		detail
+			initialise mem-x-series
+			set mx-index = md-index
+			set mx-label = str(md-index)
+			insert mem-x-series
+		end-select
+	endif
+	//
+	// check that there is a series for each datapoint
+	//
+	select distinct md-series
+		from mem-data
+	detail
+		get mem-series
+			on index ms-name
+			key is md-series
+		on error ENOREC
+			VALIDATE_CHART_MESSAGE("There is a data point with a series that is not supported by a series definition")
+			set lf-ok = false
+		endon
+	end-select
+	//
+	// check the series definitions
+	//
+	select * from mem-series
+	detail
+		if ms-axis not in ('x','y','y2')
+			VALIDATE_CHART_MESSAGE("Invalid Axis on series")
+			set lf-ok = FALSE
+		endif
+		if ms-type not in VALID_CHART_TYPES and ms-type != spaces
+			VALIDATE_CHART_MESSAGE("Invlaid Chart type on series")
+			set lf-ok = FALSE
+		endif
+		if ms-type != spaces and ms-type in ("pie","donut","gauge")
+		and  ws-chart-type = ms-type 
+			VALIDATE_CHART_MESSAGE("Invlaid Chart type on series - pie,donut,gauge")
+		endif
+		select lf-count = count(*)
+			from mem-data
+			where md-series = :ms-name
+		end-select
+		if lf-count = 0
+			VALIDATE_CHART_MESSAGE(concat("There must be at least one data point per series:" ms-name))
+			set lf-ok = FALSE
+		endif
+	end-select
+	//
+	// Check the groups
+	//
+	select * 
+		from mem-group
+	detail
+		get mem-series
+			on index ms-name
+			key is mg-series
+		on error
+			VALIDATE_CHART_MESSAGE(concat("Invalid series in group:" mg-series))
+			set lf-ok = FALSE
+		endon
+	end-select
+	//
+	// set default colour if necessary
+	//
+	if ws-default-category-colour != 0
+		select * from mem-x-series
+			for update
+		detail
+			if mx-colour = 0
+				set mx-colour = ws-default-category-colour
+			endif
+			update mem-x-series
+		end-select
+	end-if
+	//
+	// Check the Axis defintion
+	// 
+	select lf-count = count(*)
+		from mem-axis
+		where uppercase(ma-datatype) = 'TIMESERIES'
+	end-select
+	// IF there is any axis that is defined as time series, then the x axis
+	// values must all be string in the format dd-Mmm-yyyy
+	if lf-count > 0
+		select * from mem-x-series
+		detail
+			do validate-string-is-dd-mmm-yyyy-date parameters are mx-label
+			if exit-status = 1
+				VALIDATE_CHART_MESSAGE(concat("There is at least one axis defined as time series"
+					" and an x category value that is not in dd-mmm-yyyy format:"
+					mx-label))
+				set lf-ok = FALSE
+			endif
+		end-select
+	endif
+	//
+	if ws-chart-type = "gauge"
+		// gauge charts are percentages.  The numbers should be in the range 1
+		// to 100
+		// You can have multiple index points but they values are totalled.
+		select md-series lf-total = sum(md-value)
+			from mem-data
+			group by md-series
+		detail
+			if lf-total > 100
+				VALIDATE_CHART_MESSAGE(str-concat("You have a gauge chart in which the total for series:"
+					md-series " exceeds 100.  gauge chart data should be percentages in the range 1 - 100"))
+			endif
+		end-select
+		select md-series lf-count = count(*)
+			from mem-data
+			group by md-series
+		detail
+			if lf-count > 1
+				VALIDATE_CHART_MESSAGE(str-concat("You have a gauge chart in which there is more than one index point"
+					" for series:" md-series 
+					" While this works, care must be taken to ensure the values do not exceed 100"))
+			endif
+		end-select
+	endif
+	if not lf-ok
+		exit 1
+	endif
+end-procedure
+
+procedure validate-string-is-dd-mmm-yyyy-date 
+parameters
+	lp-label						type string
+	//
+	// start with length
+	//
+	if str-len(lp-label) != 11
+		exit 1
+	endif
+	// day
+	if num(substring(lp-label,1,2)) not between 1 and 31
+		exit 1
+	endif
+	// month
+	if uppercase(substring(lp-label,4,6)) not in 
+		( "JAN" "FEB" "MAR" "APR" "MAY" "JUN" "JUL" "AUG" "SEP" "OCT" "NOV" "DEC" )
+		exit 1
+	endif
+	// year
+	if num(substring(lp-label,8,11)) not between 0 and 9999
+		exit 1
+	endif
+	// valid date
+	if date2julian(lp-label) = 0
+		exit 1
+	endif
+end-procedure
+
+//
+// clib internal generic procedures
+//
+
+procedure add-message
+parameters
+	lp-text								like mim-text
+	lp-routine							like mim-routine
+local
+	lf-last-seq							type number
+	//
+	set ws-last-error  = lp-text
+	select lf-last-seq = max(mim-seq)
+		from mem-int-messages
+	end-select
+	initialise mem-int-messages
+	set mim-seq = lf-last-seq + 1
+	set mim-text = lp-text
+	set mim-routine = lp-routine
+	insert mem-int-messages
+end-procedure
+
+procedure print-header		
+	print ws-report-title col 50
+		today() col 80
+		tod() col 95
+		"Page" col 105
+		page-no
+	skip
+end-procedure
+
+procedure clibvchart-print-object export
+/*
+This routine is not for general use.  It is for debugging.
+*/
+parameters
+	lp-report-name						like ws-report-title
+local
+	lx-doc								type xml-handle
+	lf-filename							pic x(1024) type string
+	lf-blob								type blob
+	//
+	report lp-report-name
+		no-xml // just because it is used for debugging and it's easer to read with proprint
+		header print-header
+		width 500
+	page
+	//
+	set ws-report-title = lp-report-name
+	print "Object Level Data" bold
+	print "Type:" col 10 ws-chart-type
+	print "Title:" col 10 ws-chart-title
+	print "Subtitle:" col 10 ws-chart-subtitle 
+	print "Legend:" col 10 if-then-else(ws-show-legend,"True","False")
+	print "Legend Position:" col 10 ws-legend-position
+	print "Data Points:" col 10 if-then-else(ws-show-data-points,"True","False")
+	print "Data Point labels:" col 10 if-then-else(ws-show-data-point-labels,"True","False")
+	print "Data Point radius:" col 10 ws-data-point-radius
+	print "Zooming:" col 10 if-then-else(ws-allow-zoom,"True","False")
+	print "Rotated:" col 10 if-then-else(ws-rotated,"True","False")
+	print "Default Category Colour" col 10 HEX_COLOUR(ws-default-category-colour)
+	skip
+	print "Axis Data" bold
+	select * from mem-axis
+	before
+		print "Name" col 5
+			"Show" col 10	
+			"Label" col 20
+			"Data" col 40
+			"tick" col 50
+			"tick" col 60
+			"tick" col 70
+			"min" col 80
+			"min" col 90
+		print "Type" col 40
+			"rotate" col 50
+			"count" col 60
+			"culling" col 70
+	detail
+		print  ma-name col 5
+			if-then-else(ma-show,"T","F") col 11
+			ma-label col 20 pic x(20)
+			ma-datatype col 40
+			ma-tick-rotate pic zz9 col 52
+			ma-tick-count pic zz9 col 62
+			if-then-else(ma-tick-rotate,"Y","N")  col 73
+			ma-minimum col 80 pic z(7)9
+			ma-maximum col 90 pic z(7)9
+	end-select
+	skip
+	print "x Axis labels" bold
+	select *
+		from mem-x-series
+	before
+		print "Index" col 5
+			"Colour" col 15
+			"Label" col 25
+	detail
+		print mx-index col 5 pic zz9
+			HEX_COLOUR(mx-colour) col 15 pic x(10)
+			mx-label col 25 
+	end-select
+	print "Series Data" bold
+	select * from mem-series
+	before
+		print "Name" col 5
+			"Axis" col 25
+			"Type" col 30
+			"Colour" col 40
+	detail
+		print ms-name col 5
+			ms-axis col 26
+			ms-type col 30 pic x(10)
+			HEX_COLOUR(ms-colour) col 40
+	end-select
+	print "Grouped series" bold
+	select * from mem-group
+	before
+		print "Seq" col 5
+			"Series" col 10
+	detail
+		print mg-seq pic zz9 col 5
+			mg-series col 10
+	end-select
+	print "Data points " bold
+	select * from mem-data
+		order by md-series md-index
+	before
+		print 
+			"Series" col 5
+			"Index" col 20
+			"Value" col 30
+	detail
+		print 
+			md-series col 5
+			md-index col 20 pic z(5)9
+			md-value col 35 pic z(7).99
+	end-select
+	skip
+	print "Messages " bold
+	select *
+		from mem-int-messages
+		order by mim-seq
+	detail
+		print mim-seq pic zz9 col 5
+			mim-routine col 10
+			mim-text col 30
+	end-select
+	//
+#ifdef DEBUG
+	set lf-filename = concat("/tmp/clibchart_" str(ws-chart-instance) ".txt")
+#else
+	set lf-filename = concat("/tmp/chart_" str(pid) ".txt")
+#endif
+	do clibvchart-get-chart returning lf-blob
+	if exit-status > 0
+		print "Invalid Chart Returned"
+	else
+		set lx-doc = xml-parse-text(lf-blob)
+		if xml-save-as-file-ex(lx-doc,lf-filename,xml-get-doc-encoding(lx-doc),2,3) endif
+		// Now print it
+		skip
+		page 
+		print "JSON" bold
+		open text-file
+			file is lf-filename
+		on error
+			print concat("Unable to open file:" error-description(file-status()) "(" lf-filename ")")
+			exit 1
+		endon
+		select * from text-file
+		detail
+			// deal with tab characters
+			while substring(tf-line,1,1) = chr(9)
+				print "   " no-newline
+				string tf-line deleting 1 to 1
+			end-while
+			print tf-line 
+		end-select
+	endif
+	report finished
+end-procedure
+
+
+//
+//  ---------  Test cases and ssetup code go here -------- 
+//
+
+menu testcases
+	window 
+	tree-menu
+detail
+	option "Sample Charts" @1,1
+		do test-chart
+end-menu
+
+screen test-chart
+local 
+	lf-ole-id-1							type ole-interface
+	lf-ole-id-2							type ole-interface
+	lf-ole-id-3							type ole-interface
+	lf-ole-id-4							type ole-interface
+	lf-ole-id-5							type ole-interface
+	lf-ole-id-6							type ole-interface
+	lf-ole-id-7							type ole-interface
+	lf-ole-id-8							type ole-interface
+	lf-chart-blob						type blob
+	lf-index							type number
+	lf-sales-value						type number
+	lf-index-displayed					type boolean
+	lf-time-displayed					type boolean
+	lf-stacked-bar						type boolean
+	lf-gauge							type boolean
+	lf-gauge-swapped					type boolean
+	lf-calc-max							type number
+	window
+	responsive
+	datagrid
+	select * from stock-master
+	allowed search
+detail
+//	message mode-name
+	screen-group // ---- dg ----------------------------
+		title "dg"  // The title is optional
+		width 6
+		accept stock-code  col 1
+			title "Code"
+			when screen-mode = search
+			show-value
+		display stk-description col 2
+			title "Description"
+	end-screen-group // ---- dg --------------------------------------
+	screen-group // ---- chart ----------------------------
+		title "Simplest Possible Chart"
+		width 6
+		if screenmode not in (next-scr prev-scr) 
+			// Build the chart
+			do clibvchart-initialise-chart
+			set lf-index = 0
+			select t1.sctd-year t1.sctd-period lf-sales-value = sum(t0.stk-trans-value)
+				from stock-movements as t0
+				inner join system-control-time-dimension as t1
+					on t1.sctd-type = spaces and t1.sctd-date = t0.stk-trans-date
+				where t0.stock-code = :stock-code
+					and t0.stk-trans-type = "SO"
+				group by 1,2
+				order by 1,2
+			detail
+				set lf-index += 1
+				do clibvchart-add-data-point parameters are "Sales" lf-index lf-sales-value 
+			end-select
+			do clibvchart-get-chart returning lf-chart-blob
+			if not lf-ole-id-1
+				set lf-ole-id-1 = ole-create-control("Pronto.Chart",0,0,12,50)
+			endif
+			if ole-put-property(lf-ole-id-1,'config',lf-chart-blob)
+			endif
+		do clibvchart-print-object parameters str-concat(stock-code " chart")
+	endif
+	end-screen-group // ---- chart --------------------------------------
+	screen-group // ---- chart ----------------------------
+		title "Simplest Possible Pie/Donut"
+		width 6
+		next row
+		if screenmode not in (next-scr prev-scr) 
+			if not lf-ole-id-2
+				set lf-ole-id-2 = ole-create-control("Pronto.Chart",0,0,12,50)
+			endif
+			// Build the chart
+			do clibvchart-initialise-chart
+			do clibvchart-set-chart-type parameters "pie"
+			set lf-index = 0
+			select t1.sctd-year t1.sctd-period lf-sales-value = sum(t0.stk-trans-value)
+				from stock-movements as t0
+				inner join system-control-time-dimension as t1
+					on t1.sctd-type = spaces and t1.sctd-date = t0.stk-trans-date
+				where t0.stock-code = :stock-code
+					and t0.stk-trans-type = "SO"
+				group by 1,2
+				order by 1,2
+			detail
+				set lf-index += 1
+				do clibvchart-add-data-point parameters are "Sales" lf-index lf-sales-value 
+				if lf-index > 6
+					break
+				endif
+			end-select
+			do clibvchart-get-chart returning lf-chart-blob
+			do clibvchart-print-object parameters str-concat(stock-code " pie chart")
+			if ole-put-property(lf-ole-id-2,'config',lf-chart-blob)
+			endif
+		endif
+	end-screen-group // ---- chart --------------------------------------
+	screen-group // ---- All Singing All Dancing ----------------------------
+		title "All Singing All Dancing"  // The title is optional
+		width 6
+		if screenmode not in (next-scr prev-scr) // and lf-current-chart-stock != stock-code
+			if not lf-ole-id-3
+				set lf-ole-id-3 = ole-create-control("Pronto.Chart",0,0,20,50)
+			endif
+			// Build the chart
+			do test-build-data-for-chart-3 
+				parameters stock-code today()
+				returning lf-chart-blob
+			do clibvchart-get-chart returning lf-chart-blob
+			do clibvchart-print-object parameters str-concat(stock-code " whopper chart")
+			if ole-put-property(lf-ole-id-3,'config',lf-chart-blob)
+			endif
+		endif
+	end-screen-group // ---- All Singing All Dancing --------------------------------------
+	screen-group // ---- indexed data ----------------------------
+		title "indexed data"  // The title is optional
+		width 6
+		if not lf-index-displayed
+			set lf-index-displayed = true
+			do clibvchart-initialise-chart
+			do clibvchart-add-data-point parameters are "Temperature" 1 (RANDOM_BETWEEN(1,10) * 10)
+			do clibvchart-set-category-value parameters are 1 "4"
+			do clibvchart-add-data-point parameters are "Temperature" 2 (RANDOM_BETWEEN(1,10) * 10)
+			do clibvchart-set-category-value parameters are 2 "8"
+			do clibvchart-add-data-point parameters are "Temperature" 3 (RANDOM_BETWEEN(1,10) * 10)
+			do clibvchart-set-category-value parameters are 3 "14"
+			do clibvchart-add-data-point parameters are "Temperature" 4 (RANDOM_BETWEEN(1,10) * 10)
+			do clibvchart-set-category-value parameters are 4 "35"
+			do clibvchart-set-axis-datatype parameters are "x" "indexed"
+			do clibvchart-set-chart-type parameters are "line"
+			do clibvchart-get-chart returning lf-chart-blob
+			do clibvchart-print-object parameters are "Indexed data"
+			if not lf-ole-id-4
+				set lf-ole-id-4 = ole-create-control("Pronto.Chart",0,0,12,50)
+			endif
+			if ole-put-property(lf-ole-id-4,'config',lf-chart-blob)
+			endif
+		endif
+	end-screen-group // ---- indexed data --------------------------------------
+	screen-group // ---- indexed data ----------------------------
+		title "timeseries data"  // The title is optional
+		width 6
+		if not lf-time-displayed
+			set lf-time-displayed = true
+			do clibvchart-initialise-chart
+			do clibvchart-add-data-point parameters are "Temperature" 1 (RANDOM_BETWEEN(1,10) * 10)
+			do clibvchart-set-category-value parameters are 1 "01-Jan-2022"
+			do clibvchart-add-data-point parameters are "Temperature" 2 (RANDOM_BETWEEN(1,10) * 10)
+			do clibvchart-set-category-value parameters are 2 "01-Feb-2022"
+			do clibvchart-add-data-point parameters are "Temperature" 3 (RANDOM_BETWEEN(1,10) * 10)
+			do clibvchart-set-category-value parameters are 3 "01-Jun-2022"
+			do clibvchart-add-data-point parameters are "Temperature" 4 (RANDOM_BETWEEN(1,10) * 10)
+			do clibvchart-set-category-value parameters are 4 "01-Dec-2022"
+//			do clibvchart-set-category-value parameters are 5 "01-Apl-2022" // invalid month name
+//			do clibvchart-set-category-value parameters are 6 "1-Apr-2022" // not 11 chars
+//			do clibvchart-set-category-value parameters are 7 "01-Apr-2z22" // invalid year 
+//			do clibvchart-set-category-value parameters are 8 "30-Feb-2022" // not a valid date
+//			do clibvchart-set-category-value parameters are 9 "34-apr-2022" // invalid day
+			do clibvchart-set-axis-datatype parameters are "x" "timeseries"
+			do clibvchart-set-chart-type parameters are "line"
+			do clibvchart-set-axis-tick-rotate parameters are "x" 75
+			do clibvchart-get-chart returning lf-chart-blob
+			do clibvchart-print-object parameters are "timeseries data"
+			if not lf-ole-id-5
+				set lf-ole-id-5 = ole-create-control("Pronto.Chart",0,0,12,50)
+			endif
+			if ole-put-property(lf-ole-id-5,'config',lf-chart-blob)
+			endif
+		endif
+	end-screen-group // ---- indexed data --------------------------------------
+	screen-group // ---- stacked bar ----------------------------
+		title "Stacked Bar"
+		width 6
+		if not lf-stacked-bar
+			set lf-stacked-bar = TRUE
+			do clibvchart-initialise-chart
+			do clibvchart-add-data-point parameters are "Cost" 1 10000
+			do clibvchart-add-data-point parameters are "Margin" 1 5000
+			do clibvchart-add-data-point parameters are "Cost" 2 5000
+			do clibvchart-add-data-point parameters are "Margin" 2 2000
+			do clibvchart-add-data-point parameters are "Cost" 3 4000
+			do clibvchart-add-data-point parameters are "Margin" 3 -1000
+			do clibvchart-set-series-group parameters are "Cost"
+			do clibvchart-set-series-group parameters are "Margin"
+			do clibvchart-get-chart returning lf-chart-blob
+			do clibvchart-print-object parameters are "Stacked Bar"
+			if not lf-ole-id-6
+				set lf-ole-id-6 = ole-create-control("Pronto.Chart",0,0,12,50)
+			endif
+			if ole-put-property(lf-ole-id-6,'config',lf-chart-blob)
+			endif
+		endif
+	end-screen-group // ---- stacked bar --------------------------------------
+	screen-group // ---- gauge ----------------------------
+		title "gauge"  // The title is optional
+		width 6
+		if not lf-gauge
+			set lf-gauge = TRUE
+			do clibvchart-initialise-chart
+			do clibvchart-add-data-point parameters are "Cost" 1 70
+			do clibvchart-add-data-point parameters are "Margin" 1 50
+			do clibvchart-add-data-point parameters are "Cost" 2 25
+			do clibvchart-add-data-point parameters are "Margin" 2 30
+			do clibvchart-add-data-point parameters are "Cost" 2 5000
+			do clibvchart-add-data-point parameters are "Margin" 2 2000
+			do clibvchart-add-data-point parameters are "Cost" 3 4000
+			do clibvchart-add-data-point parameters are "Margin" 3 -1000
+			do clibvchart-set-chart-type parameters are "gauge"
+			do clibvchart-set-gauge-percentage parameters are 15000
+			do clibvchart-get-chart returning lf-chart-blob
+			do clibvchart-print-object parameters are "gauge"
+			if not lf-ole-id-7
+				set lf-ole-id-7 = ole-create-control("Pronto.Chart",0,0,12,50)
+			endif
+			if ole-put-property(lf-ole-id-7,'config',lf-chart-blob)
+			endif
+		endif
+	end-screen-group // ---- gauge --------------------------------------
+	screen-group // ---- gauge ----------------------------
+		title "gauge swapped"  // The title is optional
+		width 6
+		if not lf-gauge-swapped
+			set lf-gauge-swapped = TRUE
+			do clibvchart-initialise-chart
+			do clibvchart-add-data-point parameters are "W01" 1 5000
+			do clibvchart-add-data-point parameters are "W02" 1 2000
+			do clibvchart-add-data-point parameters are "W03" 1 3000
+			do clibvchart-set-chart-type parameters are "gauge"
+			do clibvchart-swap-series-for-x-axis
+			do clibvchart-set-gauge-percentage parameters are 0 returning lf-calc-max
+			do clibvchart-set-title parameters concat("As a percentage of " str(lf-calc-max))
+			do clibvchart-get-chart returning lf-chart-blob
+			do clibvchart-print-object parameters are "gauge swapped"
+			if not lf-ole-id-8
+				set lf-ole-id-8 = ole-create-control("Pronto.Chart",0,0,12,50)
+			endif
+			if ole-put-property(lf-ole-id-8,'config',lf-chart-blob)
+			endif
+		endif
+	end-screen-group // ---- gauge --------------------------------------
+end-screen
+
+procedure test-build-data-for-chart-3
+parameters
+	lp-stock-code						like stock-code
+	lp-last-day							type date
+returning
+	lr-chart							type blob
+local
+	lf-sales-val						type number 
+	lf-sales-qty						type number 
+	lf-first-dates						type date occurs 12 // last date of period
+	lf-last-dates						type date occurs 12 // last date of period
+	lf-budget-qty						type number
+	i									type number
+	//
+	do clibvchart-initialise-chart
+	//
+	// go back 12 months
+	//
+	set lf-first-dates[1] = add-months(julian(1,month(lp-last-day),year(lp-last-day)), -12, TRUE)
+	for i = 2 to 12
+		set lf-first-dates[i] = add-months(lf-first-dates[i - 1],1,TRUE)
+	end-for
+	// now make an array of end dates just to make the rest of the code simple
+	for i = 1 to 12
+		set lf-last-dates[i] = add-months(lf-first-dates[i],1,TRUE) - 1
+	endfor
+	// Chart level settings
+	do clibvchart-set-title parameters "Sales vs Budget"
+	do clibvchart-set-subtitle parameters str-concat(stock-code " - " stk-description)
+	do clibvchart-set-show-legend parameters TRUE
+	do clibvchart-set-show-data-points parameters TRUE
+	do clibvchart-set-show-data-point-labels parameters TRUE
+	//
+	// we now have two arrays of the first and lasst dates of each month.
+	//
+	for i = 1 to 12
+		select lf-budget-qty = sum(bv-quantity)
+			from budget-values
+			where bd-id = 1
+			and bv-key = :lp-stock-code
+			and bv-date >= :lf-first-dates[i]
+			and bv-date <= :lf-last-dates[i]
+		end-select
+		do clibvchart-add-data-point parameters "Budget" i lf-budget-qty 
+	end-for
+	//
+	// Now get the actuals
+	//
+	for i = 1 to occurence(lf-first-dates)
+		select lf-sales-val = sum(stk-trans-value)
+			lf-sales-qty = 0 - sum(stk-trans-qty)
+			from stock-movements
+			where stk-trans-type = 'SO'
+			and stock-code = :lp-stock-code
+			and stk-trans-date > :lf-first-dates[i]
+			and stk-trans-date < :lf-last-dates[i]
+		end-select
+		do clibvchart-add-data-point parameters are "Sales Val" i lf-sales-val
+		do clibvchart-add-data-point parameters are "Sales Qty" i lf-sales-qty 
+	end-for
+	do clibvchart-set-series-chart-type parameters are "Sales Val" "line"
+	do clibvchart-set-series-axis parameters are "Sales Val" "y2"
+	do clibvchart-set-axis-label parameters are "y" "Units"
+	do clibvchart-set-axis-label parameters are "x" "Period"
+	//
+	// make the sales qty series a spline
+	//
+	do clibvchart-set-series-chart-type parameters are "Budget" "spline"
+	do clibvchart-set-series-chart-type parameters are "Sales Qty" "bar"
+	//
+	// create formatted labels
+	//
+	for i = 1 to occurence(lf-first-dates)
+		do clibvchart-set-category-value parameter are i format-picture(lf-first-dates[i],"mmm-yy")
+	end-for
+	//
+	// Zooming
+	//
+	do clibvchart-set-allow-zoom parameters TRUE
+	// point size
+	do clibvchart-set-data-point-radius parameters 5
+	// hide axes
+	do clibvchart-set-axis-show parameters are "y" True
+//	do clibvchart-set-axis-show parameters are "x" False
+	do clibvchart-set-axis-tick-rotate parameters are "x" 75
+//	do clibvchart-set-axis-tick-count parameters are "x" 8
+	do clibvchart-set-axis-tick-culling parameters are "x" false
+	do clibvchart-set-axis-min-non-zero parameters are "y"
+	do clibvchart-set-axis-max parameters are "y2" 25000
+	do clibvchart-set-series-colour parameters are "Sales Val" RGB(156,33,123)
+	do clibvchart-set-format-notation parameter are "y2axis" "compact"
+	do clibvchart-set-format-notation parameter are "y2tooltip" "compact"
+	do clibvchart-set-format-grouping parameter are "ytooltip" true
+	do clibvchart-set-format-style parameter are "ytooltip" "currency"
+	do clibvchart-set-format-sign parameter are "ytooltip", "always"
+	do clibvchart-set-format-min-dp parameter are "datalabel" 2
+	do clibvchart-set-show-tooltips parameter are true
+	do clibvchart-set-default-category-colour parameters are RGB(0,255,0)
+	do clibvchart-set-category-colour parameters are 5, RGB(255,0,0)
+	// rotate
+	do clibvchart-set-rotated parameters are TRUE  // see messages - cannot rotate zoomed chart
+	//
+	// get the chart
+	//
+	do clibvchart-get-chart returning lr-chart
+end-procedure
+

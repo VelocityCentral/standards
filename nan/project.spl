@@ -1,0 +1,132 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : 
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2019
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: nan/project.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 01Jun19  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+
+#define FIRSTOFMONTH(A)  A - day(A) + 1
+ 
+field
+	ws-function-title						type string
+	/*
+	All dates are recalculated from a reference date. 
+	the pgm determines the number of days between today and the reference date
+	and then adds that number to every date if finds.
+	
+	We can't really determine that date programatically so we make an educated guess
+	and prompt the user.
+	*/
+
+procedure main
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+//	do i8secabt-check-abort
+//		parameters are sys-consolidation-division login-id() "ZUSR" "R004"
+//		returning ws-function-title 
+	do i8proglog-write-log
+	do get-reference-date entry once
+	spl "rms/m8resmaint" parameters "-bulkcal"
+end-procedure
+
+screen get-reference-date
+local
+	lf-min-date					type date
+	lf-wrt-date					type date
+	window
+	form-entry
+	title "Setup project"
+before
+	select lf-min-date = min(jcm-start-date)
+		from job-cost-master
+		where job-code like 'PJ%'
+	end-select
+	set lf-wrt-date = today() - day(today) + 1 // first of month
+detail
+	accept  lf-min-date @2,30
+		title "Reference Date"
+		default lf-min-date
+		help "This is the minimum project start date for all projects that start with PJ"
+	accept lf-wrt-date @3,30
+		title "Relative to"
+		default lf-wrt-date
+		help "With reference to this date"
+	display lf-wrt-date - lf-min-date @4,30 pic z(7)9
+		title "Difference in days"
+	display "Continuing will add this number of days to most setup dates" @5,10 
+		foreground prompts
+	display "for projects that start with 'PJ'" @6,10
+		foreground prompts
+	display "Note that some will be set to the first of the month of the ensuing date" @7,10
+		foreground prompts
+	confirm
+		prompt "Ok to continue?"
+	confirmed
+		do doit parameters are lf-wrt-date - lf-min-date
+		message "completed"
+	end-confirm
+end-screen
+
+procedure doit
+parameters
+	lf-offset-days								type number
+	select *
+		from job-cost-master
+		where job-code like 'PJ%'
+		for update
+	detail
+		set jcm-budget-date = FIRSTOFMONTH(jcm-budget-date + lf-offset-days)
+		set jcm-approval-date = FIRSTOFMONTH(jcm-approval-date + lf-offset-days)
+		set jcm-start-date = FIRSTOFMONTH(jcm-start-date + lf-offset-days)
+		set jcm-finish-date += lf-offset-days
+		set jcm-date-last-change = today()
+		update job-cost-master
+	end-select
+	select *
+		from job-claim-schedule-control
+		where job-code like 'PJ%'
+		for update
+	detail
+		set jcsc-practical-complete-date += lf-offset-days
+		update job-claim-schedule-control
+	end-select
+	select *
+		from job-cost-activities
+		where job-code like 'PJ%'
+		for update
+	detail
+		if job-actual-start != zero
+			set job-actual-start += lf-offset-days
+		endif
+		if job-actual-finish != zero
+			set job-actual-finish += lf-offset-days
+		endif
+	end-select
+	select *
+		from job-cost-task-resource
+		where job-code like 'PJ%'
+		for update
+	detail
+		set job-est-start-date-time = 
+			date-time(
+				date-from-date-time(job-est-start-date-time,False) + lf-offset-days,
+				time-from-date-time(job-est-start-date-time,False),
+				FALSE)
+		update job-cost-task-resource
+	end-select
+end-procedure

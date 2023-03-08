@@ -1,0 +1,227 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : This is a clib designed to work out the cost and charge rate 
+//  for a timesheet line.  
+//  Initially written only for job costing but could be extended to do service
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2020
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: clib/clibvtime.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 01May20  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+/*
+
+	This documentation is in RST format.  To view this as a nice pdf goto
+	https://overbits.herokuapp.com/rsteditor/ or rst.ninjs.org and paste this content.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|           |           |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+
+	Alternatively
+
+	 =========== =========== ======================================================== 
+	  Direction   Data Type   Description                                             
+	 =========== =========== ======================================================== 
+	 =========== =========== ======================================================== 
+
+=========
+clibvtime
+=========
+
+Routine to determine cost and charge rate on a timesheet line.
+
+Used in Job Costing and service
+
+clibvtime-get-rates 
+~~~~~~~~~~~~~~~~~~~
+
+Returns the cost and charge rates for a timesheet line.
+
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|    In     |Record     |Complete payroll-timesheet-details record               |
+	+-----------+-----------+--------------------------------------------------------+
+	|    Out    |String 128 |Any error message                                       |
+	+-----------+-----------+--------------------------------------------------------+
+	|    Out    |number     |Charge out rate                                         |
+	+-----------+-----------+--------------------------------------------------------+
+	|    Out    |Number     |Cost Rate                                               |
+	+-----------+-----------+--------------------------------------------------------+
+
+public-set-work-rates 
+~~~~~~~~~~~~~~~~~~~~~
+
+Public routine to allow the override of the cost and charge rates.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |Record     |Complete Job cost master                                |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |Record     |Complete service call master                            |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |Record     |Complete payroll-timesheet-details                      |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |Record     |Complete payroll employee details                       |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |String 10  |Engineer code                                           |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |String 1   |Timesheet Source                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |Number     |Chargeout Rate                                          |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |Number     |Cost Rate                                               |
+	+-----------+-----------+--------------------------------------------------------+
+*/
+
+ 
+#include "../include/i8proglogparam.spl"
+#include "../include/i8validgl.spl"
+#define I85TSDEF_NEED_TIMESHEET_CONTROL
+#define I85TSDEF_NEED_TIMESHEET_CONTROL_FIELDS
+#define I85TSDEF_NEED_GET_OVERHEAD_RECOVERY
+#define I85TSDEF_GET_CHGOUT_CALENDAR_WITH_HIERARCHY
+#define I85TSDEF_NEED_SET_RATES
+#define I85TSDEF_NEED_TS_STATUS_DESC
+#include "../include/i85tsdef.spl"
+ 
+procedure library-init
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8proglogparam-write-log parameters are "clibvtime"
+end-procedure
+
+procedure clibvtime-get-rates export
+parameters
+	payroll-timesheet-details.* 		global
+returning
+	lr-error-message					pic x(128) type string
+	lr-charge-out-rate					like charge-out-rate
+	lr-employee-rate					like employee-rate
+local
+	lf-rate-code-ok						type boolean
+	lf-ok								type boolean
+	lf-rounding-time-blk				type numeric	occurs 2
+	i 									type number	
+	//
+	set lr-error-message = spaces
+	do i85tsdef-get-timesheet-control
+		returning lf-ok
+	if not lf-ok
+		message "No Control Record"
+		exit 1
+	endif
+	// asset-master					// For Rental assets
+	if ts-type = "H"
+		get asset-master
+			on index asset-no
+			key is pay-allow[10]
+		on error ENOREC
+			set lr-error-message =  "Failed to locate asset"
+			exit 1
+		endon
+	else
+		get payroll-employee-master
+			on index employee-no
+			key is employee-no
+		on error ENOREC
+			set lr-error-message =  "Failed to get employee master"
+			exit 1
+		endon
+		get payroll-employee-details
+			on index employee-no
+			key is employee-no
+		on error ENOREC
+			set lr-error-message =  "Failed to get employee details"
+			exit 1
+		endon
+		get payroll-number-master
+			key is em-payroll-number
+		on error
+			set lr-error-message = "Failed to get payroll number master for employee"
+			exit 1
+		endon
+	endif
+	// job-cost-master				// Particular Project
+	get job-cost-master
+		on index job-code
+		key is job-code
+	on error ENOREC
+		set lr-error-message =  str-concat("Failed to get job (" job-code ")")
+		exit 1
+	endon
+	// job-cost-centre-budget-actual// Specific Cat
+	get job-cost-centre-budget-actual
+		on index job-code job-cost-centre
+		key is job-code job-cost-centre
+	on error ENOREC
+		set lr-error-message =  "Failed to get job cost centre recrd"
+		exit 1
+	endon
+	do i85tsdef-set-rates-per-hr-based-on-t-control
+		parameter
+			I85TSDEF_TSHEET_FROM_PROJECT_COSTING // ws-timesheet-source			//Timesheet Source / Processing Mode
+			work-category				//Work Rate
+			FALSE						//Messages required
+			employee-no					//Engineer No
+			I85TSDEF_SET_BOTH_RATES		//What Rate to Set
+			zero						//Cost Rate
+		returning
+			lf-rate-code-ok				//Rate Code OK or not
+			lf-rounding-time-blk		//Rounding time block 1=Normal 2=Afterhours
+	if not lf-rate-code-ok
+		set lr-error-message = "Failed to get valid rates"
+		exit 1
+	endif
+	do public-set-work-rates
+		parameter
+			job-cost-master.*
+			service-call-master.*
+			payroll-timesheet-details.*
+			payroll-employee-details.*
+			employee-no // ws-engineer-no
+			I85TSDEF_TSHEET_FROM_PROJECT_COSTING //ws-timesheet-source
+		returning
+			employee-rate
+			charge-out-rate
+	for i = 1 to occurence(charge-out-rate)
+		set lr-charge-out-rate[i] = charge-out-rate[i]
+	end-for
+	set lr-employee-rate = employee-rate
+//	acknowledge employee-rate
+//	acknowledge charge-out-rate[1]
+end-procedure
+
+procedure public-set-work-rates export
+parameter
+		lp-jcm.*							like job-cost-master.*
+		lp-scm.*							like service-call-master.*
+		lp-pet.*							like payroll-timesheet-details.*
+		lp-ped.*							like payroll-employee-details.*
+		lp-engineer							like engineer-no
+		lp-timesheet-source					like ts-status
+returning
+		lr-employee-rate					like employee-rate
+		lr-charge-out-rate					like charge-out-rate
+local field
+		lf-i								pic 9
+	//
+	set lr-employee-rate = lp-pet.employee-rate
+	for lf-i = 1 to occurence(charge-out-rate)
+		set lr-charge-out-rate[lf-i] = lp-pet.charge-out-rate[lf-i]
+	endfor
+endprocedure//public-set-work-rates ------------------------------------------

@@ -1,0 +1,1274 @@
+// Program : A selectable dictionary listing program
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2012
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: lbin/vgldict.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 30Aug12  rjb         written 
+// 						Note the bizarre use of printing a single space
+// 						at the beginning of a line to get a skip.  I found
+// 						that if I used the skip statement with a fullxml
+// 						report then I got weird spacing after triggers on the
+// 						first page.
+////////////////////////////////////////////////////////////////////////////////
+#include "../include/bmsdef.spl"
+link "clib/clibdict"
+link 'clib/clibvfile'
+
+
+mode md-mark
+	prompt "Mark"
+	help "Toggle Mark of table on and off"
+	process correct
+
+mode md-existing
+	prompt "Existing"
+	help "Toggle between display files that only exist in the current directory or all files"
+	when database-type() = "INFORMIX"
+
+mode md-print-dictionary
+	prompt "Print"
+	help "Print Dictionary for selected files"
+
+mode md-deselect
+	prompt "Dese&lect"
+	help "Deslect all tables"
+
+mode md-fields
+	prompt "Fiel&ds"
+	help "Show a datagrid of the fields on this table"
+
+mode md-save
+	prompt "Save"
+	help "Save this selection to a file for later access - the load defaults to cus - so put it there"
+mode md-load
+	prompt "L&oad"
+	help "Load a previously selected list"
+
+object workfile
+	type is memory
+	record is
+		wf-selected					type boolean
+		wf-dict						pic x // B)ms C)us D)ist
+		wf-obj-name					like obj-name
+		wf-obj-doc					like obj-doc
+		wf-obj-file					like obj-file
+		wf-exists					type boolean
+		wf-nrows					pic 9(9)
+	end-record
+	key is wf-obj-name
+
+object pageindex
+	type is memory
+	record is
+		pi-obj-name					like obj-name
+		pi-obj-doc					like obj-doc
+		pi-page						type number
+	end-record
+	key is pi-obj-name
+
+object informix-systables
+	file is "informix.systables"
+	type is indexed
+	record is
+		isys-tabname			pic x(128)	type string	db-column-name "tabname"
+		isys-owner				pic x(128)  type string db-column-name "owner"
+		isys-nrows				pic s9(4)	db-column-name "nrows"
+	end
+	key is isys-tabname isys-owner
+	no-rowid
+
+object savelist
+	type is external
+	record is
+		sl-dict						like wf-dict
+		sl-obj-name					like obj-name
+	end-record
+
+object rst-text
+	type is text
+	record is
+		rst-text					pic x(1024) type string
+	end-record
+
+object custom-triggers like dict-trigger
+
+field
+	ws-bms-file							pic x(512) type string
+	ws-cus-file							pic x(512) type string
+	ws-dist-file						pic x(512) type string
+	//
+	ws-print-index						type boolean
+	ws-print-indexes					type boolean	
+	ws-print-triggers					type boolean
+	ws-print-page-per-table				type boolean
+	ws-print-documentation				type boolean
+	ws-print-zero-rows					type boolean
+	ws-create-rst-file					type boolean
+	ws-current-save-filename			pic x(1024) type string
+	//
+	//
+	ws-title-type						pic x // to control pageheadings
+
+
+#define BMS_DICT_VER 7100
+
+procedure main
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do set-dict-file-names
+	do select-tables
+end-procedure
+
+procedure set-dict-file-names
+	if get-env("PRODICT") <> spaces
+		do clibdict-get-dict-name-with-suffix
+			parameters are get-env("PRODICT")
+			returning ws-bms-file
+	endif
+	if get-env("PROUSRDICT") <> spaces
+		do clibdict-get-dict-name-with-suffix
+			parameters are get-env("PROUSRDICT")
+			returning ws-cus-file
+		open custom-triggers
+			file is concat(ws-cus-file,"t")
+		on error
+		endon
+	endif
+	if get-env("PRODISTDICT") <> spaces
+		do clibdict-get-dict-name-with-suffix
+			parameters are get-env("PRODISTDICT")
+			returning ws-dist-file
+	endif
+end-procedure
+
+procedure build-wf
+parameter
+	lp-file								pic x(1024) type string
+	lp-dict-type						pic x
+returning
+	lr-count							type number
+local
+	lf-file-name						pic x(512) type string
+	lf-systable-open					type boolean
+//
+	set lf-file-name = lp-file
+	string lf-file-name appending "o"
+	if database-type() = "INFORMIX"
+		open informix-systables
+		on error
+			set lf-systable-open = false
+		else
+			set lf-systable-open = true
+		endon
+	endif
+	open dict-object 
+		read-only
+		file is lf-file-name
+	on error
+		acknowledge error-description(file-status)  
+		acknowledge lf-file-name
+		acknowledge file-name(dict-object)
+		exit
+	endon
+	select * from dict-object
+		where not pattern(obj-name,"^\~?*")
+		local-sql
+	detail
+		set wf-selected = FALSE
+		set wf-dict = lp-dict-type
+		set wf-obj-name = obj-name
+		set wf-obj-doc = obj-doc
+		set wf-obj-file = str-concat(obj-file,obj-version)
+		while pattern(wf-obj-file,"/")
+			string wf-obj-file deleting 1 to pattern(wf-obj-file,"/")
+		end-while
+		set wf-obj-file = lowercase(wf-obj-file)
+		set wf-exists = false
+		set wf-nrows = 0
+		if database-type() = "INFORMIX"
+			get informix-systables
+				on index isys-tabname,isys-owner
+				key is wf-obj-file 'pronto'
+			on error
+				set wf-exists = false
+			else
+				set wf-exists = true
+				set wf-nrows = isys-nrows
+			end-on
+		endif
+		set lr-count += 1
+		insert workfile
+		on error
+		endon
+	end-select
+end-procedure
+
+
+screen select-tables
+local
+	lf-existing-only					type boolean
+	lf-count							type number
+	lf-returned-count					type number
+	lf-file								pic x(1024) type string
+	lf-file-spec						type string pic x(100)
+	lf-dir-spec 						pic x(1024) type string
+	allowed search md-mark md-existing md-print-dictionary md-deselect md-fields md-save md-load
+	select * from workfile
+		where (lf-existing-only and wf-exists)
+		or not lf-existing-only
+	datagrid occurs 22
+	window 
+	title "Select Tables to Print Dictionary "
+before
+	open workfile temporary
+	set lf-existing-only = FALSE
+	set lf-count = 0
+	if ws-bms-file <> spaces
+		do build-wf parameters are ws-bms-file "B"
+			returning lf-returned-count
+		set lf-count += lf-returned-count
+	endif
+	if ws-cus-file <> spaces
+		do build-wf parameters are ws-cus-file "C"
+			returning lf-returned-count
+		set lf-count += lf-returned-count
+	endif
+	if ws-dist-file <> spaces
+		do build-wf parameters are ws-dist-file "D"
+			returning lf-returned-count
+		set lf-count += lf-returned-count
+	endif
+	if lf-count = 0
+		acknowledge "No tables were found"
+	endif
+detail
+	if screenmode = md-mark
+		if wf-selected
+			set wf-selected = false
+		else
+			set wf-selected = true
+		endif
+	endif
+	if screenmode = md-existing
+		if lf-existing-only
+			set lf-existing-only = false
+		else
+			set lf-existing-only = true
+		endif
+		refresh review
+	endif
+	if screenmode = md-deselect
+		select * from workfile
+			for update
+		detail
+			set wf-selected = FALSe
+			update workfile
+		end-select
+		refresh review
+	endif
+	if screenmode = md-print-dictionary
+		do print-options entry once
+	endif
+	if screenmode = md-fields
+		do show-fields parameters are wf-dict wf-obj-name
+	endif
+	if screenmode = md-save
+		if ws-current-save-filename = spaces
+			set ws-current-save-filename =  str-concat(get-env("CUS")  "/savelist.dict")
+		endif
+		do clibvfile-get-validated-filename 
+			parameters "NOCHECK" "SERVER" ws-current-save-filename
+			returning lf-file								
+		if lf-file = spaces
+			continue
+		endif
+		open savelist 
+			file is lf-file
+			create truncate permanent
+		select *
+			from  workfile
+			where wf-selected
+		detail
+			initialise savelist
+			set sl-dict = wf-dict
+			set sl-obj-name = wf-obj-name
+			insert savelist
+		end-select
+	endif
+	if screenmode = md-load
+		do clibvfile-chooser 
+		parameters are spaces get-env("CUS")
+		returning lf-file-spec	lf-dir-spec 
+		open savelist
+			file is str-concat(lf-dir-spec "/" lf-file-spec)
+		on error
+			message-box param-text("<<P1>><<BR>><<p2>>"
+				,"Cannot open file"
+				,filename(savelist))
+				title is "File open failure"
+				message-buttons  MSG_BOX_CANCEL
+				icon MSG_BOX_STOP
+		else
+			set ws-current-save-filename = file-name(savelist)
+			select * from savelist
+			detail
+				select * from workfile
+					where wf-obj-name = :sl-obj-name
+					for update
+				detail
+					if wf-dict = sl-dict
+						set wf-selected = TRUE
+						update workfile
+					endif
+				endselect
+			end-select
+			refresh data
+		endon
+	endif
+	display wf-dict @1,2
+		title "Dict"
+		colour is if-then-else(wf-selected,red,black)
+	accept wf-obj-name @1,3
+		title "Object"
+		when screenmode = search
+		showvalue
+		colour is if-then-else(wf-selected,red,black)
+	display wf-obj-doc @1,4
+		title "Description"
+		colour is if-then-else(wf-selected,red,black)
+	display wf-obj-file @1,5
+		title "File"
+		colour is if-then-else(wf-selected,red,black)
+	display wf-exists @1,6
+		title "Exists"
+		colour is if-then-else(wf-selected,red,black)
+	display wf-nrows @1,7
+		title "Rows"
+		colour is if-then-else(wf-selected,red,black)
+	if lf-existing-only
+		display "Existing Tables only" @23,75 right-coord background prompts
+			colour is red
+	else
+		display "All Tables" @23,75 right-coord background prompts
+			colour is black
+	endif
+	confirm auto
+	confirmed
+		if screenmode = md-mark
+			if wf-selected
+				get workfile next
+				on error endon
+			endif
+		endif
+	end-confirm
+end-screen
+
+procedure new-page
+	print "Dictionary Listing" in col 30
+		"Page " in col 90
+		page-no in col 95 pic z(4)
+		today() in col 1
+		tod() in col 15
+	skip
+	if ws-title-type = spaces
+		Print obj-name in col 1
+			obj-doc in col 30
+		skip
+	endif
+end-procedure
+
+procedure print-dictionary
+local
+	lf-current-dict						like wf-dict
+	lf-first-time						type boolean
+	report "Dictionary Listing"
+		no-message
+		full-xml
+		heading new-page
+		form "vgldict"
+	open pageindex
+		temporary
+	if ws-create-rst-file
+		open rst-text create truncate permanent
+			file is "/tmp/dictlist.rst"
+		do rst-header
+	endif
+	set lf-first-time = true
+	set ws-title-type = spaces
+	select * from workfile
+		where wf-selected 
+		and (ws-print-zero-rows OR
+			(wf-nrows <> 0 and not ws-print-zero-rows))
+	detail
+		if lf-current-dict <> wf-dict
+			do open-dictionary parameters are wf-dict
+			set lf-current-dict = wf-dict
+		endif
+		get dict-object
+			on index obj-name 
+			key is wf-obj-name
+		on error
+		else
+			if lf-first-time or ws-print-page-per-table
+				then page
+			else
+				skip
+			endif
+			set lf-first-time = false
+			report section "table_wrapper" 
+			set pi-obj-name = obj-name
+			set pi-obj-doc = obj-doc
+			set pi-page = pageno
+			insert pageindex
+			do print-one-table 
+			if ws-create-rst-file
+				do rst-table 
+			endif
+			report section finished // table wrapper
+		endon
+	end-select
+	if ws-print-index
+		report section  "document_index_wrapper"
+		do print-index
+		report section finished
+	endif
+	report finished
+	close pageindex
+	message "Dictionary Print Complete"
+end-procedure
+
+Procedure print-index
+	select * from pageindex
+	before
+		set ws-title-type = "I"
+		page
+		print "Name" in col 1 underline
+			"Desc" in col 35 underline
+			"Page" in col 80 underline
+			section "Index_header"
+	detail
+		report section "index_item"
+		print pi-obj-name in col 1 tag "pi_obj_name"
+			pi-obj-doc in col 35 tag "pi_obj_doc"
+			pi-page in col 80 pic z(5) tag "pi_page"
+			section "index_detail"
+		report section finished
+	end-select
+end-procedure
+
+screen print-options
+	window @1,1 to @9,50
+		window-position 5
+	title "Dictionary Print Options"
+	form-entry
+	no-ok-cancel
+detail
+	check-box ws-print-indexes
+		@2,30
+		values true false
+		title "Print Indexes"
+		right-coordinate
+		default is true
+	end-check-box 
+	check-box ws-print-triggers
+		@3,30
+		values true false
+		title "Print Triggers"
+		right-coordinate
+		default is true
+	end-check-box 
+	check-box ws-print-documentation	
+		@4,30
+		values true false
+		title "Print Documentation"
+		right-coordinate
+		default is false
+	end-check-box 
+	check-box ws-print-page-per-table
+		@5,30
+		values true false
+		title "Start Each Table on new Page"
+		right-coordinate
+		default is false
+	end-check-box 
+	check-box ws-print-index
+		@6,30
+		values true false
+		title "Print Index at end of report"
+		right-coordinate
+		default is  FALSE
+	end-check-box 
+	check-box ws-print-zero-rows
+		@7,30
+		values true false
+		title "Print tables with zero rows"
+		right-coordinate
+		default is  TRUE
+	end-check-box 
+	check-box ws-create-rst-file
+		@8,30
+		values True False
+		title "Create Rst file in temp"
+		default is TRUE
+		right-coordinate
+		help "Create a /tmp/dictlist.rst"
+	end-check-box 
+	confirm auto
+	confirmed
+		do print-dictionary
+	end-confirm
+end-screen
+
+procedure print-one-table
+local
+	i									type number
+	lf-trigger-before-flag				pic x(3)
+	lf-trigger-after-flag				pic x(3)
+	lf-pic-string						pic x(20) type string
+	lf-data-type						pic x(10) type string
+	lf-signed							type boolean
+	lf-integer-places					type number
+	lf-decimal-places					type number
+	report section "table_heading" 
+	need 3
+	print "OBJECT NAME:" in col 1 BOLD
+		obj-name in col 20
+			tag is "table_name"
+		obj-doc in col 55
+			tag is "table_description"
+	print
+		"Table Name:" in col 1 BOLD
+		wf-obj-file in col 20
+			tag is "table_file_name"
+		"No of Rows:" in col 55
+		wf-nrows in col 60 
+			tag is "table_no_rows"
+	print 
+		"Dictionary:" in col 1 bold
+		if-then-else(wf-dict = "B","BMS",if-then-else(wf-dict = "C", "CUS", "DISTRIBUTOR")) in col 20
+			tag "Dictionary"
+		"Current Directory:" in col 55 bold
+		dir() in col 70
+		tag is "current_dir"
+	skip
+	report  section finished
+//
+// Indexes
+//
+	if ws-print-indexes
+		report section "index_wrapper" 
+		select * from dict-keys
+			where obj-id = :obj-id
+#if BMS_DICT_VER >= 710
+			local-sql
+#endif
+		before
+			print "Index" in col 5 underline
+				"Unique" in col 10 underline
+				"Fields" in col 40 underline
+				"Descending" in col 70 underline
+				section "index_heading"
+		detail
+			need num-fields 
+			for i = 1 to num-fields
+				get dict-field
+					on index fld-id 
+					key is k-fld-id[i]
+				on error
+				else
+					print 
+						if-then-else(i = 1,index-no,0) pic z in col 7					
+							tag is "index_no"
+						if-then-else(i = 1,if-then-else(key-flags = 1,"NO","YES"),"   ")  in col 12
+							tag is "index_unique"
+						fld-name in col 40 
+							tag is "index_fld_name"
+						k-desc-flag[i] in col 70
+							tag is "index_desc"
+						section "index_line"
+				endon
+			end-for
+		end-select
+		print " " in col 1 section "skip"
+		report section finished
+	endif
+	//
+	if ws-print-triggers
+		report section "trigger_wrapper"
+		select * from dict-trigger
+			where obj-name = :wf-obj-name
+			order by obj-name trig-seq
+#if BMS_DICT_VER >= 710
+			local-sql
+#endif
+		before
+			report section "trigger_heading"
+			print "Seq" underline in col 5
+				"Before" underline in col 10
+				"After" underline in col 20
+				"Procedure" underline in col 40
+				"Library" underline in col 70
+			report section finished
+		detail
+			set lf-trigger-before-flag = spaces
+			set lf-trigger-after-flag = spaces
+			if trig-before-insert = "Y" 
+				string lf-trigger-before-flag appending "I"
+			endif
+			if trig-before-update = "Y" 
+				string lf-trigger-before-flag appending "U"
+			endif
+			if trig-before-delete = "Y" 
+				string lf-trigger-before-flag appending "D"
+			endif
+			if trig-after-insert = "Y" 
+				string lf-trigger-after-flag appending "I"
+			endif
+			if trig-after-update = "Y" 
+				string lf-trigger-after-flag appending "U"
+			endif
+			if trig-after-delete = "Y" 
+				string lf-trigger-after-flag appending "D"
+			endif
+			report section "trigger"
+			print trig-seq in col 1 tag is "Seq"
+				lf-trigger-before-flag in col 10 tag is "trigger_before_flag"
+				lf-trigger-after-flag in col 10 tag is "trigger_after_flag"
+				trig-procedure in col 40 tag is "trigger_procedure"
+				trig-library in col 70 tag is "trigger_library"
+			report section finished
+		end-select
+		select * from custom-triggers
+			where obj-name = :wf-obj-name
+			order by obj-name trig-seq
+#if BMS_DICT_VER >= 710
+			local-sql
+#endif
+		before
+			print "Custom Triggers" underline in col 5 
+				section "custom_triggers"
+		detail
+			set lf-trigger-before-flag = spaces
+			set lf-trigger-after-flag = spaces
+			if trig-before-insert = "Y" 
+				string lf-trigger-before-flag appending "I"
+			endif
+			if trig-before-update = "Y" 
+				string lf-trigger-before-flag appending "U"
+			endif
+			if trig-before-delete = "Y" 
+				string lf-trigger-before-flag appending "D"
+			endif
+			if trig-after-insert = "Y" 
+				string lf-trigger-after-flag appending "I"
+			endif
+			if trig-after-update = "Y" 
+				string lf-trigger-after-flag appending "U"
+			endif
+			if trig-after-delete = "Y" 
+				string lf-trigger-after-flag appending "D"
+			endif
+			report section "trigger"
+			print trig-seq in col 1 tag is "Seq"
+				lf-trigger-before-flag in col 10 tag is "trigger_before_flag"
+				lf-trigger-after-flag in col 10 tag is "trigger_after_flag"
+				trig-procedure in col 40 tag is "trigger_procedure"
+				trig-library in col 70 tag is "trigger_library"
+			report section finished
+		end-select
+		print " " in col 1 section "skip"
+		report section finished // trigger warpper
+	endif
+	//
+	// fields
+	//
+	report section "Fields_Wrapper"
+	print "Field" in col 1 underline
+		"DB Col" in col 25 underline
+		"Description" in col 50 underline
+		"Data Type" in col 80 underline
+		"Pic" in col 105 underline
+		"Occurs" in col 120 underline
+		section "field_heading"
+#if BMS_DICT_VER < 710
+	select * from dict-record
+		where obj-id = :obj-id
+		order by obj-id rec-offset
+#else
+	select * from dict-record
+		where obj-id = :obj-id
+		order by obj-id rec-fld-seq
+		local-sql
+#endif
+	detail
+		get dict-field
+			on index fld-id 
+			key is fld-id
+		on error
+		endon
+		do picture-string 
+			returning 
+			lf-pic-string
+			lf-data-type
+			lf-integer-places
+			lf-decimal-places
+			lf-signed
+		print fld-name in col 1 tag is "fld_name"
+			fld-col-name in col 25 tag is "fld_db_col"
+			fld-doc in col 50 tag is "fld_desc"
+			lf-data-type in col 80 tag is "fld_type"
+			lf-pic-string in col 105 tag is "fld_pic"
+			if-then-else(fld-occurs > 1,fld-occurs,0) in col 120 tag is "fld_occurs" pic zz
+			section "fld_details"
+		if ws-print-documentation
+			report section "doc_wrapper"
+			select * from
+				dict-documentation
+				where doc-id = :fld-id
+				and doc-id-type = "F"
+				and doc-type not in ( 3, 4, 5,7)
+				//  7 - help index
+				//  4 - column title (?)
+				//  5 - drill back
+				//  3 - pic string, help, defaults etc etc
+				//  2 - actual documentation
+				order by doc-id-type doc-id doc-type doc-line-no
+#if BMS_DICT_VER >= 710
+			local-sql
+#endif
+			detail
+				print 
+					doc-line-no in col 10
+					doc-line
+				section "doc"
+			end-select
+			report section finished // doc_wrapper
+		endif
+	end-select
+	print " " in col 1 section "skip"
+	report section finished // field wrapper
+end-procedure
+
+screen show-fields
+parameters are 
+	lp-dict-type						like wf-dict
+	lp-table							like obj-name
+local
+	lf-obj-id							like obj-id
+	lf-pic-string						pic x(20) type string
+	window @1,1 to @24,80
+		title concat("Fields for " lp-table)
+#if BMS_DICT_VER < 710
+	select 
+		obj-id,
+		fld-id,
+		fld-name,
+		fld-col-name,
+		fld-doc,
+		fld-desc,
+		fld-type,
+		fld-size,
+	from dict-record
+	on index obj-id,rec-offset
+	left outer join 
+		dict-field
+	where
+		obj-id = lf-obj-id
+#else
+	select 
+		dict-record.obj-id,
+		dict-record.fld-id,
+		dict-field.fld-name,
+		dict-field.fld-col-name,
+		dict-field.fld-doc,
+		dict-field.fld-decs,
+		dict-field.fld-signed,
+		dict-field.fld-type,
+		dict-field.fld-tot-size,
+	from dict-record, 
+		inner join dict-field on dict-record.fld-id = dict-field.fld-id
+	where
+		dict-record.obj-id = :lf-obj-id
+	order by dict-record.obj-id,dict-record.rec-fld-seq
+#endif
+	datagrid occurs 22
+	allowed search
+before
+	do open-dictionary parameters are lp-dict-type
+	get dict-object
+		on index obj-name
+		key is lp-table
+	on error
+		message "Could not find this object"
+		exit
+	endon
+	set lf-obj-id = obj-id
+detail
+	do  picture-string  returning lf-pic-string
+	display fld-name @1,4
+		title "Name"
+	display fld-doc @1,5
+		title "Description"
+	display lf-pic-string @1,6
+		title "Type" 
+	display fld-col-name @1,7
+		title "DB Col Name"
+end-screen
+
+procedure open-dictionary
+parameters
+	lp-dict								like wf-dict
+local
+	lf-this-file						pic x(512) type string
+	close dict-object
+	close dict-field
+	close dict-record
+	close dict-keys
+	close dict-trigger
+	close dict-documentation
+	switch lp-dict
+	case "B"
+		set lf-this-file = ws-bms-file
+	case "C"
+		set lf-this-file = ws-cus-file
+	case "D"
+		set lf-this-file = ws-dist-file
+	end-switch
+	open dict-object 
+		file is str-concat(lf-this-file,"o")
+	open dict-field 
+		file is str-concat(lf-this-file,"f")
+	open dict-keys 
+		file is str-concat(lf-this-file,"k")
+	open dict-record 
+		file is str-concat(lf-this-file,"r")
+	open dict-trigger 
+		file is str-concat(lf-this-file,"t")
+	open dict-documentation 
+		file is str-concat(lf-this-file,"d")
+end-procedure
+
+
+procedure	picture-string
+// assume currency on dict-field
+returning 
+	lr-pic-string							pic x(20) type string
+	lr-data-type							pic x(10) type string
+	lr-integer-places						type number
+	lr-decimal-places						type number
+	lr-signed								type boolean
+local
+	i										type number
+//
+
+#if BMS_DICT_VER < 710
+	set lr-integer-places = aand(rshift(fld-desc,5),31)
+	set lr-decimal-places = aand(fld-desc,31)
+	set lr-signed = aand(fld-desc,1024)
+#else
+	set lr-integer-places = fld-tot-size - fld-decs
+	set lr-decimal-places = fld-decs
+	set lr-signed = if-then-else(fld-signed = YES,true,false)
+#endif
+	if lr-signed 
+		set lr-pic-string = "-"
+	endif
+	switch fld-type
+	case "A"
+		set lr-data-type = "Alpha"
+#if BMS_DICT_VER < 710
+		set lr-pic-string = str-concat("x(",str(fld-size),")")
+#else
+		set lr-pic-string = str-concat("x(",str(fld-tot-size),")")
+#endif
+	case "N"
+		set lr-data-type = "Numeric"
+		if lr-signed
+			set lr-pic-string = "-"
+		endif
+		string lr-pic-string appending str-concat("9(",str(lr-integer-places),")")
+		if lr-decimal-places > 0
+			if lr-decimal-places > 4
+				string lr-pic-string appending concat(".9(",str(lr-decimal-places),")")
+			else
+				string lr-pic-string appending "."
+				for i = 1 to lr-decimal-places
+					string lr-pic-string appending "9"
+				endfor
+			endif
+		endif
+	case "D"
+		set lr-data-type = "Date"
+		set lr-pic-string = "dd/mm/yy"
+	case "J"
+		set lr-data-type = "GMT DTM"
+		set lr-pic-string = "dd/mm/yy hh:mm:ss"
+	case "L"
+		set lr-data-type = "Local DTM"
+		set lr-pic-string = "dd/mm/yy hh:mm:ss"
+	case "B"
+		set lr-data-type = "Boolean"
+		set lr-pic-string  = "T/F"
+	case "S"
+		set lr-data-type = "String"
+#if BMS_DICT_VER < 710
+		set lr-pic-string = str-concat("x(",str(fld-size),")")
+#else
+		set lr-pic-string = str-concat("x(",str(fld-tot-size),")")
+#endif
+	case "T"
+		set lr-data-type = "Time"
+		set lr-pic-string = "hh:mm:ss"
+	end-switch
+end-procedure
+
+
+#define MAX_ROWS 250
+#define MAX_LINE 130
+
+#define I(TXT) \
+	do rst-write-one-line parameters are TXT
+
+procedure rst-header
+local
+	lf-row								pic x(MAX_LINE) occurs MAX_ROWS
+	lf-modifier							pic x occurs MAX_ROWS
+	 I('.. |date| date::')
+	 I('.. |time| date:: %H:%M')
+	 I('.. header:: Dictionary Listing.  Created : |date| |time|')
+	 I('.. footer:: Page ###Page### of ###Total###')
+	 I(' ')
+	 I('.. sectnum::')
+	 I(' ')
+	 I('.. contents:: Table of Contents')
+	 I('    :depth: 2')
+	 I(' ')
+	 I('.. raw:: pdf')
+	 I(' ')
+	 I('		PageBreak')
+	 I(' ')
+	 I(' ')
+	 I('=====================')
+	 I('How to view this file')
+	 I('=====================')
+	 I(' ')
+	 I('Goto https://overbits.herokuapp.com/rsteditor/ and either open this file or paste it into the window')
+	 I('You can then save, print or view a pdf of the content')
+	 I(' ')
+	 I('=====================')
+	 I('Creation Details     ')
+	 I('=====================')
+	 I(' ')
+	 set lf-row[*] = spaces
+	 set lf-row[1] = "Field|Value"
+	 set lf-row[2] = concat("Date Created|",format-picture(today(),"dd-mmm-yyyy"))
+	 set lf-row[3] = concat("Created By|",login-id)
+	 set lf-row[4] = concat("Node Name|",node-name())
+	 set lf-modifier[*] = spaces
+	 do rst-rst-table parameters are lf-row lf-modifier
+end-procedure
+
+
+procedure rst-rst-table
+parameters
+	//  fields are pipe delimited
+	lp-row								pic x(MAX_LINE) occurs MAX_ROWS
+	lp-modifier							pic x occurs MAX_ROWS
+	//  values for modifier   are:
+	//  spaces - normal line.
+	//  "C" - Continuation line.  There should be no underscores folloing the
+	//        PREVIOUS line
+	//  "N" = Note - there are no column separators.  Col2 spans the whole
+	//        row.
+local
+	lf-one-row							pic x(256) occurs 100
+	lf-max-col-count					type number
+	lf-col-count						type number
+	lf-max-width						type number occurs 100
+	i 									type number	
+	j 									type number	
+	lf-little-line						pic x(1024) type string
+	lf-big-line							pic x(1024) type string
+	lf-one-table-line					pic x(MAX_LINE) type string
+	//
+	// determin max col-width for each column
+	set i = 1
+	repeat
+		do clibvfile-split parameters are lp-row[i] "|" returning lf-one-row lf-col-count
+	until lf-col-count = 0 or lp-row[i] = spaces
+		if lf-col-count > lf-max-col-count 
+			set lf-max-col-count = lf-col-count
+		endif
+		for j = 1 to lf-col-count
+			if lf-max-width[j] < str-len(lf-one-row[j]) AND lp-modifier[i] != "N"
+				set lf-max-width[j] = str-len(lf-one-row[j]) + 3
+			endif
+		end-for
+		set i += 1
+	end-repeat
+	//
+	// Now build the Heading lines
+	//
+	set lf-little-line  = '    '
+	set lf-big-line  = '    '
+	string lf-little-line inserting "+" at 5
+	string lf-big-line inserting "+" at 5
+	for i = 1 to lf-max-col-count
+		for j = 1 to lf-max-width[i]
+			string lf-little-line appending "-"
+			string lf-big-line appending "="
+		end-for
+		string lf-little-line appending "+" 
+		string lf-big-line appending "+" 
+	end-for
+	//
+	// Now fill the table
+	//
+	// Headings
+	I(lf-little-line)
+	do clibvfile-split parameters are lp-row[1] "|" returning lf-one-row lf-col-count
+	do rst-rst-table-one-line parameters are lf-one-row lf-max-width lp-modifier[i]
+		returning lf-one-table-line
+	I(lf-one-table-line)
+	I(lf-big-line)
+	// Detail
+	set i = 2
+	repeat
+		do clibvfile-split parameters are lp-row[i] "|" returning lf-one-row lf-col-count
+	until lf-col-count = 0 or lp-row[i] = spaces
+		do rst-rst-table-one-line parameters are lf-one-row lf-max-width lp-modifier[i]
+			returning lf-one-table-line
+		I(lf-one-table-line)
+		// check whether we need a following line or not
+		// firstly check if we are at the end of the array
+		if i < occurence(lp-row) and lp-row[i + 1] != spaces
+			// now check if the next line is a continuation line
+			if lp-modifier[i + 1] != "C"
+				I(lf-little-line)
+			endif
+		endif
+		// are we at the end?
+		if i = occurence(lp-row) OR lp-row[i + 1] = spaces
+			I(lf-little-line)
+		endif
+		//
+		set i += 1
+	end-repeat
+end-procedure
+
+procedure rst-rst-table-one-line
+parameters
+	lp-one-row							pic x(256) type string occurs 100
+	lp-max-width						type number occurs 100
+	lp-modifier							pic x
+returning
+	lr-text-line						pic x(MAX_LINE) type string
+local
+	i 									type number	
+	j 									type number	
+	lf-col-len							type number
+	//
+	// is this a note line?
+	//
+	if lp-modifier = "N"
+		do rst-rst-table-one-comment
+			parameters are lp-one-row[1] lp-max-width
+			returning lr-text-line
+		exit
+	endif
+	//
+	// We only get to here if it is not a comment
+	//
+	set lr-text-line = "    |"
+	set i = 1
+	while lp-max-width[i] > 0 and i <= occurence(lp-one-row)
+		set lf-col-len = str-len(lp-one-row[i])
+		string lr-text-line appending lp-one-row[i]
+		string lr-text-line appending "|"
+		// now insert spaces before the  vertical bar
+		for j = 1 to (lp-max-width[i] - str-len(lp-one-row[i]))
+			string lr-text-line inserting " " at str-len(lr-text-line) 
+		endfor
+		//
+		set  i += 1
+	end-while
+end-procedure
+
+procedure rst-rst-table-one-comment
+parameters
+	lp-comment							pic x(256) 
+	lp-max-width						type number occurs 100
+returning
+	lr-text-line						pic x(MAX_LINE) type string
+local
+	i 									type number	
+	lf-max-width-of-line				type number
+	//
+	// calculate the total width of the table.
+	set lf-max-width-of-line = sum-array(lp-max-width,1,occurence(lp-max-width))
+	// add one for each column separator
+	for i = 1 to occurence(lp-max-width)
+		if lp-max-width[i] != 0
+			set lf-max-width-of-line += 1
+		endif
+	endfor
+	// and subtract one
+	set lf-max-width-of-line -= 1
+	//
+	set lr-text-line = "    |"
+	string lr-text-line appending lp-comment
+	string lr-text-line appending "|"
+	// now pad out the line until we reach max width
+	for i = 1 to ( lf-max-width-of-line - str-len(lp-comment) )
+		string lr-text-line inserting " " at str-len(lr-text-line) 
+	end-for
+end-procedure
+
+procedure rst-write-one-line
+parameters
+	lp-text							pic x(1024) type string
+local
+	lf-tab-pos						type number
+	repeat
+		set lf-tab-pos = pattern(lp-text,ascii-char(9)) 
+	until lf-tab-pos = 0
+		string lp-text deleting lf-tab-pos to lf-tab-pos
+		string lp-text inserting "    " at lf-tab-pos
+	end-repeat
+	set rst-text = lp-text
+	insert rst-text
+end-procedure
+
+procedure rst-table
+local
+	lf-row								pic x(MAX_LINE) occurs MAX_ROWS
+	lf-modifier							pic x occurs MAX_ROWS
+	lf-row-num							type number
+	lf-pic-string						pic x(20) type string
+	lf-data-type						pic x(10) type string
+	lf-signed							type boolean
+	lf-integer-places					type number
+	lf-decimal-places					type number
+	i 									type number	
+	//
+	set lf-modifier[*] = spaces
+	I(" ")
+	I(obj-name)
+	I("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+	I(" ")
+	I(concat("Description : " obj-doc))
+	I(" ")
+ 	I(concat("Table Name : " wf-obj-file))
+	I(" ")
+//
+// Indexes
+//
+	if ws-print-indexes
+		I(" ")
+		I("Indexes ")
+		I(" ")
+		select * from dict-keys
+			where obj-id = :obj-id
+#if BMS_DICT_VER >= 710
+			local-sql
+#endif
+		before
+			set lf-row[*] = spaces
+			set lf-row[1] = "Index|Unique|Fields|Descending"
+			set lf-row-num = 2
+		detail
+			for i = 1 to num-fields
+				get dict-field
+					on index fld-id 
+					key is k-fld-id[i]
+				on error
+				else
+					if i  = 1
+						set lf-row[lf-row-num] = str-concat(str(index-no),"|"
+							,if-then-else(key-flags = 1, "NO", "YES")
+							,"|"
+							,fld-name
+							,"|"
+							k-desc-flag[i]
+							)
+						set lf-row-num += 1
+					else
+						set lf-row[lf-row-num] = str-concat("||",fld-name,"|")
+						set lf-row-num += 1
+					endif
+				endon
+			end-for
+		end-select
+		do rst-rst-table parameters are lf-row lf-modifier
+	endif
+	set lf-modifier[*] = spaces
+	I(" ")
+	I("Field List ")
+	I(" ")
+	set lf-row[*] = spaces
+	set lf-row-num = 1
+	//
+	set lf-row[lf-row-num] = "Field|Description|Data Type|Pic"
+	set lf-row-num += 1
+#if BMS_DICT_VER < 710
+	select * from dict-record
+		where obj-id = :obj-id
+		order by obj-id rec-offset
+#else
+	select * from dict-record
+		where obj-id = :obj-id
+		order by obj-id rec-fld-seq
+		local-sql
+#endif
+	detail
+		get dict-field
+			on index fld-id 
+			key is fld-id
+		on error
+		endon
+		do picture-string 
+			returning 
+			lf-pic-string
+			lf-data-type
+			lf-integer-places
+			lf-decimal-places
+			lf-signed
+		set lf-row[lf-row-num] = str-concat(
+			fld-name , "|"
+//			fld-col-name , "|"
+			fld-doc , "|"
+			lf-data-type ,  "|"
+			lf-pic-string ,
+			if-then-else(fld-occurs > 1,concat(' Occurs ',str(fld-occurs))," ")
+			)
+		set lf-row-num += 1
+		if fld-col-name != fld-name
+			set lf-row[lf-row-num] = str-concat(fld-col-name,"||||")
+			set lf-modifier[lf-row-num] = "C"
+			set lf-row-num += 1
+		endif
+		/*
+		get dict-documentation
+			on index doc-id-type doc-id doc-type doc-line-no
+			key is "F" fld-id 3 1
+		on error
+		else
+			set lf-row[lf-row-num] = doc-line
+			set lf-modifier[lf-row-num] = "N"
+			set lf-row-num += 1
+		endon
+		*/
+	end-select
+	do rst-rst-table parameters are lf-row lf-modifier
+	I(" ")
+end-procedure

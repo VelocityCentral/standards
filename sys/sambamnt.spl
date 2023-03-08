@@ -1,0 +1,2248 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program :  Maintenance of the samba environment
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2019
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: sys/sambamnt.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 03Sep19  rjb         written 
+//          This program requires the use of sudo (see help) and also
+//          the existence of a script : smabamnt.sh in the lbin folder.
+//          TODO:
+//          Share - change read and write list
+//          Global - Add Auditing
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+#include "../include/i8gparam.spl"
+
+link "clib/clibvfile"
+
+#define DEFAULT_SMBCONF '/etc/samba/smb.conf'
+
+//#define DEBUG(A) str-concat(A ":" get-field-value(A))
+ 
+// To permamently record audit records create the following file in the
+// distributor dictionary:
+//
+// OBJECT NAME: samba-audit Samba Audit
+//
+// Table Name:        vglsmbaud0                         
+// 
+//     IndexUnique                        Fields                        Descending
+//       1    YES                         vsa-id
+//       2    YES                         vsa-date
+//                                        vsa-time
+//                                        vsa-user
+//                                        vsa-machine
+// 
+// 
+// Field                   DB Col                   Description                   Data Type                Pic            
+// vsa-id                  vsa-id                   record id                     Numeric                  9(10)
+// vsa-user                vsa-user                 User                          Alpha                    x(30)
+// vsa-date                vsa-date                 Date                          Date                     dd/mm/yy
+// vsa-time                vsa-time                 Time                          Time                     hh:mm:ss
+// vsa-ip                  vsa-ip                   Client IP Address             Alpha                    x(15)
+// vsa-machine             vsa-machine              Machine                       Alpha                    x(20)
+// vsa-share               vsa-share                Share Name                    Alpha                    x(32)
+// vsa-operation           vsa-operation            Samba Operation Code          Alpha                    x(10)
+// vsa-success             vsa-success              Success                       Alpha                    x(10)
+// vsa-read-write          vsa-read-write           Read Write                    Alpha                    x(4)
+// vsa-filename            vsa-filename             Filename                      Alpha                    x(256)
+//
+// Create a cron job - this will depend on how often /var/log/messages turns
+// over.  Try 0600, 1200, 1800
+//
+// Ensure pgm is compiled with the following
+  
+#define SAMBA_AUDIT_DB
+ 
+field
+	ws-function-title					type string
+	ws-samba-version					type string pic x(10)
+	ws-smbdotconf-filename				pic x(1024) type string
+
+mode md-details
+	prompt "Detail"
+	help "Display full details"
+
+mode md-smb-add
+	prompt "Samba"
+	help "Set or Change Samba Passwords"
+
+mode md-group
+	prompt "Groups"
+	help "Manage groups the user belongs to"
+
+mode md-refresh
+	prompt "Refresh"
+	help "Re-read all data and refresh the screen"
+
+mode md-select
+	prompt "Select"
+	help "Select this item"
+
+mode md-show-all-groups
+	prompt "ALL"
+	help "Show all group membership"
+
+mode md-enable-auditing
+	prompt "Enable"
+	help "Update the Samba Configuration file to enable auditing"
+
+object pdbedit
+	type is memory
+	record is
+		pe-user							type string
+		pe-uid							type number
+		pe-desc							type string
+		pe-smbusers						pic x(128) type string
+	end-record
+	key is pe-user
+
+object etcpasswd
+	type is memory
+	record is
+		ep-uid							type number
+		ep-user							type string
+		ep-group						type number
+		ep-desc							type string
+		ep-home							type string
+		ep-shell						type string
+	end-record
+	key is ep-user
+
+object prouser
+	type is memory
+	record is
+		pu-user							type string
+		pu-level						type number
+		pu-name							type string
+		pu-help-level					type string
+		pu-column-export				type boolean
+		pu-filter-sort					type boolean
+		pu-dba							type boolean
+		pu-4gl-dev						type boolean
+		pu-sql-dev						type boolean
+		pu-shell-access					type boolean
+		pu-permissions					type number
+		pu-group-code					type string
+		pu-max-sessions					type number
+		pu-default-task					type string
+	end-record
+	key is pu-user
+
+object usersummary
+	type is memory
+	record is
+		us-user							type string
+		us-uid							like ep-uid
+		us-name							type string
+		us-unix-reg						pic x
+		us-pronto-reg 					pic x
+		us-samba-reg					pic x
+		us-company-count				pic 999
+		us-group-count					type number
+		us-smbusers						pic x(128) type string
+	end-record
+	key is us-user
+
+object etcgroup
+	type is memory
+	record is
+		eg-name							type string
+		eg-id							type number
+	end-record
+	key is eg-name
+	key is eg-id
+
+object groupmembership
+	type is memory
+	record
+		gm-group						type string
+		gm-user							type string
+	end-record
+	key is gm-group gm-user
+
+object smbaudit
+	type is memory
+	record
+		sa-user							type string
+		sa-date							type date
+		sa-time							type time
+		sa-ip							type string
+		sa-machine						type string
+		sa-share						type string
+		sa-operation					type string
+		sa-success						type string
+		sa-rw							type string
+		sa-file							type string
+	end-record
+	key is sa-user sa-date sa-time
+	key is sa-file
+
+
+object textfile
+	type is text
+	record is
+		tf-line							type is varchar pic x(4096)
+	end-record
+
+object smbconf
+	type is memory
+	record
+		sc-line-no						type number
+		sc-section-share				type string // section or share name
+		sc-key							type string
+		sc-value						pic x(1024) type string
+	end-record
+	key is sc-line-no
+	key is sc-section-share sc-key
+
+object smbusers
+	type is memory
+	record 
+		su-line-no						type number
+		su-user							type string
+		su-maps							pic x(128) type string
+	end-record
+	key is su-line-no
+	key is su-user
+
+procedure main
+returning
+	lr-results							pic x(1024) type string
+local
+	lf-own-passwd						type boolean
+	lf-add-audit-to-db					type boolean
+	lf-purgedays						type number
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	// 
+	// No security is required for users to change their own password
+	//
+	I8GPARAM_FLAG("-mypasswd",FALSE,lf-own-passwd)
+	if lf-own-passwd
+		do samba-passwd-screen-user entry once 
+		exit
+	endif
+	I8GPARAM_FLAG("-auditadd",FALSE,lf-add-audit-to-db)
+	if lf-add-audit-to-db
+		message "Adding to audit"
+#ifdef SAMBA_AUDIT_DB
+		do samba-audit-add-db returning lr-results
+		message lr-results
+		exit
+#else
+		set lr-results =  "Program not compiled with audit support"
+		message lr-results
+#endif
+	endif
+	I8GPARAM_NUM("-purge",0,lf-purgedays)
+	if lf-purgedays > 0
+		message "Purging audit"
+#ifdef SAMBA_AUDIT_DB
+		do purge-audit parameters are lf-purgedays returning lr-results
+		message lr-results
+		exit
+#else
+		set lr-results =  "Program not compiled with audit support"
+		message lr-results
+#endif
+	endif
+	I8GPARAM_ALPHA("-smbconf",DEFAULT_SMBCONF,ws-smbdotconf-filename)
+	//
+	// If not changing own password then must be doing a management function
+	//
+	do i8secabt-check-abort
+		parameters are sys-consolidation-division login-id() "ZVG" "M013"
+		returning ws-function-title 
+	do i8proglog-write-log
+	do get-samba-version returning ws-samba-version
+	if ws-samba-version = spaces
+		message-box param-text("<<P1>><<BR>><<p2>>"
+			,"Unable to access Samba Version"
+			,"This may be an indication of a bigger problem related to security")
+			title is ws-function-title
+			message-buttons MSG_BOX_CANCEL
+			icon MSG_BOX_WARNING
+	endif
+	do build-samba-conf
+	if exit-status != EXIT_NORMAL
+		message-box param-text("<<P1>><<BR>><<p2>>"
+			,"Unable to read the smb.conf"
+			,"This may be an indication of a bigger problem related to security")
+			title is ws-function-title
+			message-buttons MSG_BOX_CANCEL
+			icon MSG_BOX_WARNING
+	endif
+	do main-menu entry
+end-procedure
+
+#define BUTTON_POS(L,C) \
+	@L,C to @L + 1,C + 10
+
+screen main-menu
+local
+	lf-message							pic x(256) type string
+	lf-dummy							pic x
+	window @1,1 to @11,60
+		window-position 5
+		title ws-function-title
+	no-hide
+	form-entry
+	no-ok-cancel
+before
+	Display concat("You are in Management Mode.  Samba version:",ws-samba-version) @1,1
+	display "It is expected that you have sufficient authority to view and change" @2,1
+	display "the system files that support Samba or that SUDO has been setup to " @3,1
+	display "to provide such access" @4,1
+detail
+	accept lf-dummy @40 + 1,1  // adding the one makes the pos a forumla and therefore warnings are suppressed
+		optional
+		no-warning
+	option "User<BR>Management" BUTTON_POS(6,10)
+		text-position 15
+		do build-user-details returning lf-message
+		if exit-status != EXIT_NORMAL
+			message-box param-text("<<P1>><<BR>><<p2>>"
+				,"Access to some user functions is not available"
+				,lf-message)
+				title is ws-function-title
+				message-buttons MSG_BOX_OK
+				icon MSG_BOX_WARNING
+		endif
+		do user-management
+	end-option
+	option "Share<BR>Management" BUTTON_POS(6,25)
+		text-position 15
+		do share-management 
+	end-option
+	option "Audit" BUTTON_POS(6,40)
+		text-position 15
+		do display-audit
+	end-option
+	option "Review<BR>smb.conf" BUTTON_POS(9,10)
+		when login-id = "rayb"
+		text-position 15
+		do smb-conf-review parameters are spaces
+	end-option
+	option "Restart<BR>Service" BUTTON_POS(9,25)
+		text-position 15
+		help "Restart the samba service on the server"
+		do execute-command parameters are "sudo sambamnt.sh restartservice"
+		if exit-status != EXIT_NORMAL
+			message-box "It appears the service did not restart correctly"
+				title is ws-function-title
+				message-buttons MSG_BOX_CANCEL
+				icon MSG_BOX_STOP
+		else
+			message-box "Service restarted successfully"
+				title is ws-function-title
+				message-buttons MSG_BOX_OK
+				icon MSG_BOX_INFORMATION
+		endif
+	end-option
+	option "Help" BUTTON_POS(9,40)
+		text-position 15
+		do sudo-help-screen
+	end-option
+end-screen
+
+screen user-management 
+local
+	lf-message							type string
+	window @1,1 to @23,130
+		window-position 5
+		title ws-function-title
+	select * 
+		from usersummary
+	datagrid occurs 22
+	allowed search md-details md-smb-add md-group md-refresh
+detail
+	if screenmode = md-refresh
+		do build-user-details returning lf-message
+		if exit-status != EXIT_NORMAL
+			message-box param-text("<<P1>><<BR>><<p2>>"
+				,"Access to some user functions is not available"
+				,lf-message)
+				title is ws-function-title
+				message-buttons MSG_BOX_OK
+				icon MSG_BOX_WARNING
+			exit
+		else
+			reselect
+			get usersummary first
+			refresh
+		endif
+	end-if
+	if screenmode = md-details
+		do display-user-details
+			parameters are us-user
+	endif
+	if screenmode = md-smb-add
+		do samba-passwd-screen-admin entry once parameter are us-user 
+	endif
+	if screenmode = md-group
+		do show-groups parameters are us-user
+	endif
+	accept us-user @1,1 pic x(20)
+		title "User"
+		when screenmode = find
+		show-value
+	display us-uid @1,2 pic z(9)
+		title "id"
+	display us-name @1,3 pic x(30)
+		title "Name"
+	display us-pronto-reg @1,4
+		title "Pronto"
+	display us-samba-reg @1,5
+		title "Samba"
+	display us-company-count @1,6 pic zz
+		title "Companies"
+	display us-group-count @1,7 pic zz
+		title "Groups"
+	display us-smbusers @1,8
+		title "Mappings"
+end-screen
+
+#define PROCEDURE_DISPLAY(A,B) \
+	display concat(A,":") @lf-next-line,15 right-coord prompt \
+	display B @lf-next-line,16 prompt colour blue\
+	set lf-next-line += 1
+
+screen share-management
+	window @1,1 to @14,30
+		window-position 5
+		title ws-function-title
+	datagrid occurs 12
+	select distinct sc-section-share
+		from smbconf 
+		where sc-section-share not in ('global' 'homes' 'printers')
+		order by sc-section-share
+	allowed search md-select
+detail
+	if screenmode = md-select
+		do share-detail correct once parameters are sc-section-share
+		reselect 
+		refresh review
+	endif
+	accept sc-section-share @1,1 pic x(20)
+		title "Share"
+		when screenmode = search
+		show-value
+end-screen
+
+screen share-detail
+// this screen must only be called in correct mode
+// Note that changes are made to the file via onchange clauses.
+// This is because you need to know when something is not defined
+// such as the boolean values.
+parameters
+	lp-share-name					pic x(100) type string
+local 
+	lf-audited						type boolean
+	lf-read-only					type boolean
+	lf-guest-ok						type boolean
+	lf-path-name					pic x(1024) type string
+	lf-comment						pic x(1024) type string
+	lf-valid-users					pic x(512) type string
+	lf-write-list					pic x(512) type string
+	lf-force-user					pic x(512) type string
+	lf-force-group					pic x(512) type string
+	lf-create-mask					pic x(512) type string
+	lf-title						pic x(50) type string
+	lf-change-made					type boolean
+	window @1,1 to @24,80
+		window-position 5
+		title is lp-share-name
+	form-entry
+before
+	set lf-title = concat("Share: " lp-share-name)
+	select *
+		from smbconf
+		where sc-section-share = :lp-share-name
+	detail
+		switch sc-key
+		case 'vfs objects'
+			if sc-value = "full_audit"
+				set lf-audited = TRUE
+			endif
+		case 'guest ok' 
+			if sc-value = 'yes'
+				set lf-guest-ok = TRUE
+			endif
+		case 'read only'
+			if sc-value = 'yes'
+				set lf-read-only = TRUE
+			endif
+		case 'path'
+			set lf-path-name = sc-value
+		case 'comment'
+			set lf-comment = sc-value
+		case 'valid users'
+			set lf-valid-users = sc-value
+		case 'write list'
+			set lf-write-list = sc-value
+		case 'force user'
+			set lf-force-user  = sc-value
+		case 'force group'
+			set lf-force-group = sc-value
+		case 'create mask'
+			set lf-create-mask = sc-value
+		end-switch
+	end-select
+	set lf-change-made = FALSE
+	box @1,1 to @4,80
+		title is 'Location'
+	box @5,1 to @10,80
+		title is 'Security'
+	box @11,1 to @13,80
+		title is 'Auditing'
+	box @14,1 to @17,80
+		title is 'Assumed Credentials'
+detail
+	if screenmode = md-select
+		if lf-change-made
+			message-box param-text("<<P1>><<BR>><<p2>>"
+				,"You have made some changes."
+				,"In order to use this function you need to exit the screen and re-select the share")
+				title is ws-function-title
+				message-buttons MSG_BOX_OK
+				icon MSG_BOX_WARNING
+		else
+			do smb-conf-review parameters are lp-share-name
+		endif
+	endif
+	accept lf-comment @2,20 pic x(40)
+		title "Comment"
+	on change
+		do get-and-update-smbconf parameters are lp-share-name "comment" lf-comment
+		set lf-change-made = TRUE
+	endon
+	accept lf-path-name @3,20 pic x(40)
+		title "Path"
+	on change
+		do get-and-update-smbconf parameters are lp-share-name "path" lf-path-name
+		set lf-change-made = TRUE
+	endon
+	accept lf-valid-users @6,20 pic x(40)
+		title "Valid Users"
+		help "Use an @ symbol to precede group names - @management is members of the management group"
+	on change
+		do get-and-update-smbconf parameters are lp-share-name "valid users" lf-valid-users
+		set lf-change-made = TRUE
+	endon
+	accept lf-write-list @7,20 pic x(40)
+		title "Write List"
+	on change
+		do get-and-update-smbconf parameters are lp-share-name "write list" lf-write-list
+		set lf-change-made = TRUE
+	endon
+	check-box lf-read-only		@8,20
+		values TRUE FALSE
+		title "Read Only"
+		default is lf-read-only
+		right-coord
+	on change
+		do get-and-update-smbconf parameters are lp-share-name "read only" 
+			if-then-else(lf-read-only,"yes","no")
+		set lf-change-made = TRUE
+	endon
+	end-check-box 
+	check-box lf-guest-ok		@8,40
+		values TRUE FALSE
+		title "Guest OK"
+		default is lf-guest-ok
+		right-coord
+	on change
+		do get-and-update-smbconf parameters are lp-share-name "guest ok" 
+			if-then-else(lf-guest-ok,"yes","no")
+		set lf-change-made = TRUE
+	endon
+	end-check-box 
+	accept lf-create-mask @9,20
+		title "Create Mask"
+	on change
+		do get-and-update-smbconf parameters are lp-share-name "create mask" lf-create-mask
+		set lf-change-made = TRUE
+	endon
+	check-box lf-audited		@12,20
+		values TRUE FALSE
+		title "Auditing Enabled"
+		right-coord
+		default is lf-audited
+	on change
+		if lf-audited
+			do get-and-update-smbconf parameters are lp-share-name "vfs objects" "full_audit"
+		else
+			do get-and-update-smbconf parameters are lp-share-name "vfs objects" spaces
+		endif
+		set lf-change-made = TRUE
+	endon
+	end-check-box 
+	accept lf-force-user @15,20 pic x(40)
+		title "User"
+	on change
+		do get-and-update-smbconf parameters are lp-share-name "force user" lf-force-user
+		set lf-change-made = TRUE
+	endon
+	accept lf-force-group @16,20 pic x(40)
+		title "Group"
+	on change
+		do get-and-update-smbconf parameters are lp-share-name "force group" lf-force-group
+		set lf-change-made = TRUE
+	endon
+	option "Full Detail" @23,60
+		do smb-conf-review parameters are lp-share-name
+	end-option
+	confirm auto
+	end-confirm
+after 
+	if lf-change-made
+		do build-samba-conf
+	endif
+end-screen
+
+procedure get-and-update-smbconf
+parameters
+	lp-section						like sc-section-share
+	lp-key							like sc-key
+	lp-value						like sc-value
+local
+	lf-next-line					type number
+	lf-message						pic x(512) type string
+	//
+	get smbconf
+		on index sc-section-share sc-key 
+		key is lp-section lp-key 
+	on error
+		select lf-next-line = max(sc-line-no)
+			from smbconf
+			where sc-section-share = :lp-section
+		end-select
+		set lf-next-line += 1
+		do change-smb-conf
+			parameters are "-add" lf-next-line lp-key lp-value 
+			returning lf-message
+		if exit-status != EXIT_NORMAL
+			message-box lf-message
+				title is ws-function-title
+				message-buttons MSG_BOX_CANCEL
+				icon MSG_BOX_STOP
+		endif
+	else
+		if lp-value = spaces
+			do change-smb-conf
+				parameters are "-delete" sc-line-no spaces spaces
+				returning lf-message
+			if exit-status != EXIT_NORMAL
+				message-box lf-message
+					title is ws-function-title
+					message-buttons MSG_BOX_CANCEL
+					icon MSG_BOX_STOP
+			endif
+		else
+			do change-smb-conf
+				parameters are "-change" sc-line-no lp-key lp-value 
+				returning lf-message
+			if exit-status != EXIT_NORMAL
+				message-box lf-message
+					title is ws-function-title
+					message-buttons MSG_BOX_CANCEL
+					icon MSG_BOX_STOP
+			endif
+		endif
+	endon
+end-procedure
+
+
+procedure display-user-details
+	window no-hide
+	window-position 5
+parameters
+	lp-user							type string
+local
+	lf-next-line					type number
+	lf-coy-count					type number
+//
+	set lf-next-line = 1
+	get etcpasswd
+		on index ep-user
+		key is lp-user
+	on error
+		display "Unix Access Not Defined" @lf-next-line,3
+			colour red
+			background
+		set lf-next-line += 1
+	else
+		display concat("User ID:" lp-user  "(" str(ep-uid) ")") @1,1
+			colour green bold
+			prompt
+		set lf-next-line += 1
+		box @lf-next-line,1 to @lf-next-line + 4, 80
+			title "Unix"
+		set lf-next-line += 1
+		PROCEDURE_DISPLAY("Name",ep-desc)
+		PROCEDURE_DISPLAY("Home",ep-home)
+		PROCEDURE_DISPLAY("Group",str(ep-group))
+	endon
+//
+	set lf-next-line += 1
+	get pdbedit
+		on index pe-user
+		key is lp-user
+	on error
+		display "Samba Access Not Defined" @lf-next-line,3
+			colour red
+			background
+		set lf-next-line += 1
+	else
+		box @lf-next-line,1 to @lf-next-line + 3,80
+			title "Samba Access"
+		set lf-next-line += 1
+		PROCEDURE_DISPLAY("Desc", pe-desc)
+		PROCEDURE_DISPLAY("Maps", pe-smbusers)
+		set lf-next-line += 1
+	endon
+	get prouser
+		on index pu-user
+		key is lp-user
+	on error
+		display "Pronto Access Not Defined" @lf-next-line,3
+			colour red
+			background
+		set lf-next-line += 1
+	else
+		box @lf-next-line,1 to @lf-next-line + 5,80
+			title "Pronto Access"
+		set lf-next-line += 1
+		PROCEDURE_DISPLAY("Name",pu-name)
+		PROCEDURE_DISPLAY("Security Level",format-picture(pu-level,"zz"))
+		PROCEDURE_DISPLAY("4GL",if-then-else(pu-4gl-dev,"YES","NO"))
+		PROCEDURE_DISPLAY("DBA",if-then-else(pu-dba,"YES","NO"))
+		set lf-next-line += 1
+	endon
+	get system-user-control
+		on index user-id
+		key is lp-user
+	on error
+		display "Not Present in sysinfo" @lf-next-line,3
+			colour red
+			background
+		set lf-next-line += 1
+	else
+		box @lf-next-line,1 to @lf-next-line + 4,80
+			title "Pronto system user control"
+		set lf-next-line += 1
+		PROCEDURE_DISPLAY("Name",format-picture(user-employee-name,"x(30)"))
+		PROCEDURE_DISPLAY("email",format-picture(suc-user-email,"x(30)"))
+		select lf-coy-count = count(*)
+			from system-user
+			where user-id = :lp-user
+		end-select
+		PROCEDURE_DISPLAY("Coys Registered",format-picture(lf-coy-count,"zzz"))
+		set lf-next-line += 1
+	endon
+	pause
+end-procedure
+
+screen show-groups
+parameters
+	lp-user							type string
+local
+	lf-message						pic x(128) type string
+	window @1,1 to @10,40
+		window-position 5
+		title "Group Membership"
+	datagrid occurs 8
+	select * from groupmembership
+		where gm-user = lp-user
+	allowed entry remove search md-show-all-groups
+detail
+	if screenmode = md-show-all-groups
+		do show-groups-all-members
+	endif
+	accept  gm-group @1,1
+		title "Group"
+		when screenmode in ( search entry)
+		show-value
+	on help-key
+		do group-help returning gm-group
+		re-enter optional
+	endon
+	confirm auto
+	before
+		if screenmode = entry
+			do add-user-to-group parameters are lp-user gm-group
+				returning lf-message
+			if exit-status != EXIT_NORMAL
+				message-box param-text("<<P1>><<BR>><<p2>>"
+					,"Failed to Add User to Group"
+					,lf-message)
+					title is ws-function-title
+					message-buttons MSG_BOX_CANCEL
+					icon MSG_BOX_STOP
+				exit
+			endif
+		endif
+		//
+		if screenmode = remove
+			do remove-user-from-group parameters are gm-user gm-group
+				returning lf-message
+			if exit-status != EXIT_NORMAL
+				message-box param-text("<<P1>><<BR>><<p2>>"
+					,"Failed to remove Group"
+					,lf-message)
+					title is ws-function-title
+					message-buttons MSG_BOX_CANCEL
+					icon MSG_BOX_STOP
+				exit
+			endif
+		endif
+	confirmed
+	end-confirm
+end-screen
+
+screen group-help
+returning
+	lr-group						type string
+local
+	lf-message						pic x(128) type string
+	window @1,1 to @10,50
+		window-position 5
+		title "Valid Groups"
+	datagrid occurs 8
+	select * from etcgroup
+	allowed md-select search entry remove
+	no-prompt-for-search
+detail
+	if screenmode = md-select
+		set lr-group = eg-name
+		exit
+	endif
+	accept  eg-name @1,1
+		title "Group"
+		when screenmode in ( search entry)
+		show-value
+	confirm auto
+	before
+		if screenmode = entry
+			do create-new-group parameters are eg-name
+				returning lf-message
+			if exit-status != EXIT_NORMAL
+				message-box param-text("<<P1>><<BR>><<p2>>"
+					,"Failed to Add Group"
+					,lf-message)
+					title is ws-function-title
+					message-buttons MSG_BOX_CANCEL
+					icon MSG_BOX_STOP
+				exit
+			endif
+		endif
+		//
+		if screenmode = remove
+			do remove-group parameters are eg-name
+				returning lf-message
+			if exit-status != EXIT_NORMAL
+				message-box param-text("<<P1>><<BR>><<p2>>"
+					,"Failed to remove Group"
+					,lf-message)
+					title is ws-function-title
+					message-buttons MSG_BOX_CANCEL
+					icon MSG_BOX_STOP
+				exit
+			endif
+		endif
+	confirmed
+	end-confirm
+end-screen
+
+screen show-groups-all-members
+// This is primarily for excel export for management purposes
+	window @1,1 to @20,50
+		window-position 5
+		title "Group Membership - Reporting and Excel Grid"
+	datagrid occurs 18
+	select * from groupmembership, etcgroup
+		where gm-group = eg-name
+	allowed search
+detail
+	accept  gm-group @1,1
+		title "Group"
+		when screenmode in ( search entry)
+		show-value
+	on help-key
+		do group-help returning gm-group
+		re-enter optional
+	endon
+	accept gm-user @1,2
+		title "User"
+		when screenmode in ( search entry)
+		show-value
+	display eg-id @1,3 pic z(5)
+		title "Group Id"
+end-screen
+
+procedure build-pdbedit-only
+local 
+	lf-cmd							type string pic x(256)
+	lf-file							type string pic x(256)
+	lf-flds							pic x(256) type string occurs 100
+	lf-coy-count					type number
+returning
+	lr-message						type string pic x(128)
+	//
+	set lf-file = concat("/tmp/peout_" str(pid()) ".txt")
+	set lf-cmd = concat("sudo sambamnt.sh pdbedit  " lf-file)
+	close pdbedit and remove
+	command "sh" parameters are "-c" lf-cmd
+#ifndef DEBUG
+		no-message
+#endif
+	if exit-status != EXIT_NORMAL
+		set lr-message = 'Unable to access Samba Users'
+	else
+		open pdbedit temporary
+		open textfile
+			file is lf-file
+			read-only
+		select * from textfile
+		detail
+			do clibvfile-split parameters are tf-line ":" returning lf-flds
+			initialise pdbedit
+			set pe-user = lf-flds[1]
+			set pe-uid = num(lf-flds[2])
+			set pe-desc = lf-flds[3]
+			insert  pdbedit
+			on error
+				set lr-message = "Unable to add Samba Users to Memory file"
+			endon
+		end-select
+		close textfile and remove
+	endif
+end-procedure
+
+procedure build-user-details
+local 
+	lf-cmd							type string pic x(256)
+	lf-file							type string pic x(256)
+	lf-flds							pic x(256) type string occurs 100
+	lf-coy-count					type number
+returning
+	lr-message						type string pic x(128)
+	//
+	set lf-file = concat("/tmp/peout_" str(pid()) ".txt")
+	set lf-cmd = concat("sudo sambamnt.sh pdbedit  " lf-file)
+	close pdbedit and remove
+	command "sh" parameters are "-c" lf-cmd
+#ifndef DEBUG
+		no-message
+#endif
+	if exit-status != EXIT_NORMAL
+		set lr-message = 'Unable to access Samba Users'
+	else
+		open pdbedit temporary
+		open textfile
+			file is lf-file
+			read-only
+		select * from textfile
+		detail
+			do clibvfile-split parameters are tf-line ":" returning lf-flds
+			initialise pdbedit
+			set pe-user = lf-flds[1]
+			set pe-uid = num(lf-flds[2])
+			set pe-desc = lf-flds[3]
+			insert  pdbedit
+			on error
+				set lr-message = "Unable to add Samba Users to Memory file"
+			endon
+		end-select
+		close textfile and remove
+		do build-smbusers
+	endif
+	//
+	// check /etc/passwd
+	//
+	open textfile
+		file is "/etc/passwd"
+		read-only
+	on error
+		set lr-message = "Unable to open unix user file"
+	endon
+	close etcpasswd and remove
+	open etcpasswd temporary
+	select * from textfile
+	detail
+		do clibvfile-split parameters are tf-line ":"
+			returning lf-flds
+		set ep-uid = num(lf-flds[3])
+		set ep-user = lf-flds[1]
+		set ep-group = num(lf-flds[4])
+		set ep-desc = lf-flds[5]
+		set ep-home = lf-flds[6]
+		set ep-shell = lf-flds[7]
+		insert etcpasswd
+		on error
+			set lr-message = "Unable to add Unix Users to Memory file"
+		endon
+	end-select
+	//
+	// load the pronto registered users
+	//
+	open textfile
+		file is concat(get-env('PRONTO') '/lib/prouser')
+		read-only
+	on error
+		set lr-message = "Unable to open prouser file"
+	endon
+	close prouser and remove
+	open prouser temporary
+	select * from textfile
+	detail
+		do clibvfile-split parameters are tf-line ":"
+			returning lf-flds
+		set pu-user = lf-flds[1]
+		set pu-level = num(lf-flds[2])
+		set pu-help-level = lf-flds[3]
+		set pu-default-task = lf-flds[4]
+		set pu-name = lf-flds[5]
+		set pu-max-sessions = num(lf-flds[6])
+		set pu-group-code = lf-flds[7]
+		set pu-permissions = num(lf-flds[10])
+		do convert-prouser-flags 
+			parameters are pu-permissions
+			returning pu-shell-access
+				pu-sql-dev
+				pu-4gl-dev
+				pu-dba
+				pu-filter-sort
+				pu-column-export
+		insert prouser
+		on error
+			set lr-message = "Unable to add Pronto Users to Memory file"
+		endon
+	end-select
+	//
+	// Get the groups
+	//
+	open textfile
+		file is '/etc/group'
+		read-only
+	on error
+		set lr-message = "Unable to open etc group"
+	endon
+	close etcgroup and remove
+	open etcgroup temporary
+	on error
+		set lr-message = "Unable to open groups text file"
+	endon
+	close groupmembership and remove
+	open groupmembership temporary
+	on error
+		set lr-message = "Unable to create group membership"
+	endon
+	select * from textfile
+	detail
+		do clibvfile-split parameters are tf-line ":"
+			returning lf-flds
+		set eg-name = lf-flds[1]
+		set eg-id = num(lf-flds[3])
+		insert etcgroup
+		on error
+			set lr-message = "Unable to add a group to the memory file"
+		endon
+		// 
+		// to get the users in the group we want to avoid the limitations of
+		// the clib (max no of fields and max len of each field):
+		//
+		initialise groupmembership
+		while tf-line != spaces
+			if pattern(tf-line,":") = 0
+				if substring(tf-line,1,1) = ","
+					// add the member
+					set gm-group = eg-name
+					insert groupmembership
+					on error
+						set lr-message  = "Unable to add group member"
+					endon
+					initialise groupmembership // ready for next one
+				else
+					string gm-user appending sub-string(tf-line,1,1)
+				endif
+			endif
+			string tf-line deleting 1 to 1 // remove the processed character
+		end-while
+		// now check there is not one remaining name to add:
+		if gm-user != spaces
+			// add the member
+			set gm-group = eg-name
+			insert groupmembership
+			on error
+				set lr-message  = "Unable to add last group member"
+			endon
+		endif
+	end-select
+	//
+	// Finally add the primary group membership (because that is not in
+	// etc group
+	//
+	select * from etcpasswd
+	detail
+		get etcgroup 
+			on index eg-id
+			key is ep-group
+		on error
+		else
+			get groupmembership
+				on index gm-group gm-user
+				key is eg-name ep-user
+			on error
+				set gm-group = eg-name
+				set gm-user = ep-user
+				insert groupmembership
+				on error
+					set lr-message = "Unable to add primary group membership"
+				endon
+			endon
+		endon
+	end-select
+	//
+	// Now build a summary table so we can see everything in one place
+	// (because the pronto join syntax for memory tables is crap)
+	//
+	close usersummary and remove
+	open usersummary temporary
+	on error
+		set lr-message = "unable to create user summary file"
+	endon
+	select * from etcpasswd
+	detail
+		initialise usersummary
+		set us-user = ep-user
+		set us-uid = ep-uid
+		set us-name = ep-desc
+		set us-unix-reg = YES
+		get prouser
+			on index pu-user
+			key is ep-user
+		on error
+		else
+			set us-pronto-reg = YES
+			select lf-coy-count = count(*)
+				from system-user
+				where user-id = :ep-user
+			end-select
+			set us-company-count = lf-coy-count
+		endon
+		get pdbedit
+			on index pe-user
+			key is ep-user
+		on error
+		else
+			set us-samba-reg = YES
+			set us-smbusers = pe-smbusers
+		endon
+		select us-group-count = count(*)
+			from groupmembership
+			where gm-user = :ep-user
+		endselect
+		insert usersummary
+		on error
+			set lr-message = concat( "Could not add user summary record:" error-description(file-status()))
+		endon
+	end-select
+	if lr-message != spaces
+		exit 1
+	endif
+endprocedure
+
+procedure create-audit-file
+	window @1,1 to @5,20
+		window-position 5
+//
+// For this to work, there must be auditing defined in the smb.conf file:
+// The full_audit:prefix is most important as it determines the file layout
+//
+//
+//    vfs objects = full_audit
+//    full_audit:success = mkdir rmdir read pread write pwrite rename unlink open close
+//    full_audit:prefix = %U|%t|%I|%m|%S
+//    full_audit:failure = none
+//    full_audit:facility = local5
+//    full_audit:priority = notice
+// 
+local
+	lf-cmd							type string pic x(256)
+	lf-file							type string pic x(256)
+	lf-flds							pic x(256) type string occurs 100
+	lf-flds-prev					pic x(256) type string occurs 100
+	i								type number
+	lf-one-different				type boolean
+returning
+	lr-message						type string pic x(128)
+	//
+	display "Please wait... accessing data" @2,5
+	set lf-file = concat("/tmp/auditout_" str(pid()) ".txt")
+	set lf-cmd = concat("sudo sambamnt.sh smbaudit " lf-file)
+	close textfile and remove
+	close smbaudit and remove
+	command "sh" parameters are "-c" lf-cmd
+#ifndef DEBUG
+		no-message
+#endif
+	if exit-status != EXIT_NORMAL
+		set lr-message = 'Unable to access the audit file'
+	else
+		open smbaudit temporary
+		on error
+			set lr-message = "Unable to create samba audit memory file"
+			exit 1
+		endon
+		open textfile
+			file is lf-file
+		on error
+			set lr-message = "Unable to open Samba audit file"
+			exit 1
+		endon
+	//
+		select * from textfile
+		detail
+			do clibvfile-split parameters are tf-line "|"
+				returning lf-flds
+			set sa-user = lf-flds[1]
+			//
+			// There are two different types of time available in the
+			// audit.  one has slashes the other does not
+			// This is handled by the sambamnt script.
+			//
+			// This is because earlier versions of samba do not support
+			// %t, they only support %T.  The script will handle either.
+			// if %t is in the smb.conf and it is not supported then it
+			// will simply print "%t" in the file.  If you find there are
+			// no dates in the audit screen check the smb.conf and change
+			// it to %T.
+			//
+			if str-len(lf-flds[2]) = 15
+				set sa-date = julian(
+					num(substring(lf-flds[2],7,8)),
+					num(substring(lf-flds[2],5,6)),
+					num(substring(lf-flds[2],1,4)))
+				set sa-time = 
+					num(substring(lf-flds[2],10,11)) * 3600 +
+					num(substring(lf-flds[2],12,13)) * 60 +
+					num(substring(lf-flds[2],14,15))
+			endif
+			set sa-ip = lf-flds[3]
+			set sa-machine = lf-flds[4]
+			set sa-share = lf-flds[5]
+			set sa-operation = lf-flds[6]
+			set sa-success = lf-flds[7]
+			if lf-flds[8] not in ('r','w')
+				set sa-rw = "n"
+				set sa-file = lf-flds[8]
+			else
+				set sa-rw = lf-flds[8]
+				set sa-file = lf-flds[9]
+			endif
+			set lf-one-different = false
+			for i = 1 to 9
+				if lf-flds-prev[i] != lf-flds[i]
+					set lf-one-different = TRUE
+					break
+				endif
+			end-for
+			if lf-one-different and sa-file not in (spaces ".")
+				insert smbaudit
+				on error
+					set lr-message = "Unable to add audit record"
+				endon
+				for i = 1 to 9
+					set lf-flds-prev[i] = lf-flds[i]
+				end-for
+			endif
+		end-select
+		close textfile and remove
+	end-if
+end-procedure
+
+#ifdef SAMBA_AUDIT_DB
+screen display-audit
+	window 
+		title "Samba Audit Records"
+	select * from samba-audit
+		order vsa-date vsa-time vsa-user vsa-ip
+	allowed search
+	datagrid occurs 22
+detail
+	accept vsa-id @1,1 pic z(9)
+		title "Id"
+	accept vsa-date @1,2
+		title "Date"
+		when screenmode = search 
+		show-value
+	accept vsa-time @1,3
+		title "Time"
+		when screenmode = search 
+		show-value
+	accept vsa-user @1,4 pic x(10)
+		title "User"
+		when screenmode = search 
+		show-value
+	display vsa-ip @1,5 pic x(15)
+		title "IP"
+	display vsa-machine @1,6 pic x(10)
+		title "Machine"
+	display vsa-share @1,7 pic x(10)
+		title "Share"
+	display vsa-operation @1,8 pic x(5)
+		title "Operation"
+	display vsa-success @1,9 pic x(5)
+		title "Success"
+	display vsa-read-write @1,10 pic x(1)
+		title "RW"
+	display vsa-filename @1,11 pic x(30)
+		title "File"
+end-screen
+
+#else  
+
+screen display-audit
+	window 
+		title "Samba Audit Records"
+	select * from smbaudit
+	allowed search md-enable-auditing
+	datagrid occurs 20
+before
+	do create-audit-file
+detail
+	if screenmode = md-enable-auditing
+		do add-change-auditing
+		exit
+	endif
+	accept sa-user @1,1 pic x(10)
+		title "User"
+		when screenmode = search 
+		show-value
+	accept sa-date @1,2
+		title "Date"
+		when screenmode = search 
+		show-value
+	accept sa-time @1,3
+		title "Time"
+		when screenmode = search 
+		show-value
+	display sa-ip @1,4 pic x(15)
+		title "IP"
+	display sa-machine @1,5 pic x(10)
+		title "Machine"
+	display sa-share @1,6 pic x(10)
+		title "Share"
+	display sa-operation @1,7 pic x(5)
+		title "Operation"
+	display sa-success @1,8 pic x(5)
+		title "Success"
+	display sa-rw @1,9 pic x(1)
+		title "RW"
+	display sa-file @1,10 pic x(30)
+		title "File"
+end-screen
+#endif
+
+procedure convert-prouser-flags
+// the 10th field in the prouser file is a number.
+// It is actually a binary bitmap where each bit corresponds to a given
+// function
+parameters
+	lp-code								type number
+returning
+	lr-shell-access						type boolean
+	lr-sql-dev							type boolean
+	lr-4gl-dev							type boolean
+	lr-dba								type boolean
+	lr-filter-sort						type boolean
+	lr-export							type boolean
+//
+	set lr-shell-access = if-then-else(aand(lp-code,1) = 1,TRUE,FALSE) 
+	set lr-sql-dev = if-then-else(aand(lp-code,2) = 2,TRUE,FALSE) 
+	set lr-4gl-dev = if-then-else(aand(lp-code,4) = 4,TRUE,FALSE) 
+	set lr-filter-sort = if-then-else(aand(lp-code,16) = 16,TRUE,FALSE) 
+	set lr-export = if-then-else(aand(lp-code,32) = 32,TRUE,FALSE) 
+	set lr-dba = if-then-else(aand(lp-code,64) = 64,TRUE,FALSE) 
+end-procedure
+
+procedure get-smbusers-filename
+returning
+	lr-filename						pic x(30)
+	select * from smbconf
+		where sc-section-share = "global"
+		and sc-key = "usernamemap"
+	detail
+		set lr-filename = sc-value
+	end-select
+end-procedure
+
+procedure build-smbusers
+// This is a separate procedure because it is called from two places
+local
+	lf-file-name					pic x(128) type string
+	lf-flds							pic x(256) type string occurs 100
+	//
+	do get-smbusers-filename returning lf-file-name
+	close smbusers and remove
+	open smbusers temporary
+	if lf-file-name = spaces
+		exit 
+	endif
+	open textfile
+		file is  lf-file-name
+		read-only
+	on error ENOENT
+		exit 1
+	endon
+	set su-line-no = 0
+	select * from textfile
+	detail
+		// trim leading spaces
+		set su-line-no += 1
+		initialise smbusers leaving su-line-no
+		while substring(tf-line,1,1) in (spaces, str(9)) 
+			string tf-line deleting 1
+			if tf-line = spaces
+				break
+			endif
+		end-while
+		do clibvfile-split parameters are tf-line "=" returning lf-flds
+		if substring(lf-flds[1],1,1) != '#' // commented out
+			set su-user = lf-flds[1]
+			set su-maps = lf-flds[2]
+			insert smbusers
+			get pdbedit
+				on index pe-user
+				key is ltrim(lf-flds[1])
+				lock
+			on error
+			else
+				set pe-smbusers = lf-flds[2]
+				update pdbedit
+				on error
+				endon
+			endon
+		endif
+	end-select
+end-procedure
+
+screen samba-passwd-screen-admin
+// 
+// Only administrators can change the windows login name for use in the
+// smb-users file.  This is because you need elevated access to read the
+// smb.conf in order to get the name of the smb-users file.
+// and elevated authority to change the smb-users file.
+parameters
+	lp-user									like ep-user
+local
+	lf-p1									type string
+	lf-p2									type string
+	lf-windows-user							type string
+	lf-message								pic x(256) type string
+	window @1,1 to @10,50
+		window-position 5
+	title ws-function-title
+//
+before
+	// changine someone else's
+	display lp-user @1,25 colour red
+		title "User id is :"
+	display "The Windows user id need only be entered if different to Pronto user id" @4,3
+		colour RGB(186,183,202)
+	display "Windows User ID:" @3,13 right-coord
+	get smbusers
+		on index su-user
+		key is lp-user
+	on error
+	else
+		set lf-windows-user = su-maps
+	endon
+detail
+	accept lf-windows-user @3,15 pic x(30)
+		help "Usually this will need to include the domain name such as TOYTOWN\noddy"
+		default lf-windows-user
+		optional
+	accept lf-p1 @5,15 pic x(30)
+		title "Windows Password:"
+		help "This should be the password you log on to WINDOWS (not pronto)"
+		blank
+	accept lf-p2 @6,15 pic x(30)
+		title "Re-type:"
+		help "Enter password a second time"
+		blank
+	confirm auto
+	confirmed
+		if lf-p1 <> lf-p2
+			message "The passwords are not the same"
+			re-enter lf-p1
+		endif
+		do set-samba-passwd-admin parameters are lp-user lf-p1 
+			returning lf-message
+		if exit-status != EXIT_NORMAL
+			message-box param-text("<<P1>><<BR>><<p2>>"
+				,"There was a problem changing the password"
+				,lf-message)
+				title is ws-function-title
+				message-buttons MSG_BOX_CANCEL
+				icon MSG_BOX_STOP
+		endif
+		// Check the windows user
+		set lf-message = spaces
+		get smbusers 
+			on index su-user
+			key is lp-user
+		on error
+			if lf-windows-user != spaces
+				do change-smb-user parameters are '-add' lp-user lf-windows-user
+					returning lf-message
+			endif
+		else
+			if lf-windows-user = spaces
+				do change-smb-user parameters are '-delete' lp-user spaces
+					returning lf-message
+			elseif lf-windows-user != su-maps
+				do change-smb-user parameters are '-delete' lp-user spaces
+					returning lf-message
+				do change-smb-user parameters are '-add' lp-user lf-windows-user
+					returning lf-message
+			endif
+		endon
+		if lf-message != spaces
+			message-box param-text("<<P1>><<BR>><<p2>>"
+				,"There was a problem setting the windows user"
+				,lf-message)
+				title is ws-function-title
+				message-buttons MSG_BOX_CANCEL
+				icon MSG_BOX_WARNING
+		endif
+	end-confirm
+end-screen
+
+
+procedure set-samba-passwd-admin
+parameters
+	lp-user								like ep-user
+	lp-passwd							type string
+returning
+	lr-message							pic x(128) type string
+local
+	lf-cmd								pic x(128) type string
+	//
+	//  Command should be :  smbpasswd -a -s $1 < <(echo $2;echo $2)
+	//  where $1 is the user name
+	//  and $2 is the password
+	set lf-cmd = 'sudo bash -c "smbpasswd -a -s'
+	string lf-cmd appending concat(" " lp-user)
+	string lf-cmd appending " < <(echo"
+	string lf-cmd appending concat(" " lp-passwd)
+	string lf-cmd appending concat(";echo " lp-passwd)
+	string lf-cmd appending ')"'
+	do execute-command parameters are lf-cmd returning lr-message
+	if exit-status != EXIT_NORMAL
+		exit 1
+	endif
+	// TODO: add to smb-users
+end-procedure
+
+screen samba-passwd-screen-user
+// 
+// Only administrators can change the windows login name for use in the
+// smb-users file.  This is because you need elevated access to read the
+// smb.conf in order to get the name of the smb-users file.
+// and elevated authority to change the smb-users file.
+local
+	lf-old-passwd						type string
+	lf-p1								type string
+	lf-p2								type string
+	lf-message							pic x(256) type string
+	window @1,1 to @10,50
+		window-position 5
+	title ws-function-title
+//
+before
+		// changing own password
+	display "Use this program to enter your windows password" @1,5
+	display "This will allow you access to shared folders on this PRONTO Server" @2,5
+	display login-id @4,25 colour red
+		title "Your Current User id is :"
+	do build-pdbedit-only
+	get pdbedit
+		on index pe-user
+		key is login-id()
+	on error
+		message-box param-text("<<P1>><<BR>><<p2>>"
+			,"You have not yet been set up"
+			,"Contact a system admin")
+			title is ws-function-title
+			message-buttons  MSG_BOX_CANCEL
+			icon MSG_BOX_STOP
+		exit
+	endon
+detail
+	accept lf-old-passwd @5,15 pic x(30)
+		title "OLD Password:"
+		help "This is whatever your password WAS"
+		blank
+	accept lf-p1 @7,15 pic x(30)
+		title "Windows Password:"
+		help "This should be the password you log on to WINDOWS (not pronto)"
+		blank
+	accept lf-p2 @8,15 pic x(30)
+		title "Re-type:"
+		help "Enter your password a second time"
+		blank
+	confirm auto
+	confirmed
+		if lf-p1 <> lf-p2
+			message "The passwords are not the same"
+			re-enter lf-p1
+		endif
+		do set-samba-passwd-user parameters are lf-old-passwd lf-p1
+			returning lf-message
+		if exit-status != EXIT_NORMAL
+			message-box param-text("<<P1>><<BR>><<p2>><<BR>><<p3>>"
+				,"There was a problem changing the password"
+				,"Did you get your old password correct?"
+				,lf-message)
+				title is ws-function-title
+				message-buttons MSG_BOX_CANCEL
+				icon MSG_BOX_STOP
+		endif
+	end-confirm
+end-screen
+
+procedure set-samba-passwd-user
+parameters
+	lp-old-passwd						like ep-user
+	lp-new-passwd						type string
+returning
+	lr-message							pic x(128) type string
+local
+	lf-cmd								pic x(128) type string
+	//
+	//  Command should be :  
+	//  smbpasswd -s < <(echo oldpwd; echo newpwd; echo newpwd)
+	//  to do this via sh you will need:
+	//  sh -c "(echo bigears;echo noddy;echo noddy) | smbpasswd -s"
+	//  where $1 is the user name
+	//  and $2 is the password
+	set lf-cmd = "smbpasswd -s"
+	set lf-cmd = "(echo"
+	string lf-cmd appending concat(" " lp-old-passwd )
+	string lf-cmd appending concat(";echo " lp-new-passwd )
+	string lf-cmd appending concat(";echo " lp-new-passwd)
+	string lf-cmd appending ') | smbpasswd -s'
+	do execute-command parameters are lf-cmd returning lr-message
+	if exit-status != EXIT_NORMAL
+		exit 1
+	endif
+end-procedure
+
+procedure change-smb-user
+parameters
+	lp-action							pic x(30) type string
+	lp-user								like ep-user
+	lp-maps								pic x(128) type string
+returning
+	lr-message							pic x(1024) type string
+local
+	lf-cmd								pic x(1024) type string
+	lf-smbuser-filename					pic x(1024) type string
+	//
+	if lp-action not in ( '-add', '-delete' )
+		set lr-message = "Invalid operation code"
+		exit 1
+	endif
+	//
+	get etcpasswd
+		on index ep-user
+		key is lp-user
+	on error ENOREC
+		set lr-message = "Invalid user id"
+		exit 1
+	endon
+	//
+	do get-smbusers-filename
+		returning lf-smbuser-filename
+	if lf-smbuser-filename = spaces
+		exit 1
+	endif
+	// 
+	//
+	switch lp-action
+	case "-add"
+		set lf-cmd = 'sudo sambamnt.sh addsmbuser '
+		string lf-cmd appending concat(" ",lp-user)
+		string lf-cmd appending concat(" ",lp-maps)
+		string lf-cmd appending concat(" ",lf-smbuser-filename)
+		do execute-command parameters are lf-cmd returning lr-message
+		if exit-status != EXIT_NORMAL
+			exit 1
+		endif
+	case '-delete'
+		get smbusers
+			on index su-user
+			key is lp-user
+		on error ENOREC
+			set lr-message = "Failed to get currency on smbusers"
+			exit 1
+		endon
+		//
+		set lf-cmd = 'sudo sambamnt.sh delsmbuser '
+		string lf-cmd appending concat(" ",str(su-line-no))
+		string lf-cmd appending concat(" ",lf-smbuser-filename)
+		do execute-command parameters are lf-cmd returning lr-message
+		if exit-status != EXIT_NORMAL
+			exit 1
+		endif
+	end-switch
+	do build-smbusers
+end-procedure
+
+procedure add-change-auditing
+local
+	lf-lines-to-delete							type number occurs 100
+	i											type number
+	lf-objname									type string
+	lf-max-global								like sc-line-no
+	select * from smbconf
+		where sc-section-share = 'global'
+		and sc-key = 'vfs objects'
+	detail
+		set lf-objname = sc-value
+		set lf-lines-to-delete[1] = sc-line-no
+		break
+	end-select
+	if lf-lines-to-delete[1] != 0
+		// Auditing currently enabled. Remove existing and add new
+		set i  = 2
+		string lf-objname appending "%"
+		select * from smbconf
+			where sc-section-share =  'global'
+			and sc-key like rtrim(lf-objname)
+			order by sc-line-no
+		detail
+			set lf-lines-to-delete[i] = sc-line-no
+			set i += 1
+		end-select
+		// now sort the lines desc 
+		do sort-array-desc parameters are lf-lines-to-delete  returning lf-lines-to-delete
+		// now delete them all (The deletion has to be descending because it uses
+		// sed and the line numbers will change between each execution
+		for i = 1 to occurence(lf-lines-to-delete)
+			if lf-lines-to-delete[i]  = 0
+				break
+			endif
+			do change-smb-conf parameters are '-delete' lf-lines-to-delete[i] spaces spaces
+		endfor
+		// rebuild it
+		do build-samba-conf
+	endif
+	//
+	// insert lines we know of
+	//
+	select lf-max-global = max(sc-line-no)
+		from smbconf
+		where sc-section-share = "global"
+	end-select
+	set lf-max-global += 1
+	do change-smb-conf parameters are "-add" lf-max-global
+		"vfs objects " "full_audit"
+	set lf-max-global += 1
+	do change-smb-conf parameters are "-add" lf-max-global
+		"full_audit:success " "mkdir rmdir read pread write pwrite rename unlink open close"
+	set lf-max-global += 1
+	if ws-samba-version > "4.7"
+		do change-smb-conf parameters are "-add" lf-max-global
+			"full_audit:prefix " "%U|%t|%I|%m|%S"
+	else
+		do change-smb-conf parameters are "-add" lf-max-global
+			"full_audit:prefix " "%U|%T|%I|%m|%S"
+	endif
+	set lf-max-global += 1
+	do change-smb-conf parameters are "-add" lf-max-global
+		"full_audit:failure " "none"
+	set lf-max-global += 1
+	do change-smb-conf parameters are "-add" lf-max-global
+		"full_audit:facility " "local5"
+	set lf-max-global += 1
+	do change-smb-conf parameters are "-add" lf-max-global
+		"full_audit:priority " "notice"
+	do build-samba-conf
+end-procedure
+
+procedure sort-array-desc
+parameters
+	lp-array							type number occurs 100
+returning
+	lp-array							
+local
+	i									type number
+	lf-swap								type number
+	lf-bubble-swap						type boolean
+	// now sort the lines desc using a bubble sorter
+	repeat 
+		set lf-bubble-swap = FALSE
+		for i = 1 to occurence(lp-array)
+			if lp-array[i] = 0
+				break
+			endif
+			if lp-array[i] < lp-array[i + 1] 
+				set lf-swap = lp-array[i]
+				set lp-array[i] = lp-array[i + 1]
+				set lp-array[i + 1] = lf-swap
+				set lf-bubble-swap = TRUE
+			endif
+		end-for
+	until not lf-bubble-swap
+	end-repeat
+end-procedure
+
+procedure change-smb-conf
+parameters
+	lp-action							pic x(30) type string
+	lp-line-no							like sc-line-no
+	lp-key								pic x(128) type string
+	lp-value							pic x(1024) type string
+returning
+	lr-message							pic x(1024) type string
+local
+	lf-cmd								pic x(1024) type string
+	//
+	if lp-action not in ( '-add', '-delete' , '-change' )
+		set lr-message = "Invalid operation code"
+		exit 1
+	endif
+	//
+	switch lp-action
+	case "-add"
+		set lf-cmd = 'sudo sambamnt.sh addsmbconf '
+		string lf-cmd appending concat(" ", str(lp-line-no))
+		string lf-cmd appending concat(" '\t",lp-key,"'")
+		string lf-cmd appending concat(" '",lp-value,"'")
+		string lf-cmd appending concat(" ",ws-smbdotconf-filename)
+		do execute-command parameters are lf-cmd returning lr-message
+		if exit-status != EXIT_NORMAL
+			exit 1
+		endif
+	case "-change"
+		set lf-cmd = 'sudo sambamnt.sh chgsmbconf '
+		string lf-cmd appending concat(" ", str(lp-line-no))
+		string lf-cmd appending concat(" '\t",lp-key,"'")
+		string lf-cmd appending concat(" '",lp-value,"'")
+		string lf-cmd appending concat(" ",ws-smbdotconf-filename)
+		do execute-command parameters are lf-cmd returning lr-message
+		if exit-status != EXIT_NORMAL
+			exit 1
+		endif
+	case '-delete'
+		//
+		set lf-cmd = 'sudo sambamnt.sh delsmbconf '
+		string lf-cmd appending concat(" ",str(lp-line-no))
+		string lf-cmd appending concat(" ",ws-smbdotconf-filename)
+		do execute-command parameters are lf-cmd returning lr-message
+		if exit-status != EXIT_NORMAL
+			exit 1
+		endif
+	end-switch
+end-procedure
+
+procedure add-user-to-group
+parameters
+	lp-user								like ep-user
+	lp-group							like eg-name
+returning
+	lr-message							pic x(128) type string
+local
+	lf-cmd								pic x(128) type string
+	//
+	//  Command should be :  sudo usermod -a -G <user> <group>
+	set lf-cmd = 'sudo sambamnt.sh addusergrp '
+	string lf-cmd appending concat(" " lp-group)
+	string lf-cmd appending concat(" " lp-user)
+	do execute-command parameters are lf-cmd returning lr-message
+	if exit-status != EXIT_NORMAL
+		exit 1
+	endif
+end-procedure
+
+procedure remove-user-from-group
+parameters
+	lp-user								like ep-user
+	lp-group							like eg-name
+returning
+	lr-message							pic x(128) type string
+local
+	lf-cmd								pic x(128) type string
+	//
+	//  Command should be :  sudo usermod -a -G <user> <group>
+	set lf-cmd = 'sudo sambamnt.sh rmvusergrp'
+	string lf-cmd appending concat(" " lp-user)
+	string lf-cmd appending concat(" " lp-group)
+	do execute-command parameters are lf-cmd returning lr-message
+	if exit-status != EXIT_NORMAL
+		exit 1
+	endif
+end-procedure
+
+procedure create-new-group
+parameters
+	lp-group							like eg-name
+returning
+	lr-message							pic x(128) type string
+	//
+	get etcgroup
+		on index eg-name
+		key is lp-group
+	on error ENOREC
+		do execute-command parameters are concat("sudo sambamnt.sh addgroup " , lp-group) returning lr-message
+		if exit-status != EXIT_NORMAL
+			exit 1
+		endif
+	else
+		set lr-message = "Group Already exists"
+		exit 1
+	endon
+	// refresh data files
+	do build-user-details
+end-procedure
+
+procedure remove-group
+parameters
+	lp-group							like eg-name
+returning
+	lr-message							pic x(128) type string
+local
+	lf-count							type number
+	//
+	get etcgroup
+		on index eg-name
+		key is lp-group
+	on error ENOREC
+		set lr-message = "Group does not exist"
+		exit 1
+	else
+		select lf-count = count(*)
+			from groupmembership
+			where gm-group = :lp-group
+		end-select
+		if lf-count != 0
+			set lr-message = "There are still members of the group.  Remove these first."
+			exit 1
+		endif
+		do execute-command parameters are concat("sudo sambamnt.sh rmvgroup ", lp-group) returning lr-message
+		if exit-status != EXIT_NORMAL
+			exit 1
+		endif
+	endon
+	// refresh data files
+	do build-user-details
+end-procedure
+
+
+procedure execute-command
+parameters
+	lp-cmd								pic x(1024) type string
+returning
+	lr-message							pic x(128) type string
+local
+	lf-single-slash						type number
+	lf-double-slash						type number
+	lf-start-pos						type number
+	//
+	// check for any backslashes as these will need to be escaped...
+	// .... unless it is chgsmbconf ....
+	//
+	if pattern(lp-cmd, 'chgsmbconf') = 0
+		set lf-start-pos = 1
+		repeat
+			set lf-single-slash = pattern(substring(lp-cmd,lf-start-pos,str-len(lp-cmd))
+										,'\\[~\\]')  // a backslash followed by not a backslash
+			set lf-double-slash = pattern(substring(lp-cmd,lf-start-pos,str-len(lp-cmd))
+										,'\\\\')  // a  double slash
+		until lf-single-slash = 0
+			or (lf-single-slash > lf-double-slash + 1 AND lf-double-slash != 0)
+			string lp-cmd inserting "\" at lf-single-slash
+			set lf-start-pos = lf-single-slash + 2
+		end-repeat
+	endif
+#ifdef DEBUG
+	message DEBUG("lp-cmd")
+#endif
+	command "sh" parameters are "-c" lp-cmd 
+	on error
+		set lr-message = "Unable to execute command"
+#ifdef DEBUG
+		message "sh failed:" DEBUG("lp-cmd")
+#endif
+		exit 1
+	endon
+	if exit-status != EXIT_NORMAL
+#ifdef DEBUG
+		message "script failed:" str(exit-status())
+#endif
+		if exit-status = 2
+			set lr-message = concat("Script called with invalid parameter : " lp-cmd)
+			exit 1
+		endif
+		set lr-message = concat("Command Failed (" str(exit-status()) ")")
+		exit 1
+	endif
+	exit 0
+end-procedure
+
+
+
+#define HELP_DISPLAY(A) \
+	display A @lf-next-line,2 prompt colour blue\
+	set lf-next-line += 1
+#define HELP_CMD_DISPLAY(A) \
+	display A @lf-next-line,2 prompt colour green bold\
+		fixed-width-font \
+	set lf-next-line += 1
+
+procedure sudo-help-screen
+	window no-hide
+	window-position 5
+local
+	lf-next-line						type number
+	//
+	set lf-next-line = 1
+	HELP_DISPLAY("This procedure makes extensive use of SUDO and sudo needs to be configured correctly.")
+	HELP_DISPLAY("As root create a new group called samba_admin:")
+	HELP_CMD_DISPLAY("groupadd samba_admin")
+	HELP_DISPLAY("Add this to the first user:")
+	HELP_CMD_DISPLAY("usermod -a -G samba_admin <youruserid>")
+	HELP_DISPLAY("Now edit the sudo configuration file using the visudo command")
+	HELP_DISPLAY("At the end of the file add these records:")
+	HELP_CMD_DISPLAY("%samba_admin     ALL = NOPASSWD: /bin/smbpasswd ?*")
+	HELP_CMD_DISPLAY("%samba_admin     ALL = NOPASSWD: /bin/bash -c smbpasswd ?*")
+	HELP_CMD_DISPLAY("%samba_admin     ALL = NOPASSWD: /pro/pronto/lbin/sambamnt.sh ?*")
+	pause
+end-procedure
+
+procedure get-samba-version
+returning
+	lr-version					type string
+local
+	lf-file						type string pic x(128)
+	set lf-file = concat("/tmp/smbversion_" str(pid()) ".txt")
+	//
+	do execute-command parameters are concat("sudo sambamnt.sh smbversion ", lf-file) 
+	if exit-status != EXIT_NORMAL
+		exit 1
+	endif
+	open textfile
+		file is lf-file
+	on error
+		exit 1
+	endon
+	select * from textfile
+	detail
+		string tf-line deleting 1 to 8
+		set lr-version = tf-line
+		exit
+	end-select
+	close textfile and remove
+end-procedure
+
+procedure build-samba-conf
+local
+	lf-file								pic x(128) type string
+	lf-equals							type number
+	lf-this-section						type string
+	lf-line-no							type number
+	//
+	set lf-file = concat("/tmp/smbconf" str(pid()) ".txt")
+	//
+	do execute-command parameters are concat("sudo sambamnt.sh getfile " ws-smbdotconf-filename " ", lf-file) 
+	if exit-status != EXIT_NORMAL
+		exit 1
+	endif
+	close smbconf and remove
+	open smbconf temporary
+	on error
+		exit 1
+	endon
+	open textfile
+		file is lf-file
+	on error
+		exit 1
+	endon
+	set lf-line-no = 0
+	set sc-section-share = spaces
+	select * from textfile
+	detail
+		set lf-line-no += 1
+		initialise smbconf 
+		set sc-line-no = lf-line-no
+		set lf-equals = 0
+		// remove comments
+		if pattern(tf-line, "#")
+			string tf-line deleting pattern(tf-line,"#") to str-len(tf-line)
+		endif
+		// skip blank lines
+		if tf-line = spaces
+			continue
+		endif
+		// forece lc
+		set tf-line = lowercase(tf-line)
+		// remove white space at beginning
+		while substring(tf-line,1,1) in (spaces,str(9))
+			string tf-line deleting 1 
+		endwhile
+		// check for section heading
+		if pattern(tf-line , "^\[" ) != 0
+			set lf-this-section = substring(tf-line,2,str-len(tf-line))
+			string lf-this-section deleting pattern(tf-line,"\]") - 1 to str-len(tf-line)
+			continue
+		endif
+		set sc-section-share = lf-this-section
+		set tf-line = ltrim(tf-line)
+		set sc-key = substring(tf-line,1,pattern(tf-line, "=") - 1 )
+		string tf-line deleting 1 to pattern(tf-line,"=")
+		set tf-line = ltrim(tf-line)
+		if tf-line = spaces
+			// some big cock up
+			continue
+		endif
+		set sc-value = tf-line
+		insert smbconf
+	end-select
+#ifndef DEBUG
+	close textfile and remove
+#endif
+	report finished
+end-procedure
+
+screen smb-conf-review
+parameters are 
+	lp-section-name						like sc-section-share
+	window @1,1 to @24,132
+		window-position 5
+		title "Smb Conf"
+	datagrid occurs 22
+	select * from smbconf
+		where sc-section-share = :lp-section-name
+		or :lp-section-name = spaces
+	allowed search
+detail
+	accept sc-line-no @1,1
+		title "sc-line-no"
+	display sc-section-share @1,2
+		title "sc-section-share"
+	display sc-key @1,3
+		title "sc-key"
+	display sc-value @1,4
+		title "sc-value"
+end-screen
+
+#ifdef SAMBA_AUDIT_DB
+procedure samba-audit-add-db
+returning 
+	lr-message							type string pic x(1024) // for app services
+local
+	lf-next-seq							like vsa-id
+	lf-syslog-count						type number
+	lf-added-count						type number
+	lf-sql-count						type number
+//
+// this procedures adds records to a permanent database file.
+// /var/log/messages is turned over relatively frequently so to have
+// audit records longer than about a day this program needs to be included in
+// appervices at an appropriate time.  It is important that appserv user has
+// access to the samba maintenance functions via sudo as described earlier.
+//
+	open samba-audit
+	on error
+		set lr-message =  "Unable to open samba-audit"
+		exit 1
+	endon
+	do create-audit-file
+	if exit-status != EXIT_NORMAL
+		set lr-message =  "Unable to access audit records"
+		exit 1
+	endif
+	select lf-next-seq = max(vsa-id)
+		from samba-audit
+	end-select
+	set lf-next-seq += 1
+	// 
+	// Now read through the temp file and add to the audit
+	//
+	select * from smbaudit
+		order by sa-date sa-time sa-user sa-ip
+	BEFORE sa-date sa-time sa-user sa-ip
+		select lf-sql-count = count(*)
+			from samba-audit
+			where vsa-date = :sa-date
+			and vsa-time = :sa-time
+			and vsa-user = :sa-user
+			and vsa-ip = :sa-ip
+		end-select
+	detail
+		set lf-syslog-count += 1
+		if lf-sql-count = 0
+			// add these records
+			initialise samba-audit 
+			set vsa-id = lf-next-seq
+			set vsa-user = sa-user
+			set vsa-date = sa-date
+			set vsa-time = sa-time
+			set vsa-ip = sa-ip
+			set vsa-machine = sa-machine
+			set vsa-share = sa-share
+			set vsa-operation = sa-operation
+			set vsa-success = sa-success
+			set vsa-read-write = sa-rw
+			set vsa-filename = sa-file
+			insert samba-audit
+			on error
+			else
+				set lf-next-seq += 1
+				set lf-added-count += 1
+			endon
+		endif
+	end-select
+	set lr-message = concat(str(lf-syslog-count) 
+		" records read from syslog. " 
+		str(lf-added-count)
+		" records added to db.")
+end-procedure
+
+procedure purge-audit
+parameters
+	lp-days							type number
+returning
+	lr-message						pic x(1024) type string
+local
+	lf-sql-date						type date
+	//
+	set lf-sql-date = today - lp-days
+	//
+	sql-delete samba-audit
+		where vsa-date < :lf-sql-date
+	set lr-message = concat("Records prior to " 
+				format-picture(lf-sql-date, "dd-mmm-yyyy") 
+				" removed from audit")
+end-procedure
+		
+#endif
+
+

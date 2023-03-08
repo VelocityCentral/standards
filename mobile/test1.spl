@@ -1,0 +1,65 @@
+procedure main
+	do testit parameters are 14266 spaces
+end-procedure
+
+procedure testit
+parameters
+	lp-order-no							like so-order-no
+	lp-bo-suffix						like so-bo-suffix
+	select 
+		t0.*
+		t1.*
+		// note that it is important NOT to select the order number from the
+		// delivery table because this is an outer join.  If the delivery
+		// record is not there, then the order number will revert to 0
+		t2.so-text-type
+		t2.so-dl-text
+		from sales-order as t0
+		left join deb-master as t1 on t1.accountcode = t0.so-cust-code
+		left outer join sales-order-delivery as t2 
+			on t2.so-order-no = t0.so-order-no
+			and t2.so-bo-suffix = t0.so-bo-suffix
+			and t2.so-text-type = "DA"
+		where t0.so-order-no = :lp-order-no
+		and t0.so-bo-suffix = :lp-bo-suffix
+	detail
+		message so-dl-text[2]
+	end-select
+end-procedure
+
+
+screen order-header
+parameters
+	lp-order-no							like so-order-no
+	lp-bo-suffix						like so-bo-suffix
+	window
+	responsive
+	select 
+		t0.*
+		t1.*
+		// note that it is important NOT to select the order number from the
+		// delivery table because this is an outer join.  If the delivery
+		// record is not there, then the order number will revert to 0
+		t2.so-text-type
+		t2.so-dl-text[1]
+		from sales-order as t0
+		left join deb-master as t1 on t1.accountcode = t0.so-cust-code
+		left outer join sales-order-delivery as t2 
+			on t2.so-order-no = t0.so-order-no
+			and t2.so-bo-suffix = t0.so-bo-suffix
+			and t2.so-text-type = "DA"
+		where t0.so-order-no = :lp-order-no
+		and t0.so-bo-suffix = :lp-bo-suffix
+detail
+	screen-group
+		title "Address"
+		vertical
+		display so-dl-text[1]
+		display so-dl-text[2]
+		display so-dl-text[3]
+		display so-dl-text[4]
+		display so-dl-text[5]
+		display so-dl-text[6]
+		display so-dl-text[7]
+	end-screen-group
+end-screen

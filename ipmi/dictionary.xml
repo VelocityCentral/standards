@@ -1,0 +1,237 @@
+<?xml version="1.0"?>
+<?xml-stylesheet type="text/xsl" href="cli6128_2.xsl" ?>
+<report><report_info>
+<page_count>00000002</page_count>
+<printed>N</printed>
+<title>Dictionary Listing Report</title>
+<length>66</length>
+<width>132</width>
+<real_length>00062</real_length>
+<real_width>0145</real_width>
+<data_dir>/pro/data/spc</data_dir>
+<style_sheet_type>full</style_sheet_type>
+<host></host>
+</report_info><page_header tag="0">
+<ln1_expr_1>DICTIONARY LISTING OF:</ln1_expr_1><dict>/pro/pronto/cus/spicers</dict><ln1_expr_100>18-AUG-2011</ln1_expr_100><ln1_expr_120>Page</ln1_expr_120><pageno>1</pageno>
+</page_header>
+<detail tag="1">
+<object tag="2">
+<obj-head tag="3">
+<obj_name>ipmi-master</obj_name><obj_id>86</obj_id>
+<obj_doc>Ipmi Master</obj_doc><obj_recsize>142</obj_recsize>
+<obj_file>ipmimast</obj_file><obj_sec>2</obj_sec>
+<lf_audited>No</lf_audited>
+<obj_type>I</obj_type><ln5_expr_18>- ISAM</ln5_expr_18>
+</obj-head>
+<keys tag="4">
+<key-field tag="5">
+<index_no>1</index_no><ln1_expr_12>YES</ln1_expr_12><fld_name>ipmi-code</fld_name>
+</key-field>
+</keys>
+<field-headings tag="6">
+</field-headings>
+<field tag="7">
+<fld_name>ipmi-code</fld_name><fld_doc>Code</fld_doc><fld_col_name>code</fld_col_name><fld_id>475</fld_id><rec_offset>0</rec_offset><fld_size>10</fld_size><type_desc>Alpha</type_desc><tot_digits>10</tot_digits><dec_places>0</dec_places><lf_audited>Yes</lf_audited>
+<validations tag="8">
+<val tag="9">
+<ln1_expr_5>Validations:</ln1_expr_5><doc_line>help &quot; **Enter Help Text in quotes**&quot;</doc_line>
+</val>
+</validations>
+</field>
+<field tag="10">
+<fld_name>ipmi-description</fld_name><fld_doc>Description</fld_doc><fld_col_name>description</fld_col_name><fld_id>476</fld_id><rec_offset>10</rec_offset><fld_size>30</fld_size><type_desc>Alpha</type_desc><tot_digits>30</tot_digits><dec_places>0</dec_places><lf_audited>Yes</lf_audited>
+<validations tag="11">
+<val tag="12">
+<ln1_expr_5>Validations:</ln1_expr_5><doc_line>help &quot;The description of this reading&quot;</doc_line>
+</val>
+</validations>
+</field>
+<field tag="13">
+<fld_name>ipmi-match-text</fld_name><fld_doc>Match Text</fld_doc><fld_col_name>match-text</fld_col_name><fld_id>477</fld_id><rec_offset>40</rec_offset><fld_size>50</fld_size><type_desc>Alpha</type_desc><tot_digits>50</tot_digits><dec_places>0</dec_places><lf_audited>Yes</lf_audited>
+<validations tag="14">
+<val tag="15">
+<ln1_expr_5>Validations:</ln1_expr_5><doc_line>help &quot;Text to look for in the ipmitool sdr&quot;</doc_line>
+</val>
+</validations>
+</field>
+<field tag="16">
+<fld_name>ipmi-reading-type</fld_name><fld_doc>Reading Type</fld_doc><fld_col_name>reading-type</fld_col_name><fld_id>478</fld_id><rec_offset>90</rec_offset><fld_size>1</fld_size><type_desc>Alpha</type_desc><tot_digits>1</tot_digits><dec_places>0</dec_places><lf_audited>Yes</lf_audited>
+<validations tag="17">
+<val tag="18">
+<ln1_expr_5>Validations:</ln1_expr_5><doc_line>help &quot;N)umeric B)oolean&quot;</doc_line>
+</val>
+<val tag="19">
+<doc_line>allow &quot;N&quot; &quot;B&quot;</doc_line>
+</val>
+</validations>
+<documentation tag="20">
+<doc tag="21">
+<ln1_expr_5>Documentation:</ln1_expr_5><doc_line>the field can contain either numeric data such as temperature or Fan RPM</doc_line>
+</doc>
+<doc tag="22">
+<doc_line>(type N for numeric) or it may contain just an OK/Not OK value in the case of</doc_line>
+</doc>
+<doc tag="23">
+<doc_line>redundant power supplies or disks.</doc_line>
+</doc>
+</documentation>
+</field>
+<field tag="24">
+<fld_name>ipmi-reading-field</fld_name><fld_doc>Reading Field</fld_doc><fld_col_name>reading-field</fld_col_name><fld_id>479</fld_id><rec_offset>91</rec_offset><fld_size>2</fld_size><type_desc>Numeric</type_desc><tot_digits>3</tot_digits><dec_places>0</dec_places><lf_audited>Yes</lf_audited>
+<validations tag="25">
+<val tag="26">
+<ln1_expr_5>Validations:</ln1_expr_5><doc_line>help &quot;The number of the field that contains the value&quot;</doc_line>
+</val>
+<val tag="27">
+<doc_line>default 4</doc_line>
+</val>
+<val tag="28">
+<doc_line>allow 4-10</doc_line>
+</val>
+</validations>
+<documentation tag="29">
+<doc tag="30">
+<ln1_expr_5>Documentation:</ln1_expr_5><doc_line>the ipmi reading file should contain the date,time, sensor name in the first</doc_line>
+</doc>
+<doc tag="31">
+<doc_line>three fields.  the data field may be in any field from 4 onwards.</doc_line>
+</doc>
+<doc tag="32">
+<doc_line>This field contains the field number in the file.  Field number 1 is the first</doc_line>
+</doc>
+<doc tag="33">
+<doc_line>field on the file (date).</doc_line>
+</doc>
+</documentation>
+</field>
+<field tag="34">
+<fld_name>ipmi-boolean-tf</fld_name><fld_doc>Boolean True/False</fld_doc><fld_col_name>boolean-tf</fld_col_name><fld_id>480</fld_id><rec_offset>93</rec_offset><fld_size>1</fld_size><type_desc>Alpha</type_desc><tot_digits>1</tot_digits><dec_places>0</dec_places><lf_audited>Yes</lf_audited>
+<validations tag="35">
+<val tag="36">
+<ln1_expr_5>Validations:</ln1_expr_5><doc_line>help &quot;Enter T if the boolean match text will result in TRUE or F for false&quot;</doc_line>
+</val>
+<val tag="37">
+<doc_line>default &quot;T&quot;</doc_line>
+</val>
+<val tag="38">
+<doc_line>allowed &quot;T&quot; &quot;F&quot;</doc_line>
+</val>
+</validations>
+</field>
+<field tag="39">
+<fld_name>ipmi-reading-boolean-match</fld_name><fld_doc>Boolean match test</fld_doc><fld_col_name>boolean_match</fld_col_name><fld_id>481</fld_id><rec_offset>94</rec_offset><fld_size>30</fld_size><type_desc>Alpha</type_desc><tot_digits>30</tot_digits><dec_places>0</dec_places><lf_audited>Yes</lf_audited>
+<documentation tag="40">
+<doc tag="41">
+<ln1_expr_5>Documentation:</ln1_expr_5><doc_line>The program looks at fields marked as boolean.  It looks at the text in this</doc_line>
+</doc>
+<doc tag="42">
+<doc_line>field.  If it matches the text in the IPMI then the value is set to TRUE.</doc_line>
+</doc>
+<doc tag="43">
+<doc_line>if not the value is set to FALSE.</doc_line>
+</doc>
+<doc tag="44">
+<doc_line>Triggers are raised when the value of the field is false.</doc_line>
+</doc>
+<doc tag="45">
+<doc_line>So the description for a redundant power supply sensor should be</doc_line>
+</doc>
+<doc tag="46">
+<doc_line>&quot;Power supply OK&quot;.  The reading true value should be &quot;ok&quot;.  Whenever</doc_line>
+</doc>
+<doc tag="47">
+<doc_line>the reading returns something other than OK.  Then the value is set</doc_line>
+</doc>
+<doc tag="48">
+<doc_line>to FALSE and a trigger alarm raised.</doc_line>
+</doc>
+</documentation>
+</field>
+<field tag="49">
+<fld_name>ipmi-trigger-low</fld_name><fld_doc>Trigger</fld_doc><fld_col_name>trigger-low</fld_col_name><fld_id>482</fld_id><rec_offset>124</rec_offset><fld_size>8</fld_size><type_desc>Numeric</type_desc><tot_digits>14</tot_digits><dec_places>4</dec_places><signed>Y</signed><lf_audited>Yes</lf_audited>
+<validations tag="50">
+<val tag="51">
+<ln1_expr_5>Validations:</ln1_expr_5><doc_line>help &quot;Lower Boundary Trigger Point&quot;</doc_line>
+</val>
+</validations>
+</field>
+<field tag="52">
+<fld_name>ipmi-trigger-high</fld_name><fld_doc>Trigger High</fld_doc><fld_col_name>trigger-high</fld_col_name><fld_id>483</fld_id><rec_offset>132</rec_offset><fld_size>8</fld_size><type_desc>Numeric</type_desc><tot_digits>14</tot_digits><dec_places>4</dec_places><signed>Y</signed><lf_audited>Yes</lf_audited>
+<validations tag="53">
+<val tag="54">
+<ln1_expr_5>Validations:</ln1_expr_5><doc_line>help &quot;High Tigger point&quot;</doc_line>
+</val>
+</validations>
+</field>
+<field tag="55">
+<fld_name>ipmi-days-to-keep</fld_name><fld_doc>Days To Keep</fld_doc><fld_col_name>days-to-keep</fld_col_name><fld_id>484</fld_id><rec_offset>140</rec_offset><fld_size>2</fld_size><type_desc>Numeric</type_desc><tot_digits>4</tot_digits><dec_places>0</dec_places><lf_audited>Yes</lf_audited>
+<validations tag="56">
+<val tag="57">
+<ln1_expr_5>Validations:</ln1_expr_5><doc_line>help &quot;Number of days to keep readings&quot;</doc_line>
+</val>
+<val tag="58">
+<doc_line>default 5</doc_line>
+</val>
+</validations>
+</field>
+</object>
+</detail>
+<br/><br/><br/><br/><br/><br/><br/><br/>
+<page_footer tag="59">
+<footer tag="60">
+<ln62_expr_101>                   ipmi-master</ln62_expr_101>
+</footer>
+</page_footer>
+<page/>
+<page_header tag="61">
+<ln1_expr_1>DICTIONARY LISTING OF:</ln1_expr_1><dict>/pro/pronto/cus/spicers</dict><ln1_expr_100>18-AUG-2011</ln1_expr_100><ln1_expr_120>Page</ln1_expr_120><pageno>2</pageno>
+</page_header>
+<detail tag="62">
+<object tag="63">
+<obj-head tag="64">
+<obj_name>ipmi-readings</obj_name><obj_id>88</obj_id>
+<obj_doc>Ipmi Readings</obj_doc><obj_recsize>32</obj_recsize>
+<obj_file>ipmireading</obj_file><obj_sec>2</obj_sec>
+<lf_audited>No</lf_audited>
+<obj_type>I</obj_type><ln5_expr_18>- ISAM</ln5_expr_18>
+</obj-head>
+<keys tag="65">
+<key-field tag="66">
+<index_no>1</index_no><ln1_expr_12>YES</ln1_expr_12><fld_name>ipmi-code</fld_name>
+</key-field>
+<key-field tag="67">
+<fld_name>ipmi-datetime</fld_name>
+</key-field>
+</keys>
+<field-headings tag="68">
+</field-headings>
+<field tag="69">
+<fld_name>ipmi-code</fld_name><fld_doc>Code</fld_doc><fld_col_name>code</fld_col_name><fld_id>475</fld_id><rec_offset>0</rec_offset><fld_size>10</fld_size><type_desc>Alpha</type_desc><tot_digits>10</tot_digits><dec_places>0</dec_places><lf_audited>Yes</lf_audited>
+<validations tag="70">
+<val tag="71">
+<ln1_expr_5>Validations:</ln1_expr_5><doc_line>help &quot; **Enter Help Text in quotes**&quot;</doc_line>
+</val>
+</validations>
+</field>
+<field tag="72">
+<fld_name>ipmi-datetime</fld_name><fld_doc>Datetime</fld_doc><fld_col_name>reading_time</fld_col_name><fld_id>488</fld_id><rec_offset>10</rec_offset><fld_size>4</fld_size><type_desc>Local Date/Time</type_desc><tot_digits>0</tot_digits><dec_places>0</dec_places><lf_audited>Yes</lf_audited>
+</field>
+<field tag="73">
+<fld_name>ipmi-reading-value</fld_name><fld_doc>Reading Value</fld_doc><fld_col_name>reading-value</fld_col_name><fld_id>486</fld_id><rec_offset>14</rec_offset><fld_size>8</fld_size><type_desc>Numeric</type_desc><tot_digits>14</tot_digits><dec_places>4</dec_places><signed>Y</signed><lf_audited>Yes</lf_audited>
+<validations tag="74">
+<val tag="75">
+<ln1_expr_5>Validations:</ln1_expr_5><doc_line>help &quot;Reading Value&quot;</doc_line>
+</val>
+</validations>
+</field>
+<field tag="76">
+<fld_name>ipmi-reading-unit</fld_name><fld_doc>Reading Unit</fld_doc><fld_col_name>uom</fld_col_name><fld_id>487</fld_id><rec_offset>22</rec_offset><fld_size>10</fld_size><type_desc>Alpha</type_desc><tot_digits>10</tot_digits><dec_places>0</dec_places><lf_audited>Yes</lf_audited>
+<validations tag="77">
+<val tag="78">
+<ln1_expr_5>Validations:</ln1_expr_5><doc_line>help &quot;Unit of Measure&quot;</doc_line>
+</val>
+</validations>
+</field>
+</object>
+</detail>
+</report>

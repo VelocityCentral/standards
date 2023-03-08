@@ -1,0 +1,8 @@
+
+
+procedure main
+local
+	lf-results pic x(1024) type string
+	spl 'edi/ediamazon' returning lf-results
+	message lf-results
+end-procedure

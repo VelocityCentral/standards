@@ -1,0 +1,2135 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : clib implementation of iolexl
+//   This program is designed to replace iolexl.
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2020
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: clib/clibvxlole.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 28Jun20  rjb         written 
+/*
+
+Written by Ray Burns of Velocitty Global Ltd.
+
+	This documentation is in RST format.  To view this as a nice pdf goto
+	https://overbits.herokuapp.com/rsteditor/ or rst.ninjs.org and paste this content.
+
+==========
+clibvxlole
+==========
+
+This clib is used to create excel spread sheets from within a
+4GL program.  It does require some global field definitions.
+It was originally an include file and is now a clib.
+
+General:
+~~~~~~~~
+	1) 	Make use of the exit-status.  If an error occurs the exit status will be non-zero
+	2)	clibvxlole-last-error returns the error message from the last error that occurred
+	3)  There are three critical variables :
+
+		a. ws-instance-id ( the ole link to excel), 
+		b. ws-workbook-id (the ole link to the workbook)
+		c. ws-worksheet-id (the ole link to the worksheet)
+
+	Each routine checks that these are set appropriately and will error if not.
+
+Usage
+~~~~~
+
+XL_ADDR(R,C) 
+~~~~~~~~~~~~
+	 returns a Letter/rownum refrence from a row and col parameter
+	 that can be used in formulas and the like
+
+clibvxlole-enumerate-workbooks
+------------------------------
+	 Returns a big varchar that is a pipe delimited list of all the workbooks
+	 that are currently open.  Also returns the count					
+	 
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   out     |Varchar    | Pipe separated list of all open workbooks              |
+	|           | 160000    |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   out     | int       | No of Open Worksheets                                  |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvxlole-enumerate-worksheets
+-------------------------------
+	Pass the name of a workbook (includes extension but not path) and returns
+	a big varchar of all the worksheets in a workbook plus a count of same.
+	list is pipe delimited.
+	 
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   in      |String 128 | name of workbook                                       |
+	+-----------+-----------+--------------------------------------------------------+
+	|   out     |Varchar    | Pipe separated list of all open workbooks              |
+	|           | 160000    |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   out     | int       | No of Open Worksheets                                  |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvxlole-create-new
+---------------------
+	Creates a new spreadsheet 
+	There are no parameters to specify
+
+clibvxlole-open-sheet
+---------------------
+	Opens an existing spreadsheet.  
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 128 |Full path to file                                       |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |String 40  |Worksheet to make active                                |
+	+-----------+-----------+--------------------------------------------------------+
+
+	Be Careful - full pathnames should be used.  IF not this
+	routine uses the pronto file-exists function which defaults
+	to whereever proclient is running from and, it also uses the xl
+	save.as function which defaults to my documents. - the two
+	will be confused.
+
+
+clibvxlole-set-active-sheet
+---------------------------
+	searches all the sheets in the current connected workbook for the one with 
+	the specifed name
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 500 |Name of the sheet to make active                        |
+	+-----------+-----------+--------------------------------------------------------+
+
+
+
+clibvxlole-rename-sheet
+-----------------------
+	Renames the current sheet to the specifed name
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 500 |New sheet name                                          |
+	+-----------+-----------+--------------------------------------------------------+
+
+
+clibvxlole-create-from-template
+-------------------------------
+	Creates a new spreadsheet from the template FN which must be
+	in the Excel startup folder. Don't pass the extension - use 
+	the name as it appears in the File/New dialog box. S is 
+	worksheet to be used. 
+	Need to start excel first.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|    In     |String 200 |Full path to template file (no extension)               |
+	+-----------+-----------+--------------------------------------------------------+
+	|    In     |String 40  |Name of newly created sheet                             |
+	+-----------+-----------+--------------------------------------------------------+
+
+
+clibvxlole-send-mail
+--------------------
+	Send spreadsheet via email to recipient(s) , with specified subject 
+	If the subject is ommitted, Excel will use the workbook name.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 500 |semi-colon delimited list of email addresses            |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |String 150 |Subject line of sent email                              |
+	+-----------+-----------+--------------------------------------------------------+
+
+
+clibvxlole-close
+----------------
+
+	Closes the current session. Note that Maximising the application
+	also does this.  Only use this if you are maximising the sheet
+	e.g. in order to work with a different sheet.
+	This function also saves the open file before closing.
+
+	No Parameters
+
+clibvxlole-save
+---------------
+	Saves the spreadsheet as specified file
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 200 |Full path to file to saved (think "Saveas")             |
+	+-----------+-----------+--------------------------------------------------------+
+
+
+clibvxlole-maximise
+-------------------------------------------------------------------------
+
+	Maximise the spreadsheet
+
+	No Parameters
+
+clibvxlole-put
+-------------------------------------------------------------------------
+	Populates a cell with the specified string
+	S must be a valid 4gl string.  A number must be converted using str()
+	Any valid XL formula can be passed as well
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |  int      |Row Number                                              |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |  int      |Column Number                                           |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |String 400 |String to place at specified location                   |
+	+-----------+-----------+--------------------------------------------------------+
+
+
+clibvxlole-comment
+-------------------------------------------------------------------------
+	Adds a cell comment of specified text  to the cell 
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |  int      |Row Number                                              |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |  int      |Column Number                                           |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |String 1k  |String to add as comment to specified cell              |
+	+-----------+-----------+--------------------------------------------------------+
+
+
+clibvxlole-border
+-------------------------------------------------------------------------
+ 	puts a border around the nominated cells
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |  int      |Start Row number                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |  int      |Start Column Number                                     |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |  int      |End   Row number                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |  int      |End   Column Number                                     |
+	+-----------+-----------+--------------------------------------------------------+
+
+
+clibvxlole-merge
+-------------------------------------------------------------------------
+	Merges the content in the nomintated cells 
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |  int      |Start Row number                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |  int      |Start Column Number                                     |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |  int      |End   Row number                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |  int      |End   Column Number                                     |
+	+-----------+-----------+--------------------------------------------------------+
+
+
+clibvxlole-format
+-------------------------------------------------------------------------
+
+	applies format string FS to the cells from row SR col SC
+	to row ER column EC.  Any valid XL format string can be used.
+	Some symbolic constants have been defined for the most common
+	as a guide but you can add what you like.
+
+		SYMBOLIC CONSTANTS :
+
+		*	XL_FORMAT_INTEGER 
+		*	XL_FORMAT_DOLLAR 
+		*	XL_FORMAT_PERCENT 
+		*	XL_FORMAT_NO_ZERO (integer)
+		*	XL_FORMAT_NO_ZERO_2DP 
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |  int      |Start Row number                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |  int      |Start Column Number                                     |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |  int      |End   Row number                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |  int      |End   Column Number                                     |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |String 400 |Format string to apply                                  |
+	|           |           |                                                        |
+	|           |           |To use the symbolic constants pass these as the string. |
+	|           |           |i.e. in the calling program make this parameter         |
+	|           |           |"XL_FORMAT_INTEGER"                                     |
+	|           |           |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvxlole-column-width
+-------------------------------------------------------------------------
+	Sets the width of each column in the specified range
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |  int      |Start Column number                                     |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |  int      |End Column Number                                       |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |  int      |Width to set                                            |
+	+-----------+-----------+--------------------------------------------------------+
+
+
+clibvxlole-row-height
+-------------------------------------------------------------------------
+
+	Sets the Height of each column in the specfied range 
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |  int      |Start Row number                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |  int      |End Row Number                                          |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |  int      |Height to set                                           |
+	+-----------+-----------+--------------------------------------------------------+
+
+
+clibvxlole-auto-fit
+-------------------------------------------------------------------------
+	Automatically sets the row and column width to the widest/ heights
+	required for the text contained.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |  int      |Start Row number                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |  int      |Start Column Number                                     |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |  int      |End   Row number                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |  int      |End   Column Number                                     |
+	+-----------+-----------+--------------------------------------------------------+
+
+
+clibvxlole-auto-fit-row
+-------------------------------------------------------------------------
+	Automatically sets the row height to the minimum 
+	required for the text contained.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |  int      |Start Row number                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |  int      |End Row Number                                          |
+	+-----------+-----------+--------------------------------------------------------+
+
+
+clibvxlole-format-text
+-------------------------------------------------------------------------
+	Formats the cells according to the specified format string FC.  
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |  int      |Start Row number                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |  int      |Start Column Number                                     |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |  int      |End   Row number                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |  int      |End   Column Number                                     |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |String 40  |                                                        |
+	|           |           |If the string contains a "B" the text will be bold,     |
+	|           |           |I - ITalic, U-Underline.                                |
+	|           |           |They can be mixed so that the string BU will            |
+	|           |           |cause bold underlined.                                  |
+	|           |           |If FC is a valid number, then it will apply             |
+	|           |           |that point size to the text.                            |
+	+-----------+-----------+--------------------------------------------------------+
+
+
+clibvxlole-wrap-text
+-------------------------------------------------------------------------
+	Wrap the text in the range 
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |  int      |Start Row number                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |  int      |Start Column Number                                     |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |  int      |End   Row number                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |  int      |End   Column Number                                     |
+	+-----------+-----------+--------------------------------------------------------+
+
+
+clibvxlole-horiz-text
+-------------------------------------------------------------------------
+	Change the Horizontal Alignment for the text in the range 
+	This option should only be performed AFTER an XL_AUTO_FIT
+	has been executed
+
+	The format code
+
+	*		1	General
+	*		2	Left
+	*		3	Center
+	*		4	Right
+	*		5	Fill
+	*		6	Justify
+	*		7	Center across selection
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |  int      |Start Row number                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |  int      |Start Column Number                                     |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |  int      |End   Row number                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |  int      |End   Column Number                                     |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |  int      |Format code to apply - See above                        |
+	+-----------+-----------+--------------------------------------------------------+
+
+
+clibvxlole-vert-text
+-------------------------------------------------------------------------
+	Change the Vertical Alignment for the text in the range 
+	
+	FC has the current values :
+	*	1	Top
+	*	2	Center 
+	*	3	Bottom
+	*	4	Justify
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |  int      |Start Row number                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |  int      |Start Column Number                                     |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |  int      |End   Row number                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |  int      |End   Column Number                                     |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |  int      |Format code to apply - See above                        |
+	+-----------+-----------+--------------------------------------------------------+
+
+
+clibvxlole-orient-text
+-------------------------------------------------------------------------
+
+	Change the Vertical Alignment for the text in the range 
+
+	Format Code has the current values :
+
+	*	0	Horizontal
+	*	1	Vertical 
+	*	2	Upward
+	*	3	Downward
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |  int      |Start Row number                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |  int      |Start Column Number                                     |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |  int      |End   Row number                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |  int      |End   Column Number                                     |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |  int      |Format code to apply - See above                        |
+	+-----------+-----------+--------------------------------------------------------+
+
+
+clibvxlole-box-border
+-------------------------------------------------------------------------
+
+	put a border around EACH cell
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |  int      |Start Row number                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |  int      |Start Column Number                                     |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |  int      |End   Row number                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |  int      |End   Column Number                                     |
+	+-----------+-----------+--------------------------------------------------------+
+
+
+clibvxlole-outline-border
+-------------------------------------------------------------------------
+	
+	put a border around the range.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |  int      |Start Row number                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |  int      |Start Column Number                                     |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |  int      |End   Row number                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |  int      |End   Column Number                                     |
+	+-----------+-----------+--------------------------------------------------------+
+
+
+clibvxlole-print
+-------------------------------------------------------------------------
+
+	Print the current worksheet
+
+	There are no parameters
+
+
+clibvxlole-get
+-------------------------------------------------------------------------
+
+	Get the contents of a cell.
+	
+	Note : As as 20 July 2020 there is a bug in local agent that results in nothing
+	being returned if the contents exceed 186 bytes.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |  int      |Row number                                              |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |  int      |Column Number                                           |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |  String   |Contents of the cell                                    |
+	+-----------+-----------+--------------------------------------------------------+
+
+
+clibvxlole-freezepanes
+-------------------------------------------------------------------------
+
+	Freezes the window pane at the specified location.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |  int      |Row number                                              |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |  int      |Column Number                                           |
+	+-----------+-----------+--------------------------------------------------------+
+
+
+clibvxlole-release-resources
+-------------------------------------------------------------------------
+
+	No parameters.  Call this at the end of the process to release all ole handles.
+
+Creating Charts.
+~~~~~~~~~~~~~~~~
+
+To create a chart you must first be active on a worksheet that contains the data.
+The charting function assumes a simple grid of data (typically with the xaxis in column A but that is not essential).
+Note that that ALL rows are included in the chart.  When specifying the data you only specify the COLUMNS.
+
+Start by calling  clibvxl-ole-chart-add
+
+You may then optionally add titles and other data series
+
+
+clibvxlole-chart-add
+-------------------------------------------------------------------------
+		- The first parameter is the name.  This is the name that appears in the tab at the bottom of the workbook.
+		  You must specify a X and Y axis.  These should be the column NUMBER to use.
+		  The Xtype parameter determines the type of data on the X axis.  Normally this is spaces.  
+		  Set this to a "D" if the X axis contains dates.
+		  This will ensure that the x axis is calendar spaced.  I.e. it will correctly handle
+		  a data set that is missing values in the date range.  The X axis will be evenly spaced
+		  between the first and last values in the range irresepective of the number of values you 
+		  actually have.
+
+		  The Ytype  parameter is one of the xlChartType enumarations and determines the kind of chart.  
+		  0 will set the chart type to line.  The most common other types are :
+
+		  *	1	Bar chart
+		  * 4	Line Chart
+		  * 5   Pie Chart
+
+		  For further chart types see the clibvxlole code or the excel ole documentation
+
+		  FirstRow is used when you don't want the graph to start at the first row on the sheet.  When you are looking at
+		  the differences between rows you might want the graph to start on the second row of data
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 128 |Name of the chart sheet                                 |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |  int      |Column Number of the x axis                             |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |  int      |Column Number of the x axis                             |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |string 1   |Spaces will make x a normal axis. "D" will make the x   |
+	|           |           |axis a date axis                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |  int      |The Chart TYPE as described above                       |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |  int      |The first row that contains values to chart             |
+	+-----------+-----------+--------------------------------------------------------+
+
+
+clibvxlole-chart-title
+-------------------------------------------------------------------------
+		The first parameter is the text.  
+
+		The second parameter is the type of title:
+
+		* M) the main title that appears top and centre
+		* X) the title for the x axis
+		* YP) the title for the left hand Y axis
+		* YS) the title for the right hand Y axis
+
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 256 |Title                                                   |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |String xx  |Type of title as described above                        |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvxlole-chart-add-series
+-------------------------------------------------------------------------
+
+	Add another data series to the chart
+
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 100 |Name of sheet containing data                           |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |  int      |Column Number to add                                    |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |Boolean    |True to make this a secondary axis (RHS axis)           |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      | int       |Chart type as per the chart add function                |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |String 100 |If the data has the name at the top of the column, leave|
+	|           |           |this parameter blank.  Otherwise set this toa string to |
+	|           |           |to change the name as it will appear in the legend      |
+	+-----------+-----------+--------------------------------------------------------+
+
+
+*/
+////////////////////////////////////////////////////////////////////////////////
+//
+//
+
+#define MAX_OPEN_WORKBOOKS 25
+
+link "clib/clib100"
+
+#include "../include/i8proglogparam.spl"
+
+#define	I8EXCEL_APPNAME	"Excel.Application"
+// OLE Excel value definitions
+////////////////////////////////////
+// Border values 
+////////////////////////////////////
+//EdgeTypes
+#define xlDiagonalDown 5
+#define xlDiagonalUp 6
+#define xlEdgeBottom 9
+#define xlEdgeLeft 7
+#define xlEdgeRight 10
+#define xlEdgeTop 8
+#define xlInsideHorizontal 12
+#define xlInsideVertical 11
+//Weight
+#define xlHairline 1
+#define xlMedium -4138
+#define xlThick 4
+#define xlThin 2
+//Linestyle
+#define xlContinuous 1
+#define xlDash -4115
+#define xlDashDot 4
+#define xlDashDotDot 5
+#define xlDot -4118
+#define xlDouble -4119
+#define xlLineStyleNone -4142
+#define xlSlantDashDot 13
+////////////////////////
+//ColorIndex - Values 0 to 56 (there is a chart) i will put it somewhere.
+#define xlColorIndexAutomatic  -4105 
+#define xlColorIndexNone  -4142 
+////////////////////////////
+//Cell HorizontalAlignment
+#define xlCenter  -4108 
+#define xlCenterAcrossSelection  7 
+#define xlDistributed  -4117 
+#define xlFill  5 
+#define xlGeneral  1 
+#define xlJustify  -4130 
+#define xlLeft  -4131 
+#define xlRight  -4152 
+//XlWindowState
+#define xlMaximized  -4137 
+#define xlMinimized  -4140 
+#define xlNormal  -4143 
+#define xl3DBar -4099 // 3D Bar
+#define xl3DEffects1 13 // 3D Effects1
+#define xl3DEffects2 14 // 3D Effects2
+#define xl3DSurface -4103 // 3D Surface
+#define xlAbove 0 // Above
+#define xlAccounting1 4 // Accounting1
+#define xlAccounting2 5 // Accounting2
+#define xlAccounting4 17 // Accounting4
+#define xlAdd 2 // Add
+#define xlAll -4104 // All
+#define xlAccounting3 6 // Accounting3
+#define xlAllExceptBorders 7 // All Except Borders
+#define xlAutomatic -4105 // Automatic
+#define xlBar 2 // Automatic
+#define xlBelow 1 // Below
+#define xlBidi -5000 // Bidi
+#define xlBidiCalendar 3 // BidiCalendar
+#define xlBoth 1 // Both
+#define xlBottom -4107 // Bottom
+#define xlCascade 7 // Cascade
+//#define xlCenter -4108 // Center
+//#define xlCenterAcrossSelection 7 // Center Across Selection
+#define xlChart4 2 // Chart 4
+#define xlChartSeries 17 // Chart Series
+#define xlChartShort 6 // Chart Short
+#define xlChartTitles 18 // Chart Titles
+#define xlChecker 9 // Checker
+#define xlCircle 8 // Circle
+#define xlClassic1 1 // Classic1
+#define xlClassic2 2 // Classic2
+#define xlClassic3 3 // Classic3
+#define xlClosed 3 // Closed
+#define xlColor1 7 // Color1
+#define xlColor2 8 // Color2
+#define xlColor3 9 // Color3
+#define xlColumn 3 // Column
+#define xlCombination -4111 // Combination
+#define xlComplete 4 // Complete
+#define xlConstants 2 // Constants
+#define xlContents 2 // Contents
+#define xlContext -5002 // Context
+#define xlCorner 2 // Corner
+#define xlCrissCross 16 // CrissCross
+#define xlCross 4 // Cross
+#define xlCustom -4114 // Custom
+#define xlDebugCodePane 13 // Debug Code Pane
+#define xlDefaultAutoFormat -1 // Default Auto Format
+#define xlDesktop 9 // Desktop
+#define xlDiamond 2 // Diamond
+#define xlDirect 1 // Direct
+//#define xlDistributed -4117 // Distributed
+#define xlDivide 5 // Divide
+#define xlDoubleAccounting 5 // Double Accounting
+#define xlDoubleClosed 5 // Double Closed
+#define xlDoubleOpen 4 // Double Open
+#define xlDoubleQuote 1 // Double Quote
+#define xlDrawingObject 14 // Drawing Object
+#define xlEntireChart 20 // Entire Chart
+#define xlExcelMenus 1 // Excel Menus
+#define xlExtended 3 // Extended
+//#define xlFill 5 // Fill
+#define xlFirst 0 // First
+#define xlFixedValue 1 // Fixed Value
+#define xlFloating 5 // Floating
+#define xlFormats -4122 // Formats
+#define xlFormula 5 // Formula
+#define xlFullScript 1 // Full Script
+//#define xlGeneral 1 // General
+#define xlGray16 17 // Gray16
+#define xlGray25 -4124 // Gray25
+#define xlGray50 -4125 // Gray50
+#define xlGray75 -4126 // Gray75
+#define xlGray8 18 // Gray8
+#define xlGregorian 2 // Gregorian
+#define xlGrid 15 // Grid
+#define xlGridline 22 // Gridline
+#define xlHigh -4127 // High
+#define xlHindiNumerals 3 // Hindi Numerals
+#define xlIcons 1 // Icons
+#define xlImmediatePane 12 // Immediate Pane
+#define xlInside 2 // Inside
+#define xlInteger 2 // Integer
+//#define xlJustify -4130 // Justify
+#define xlLast 1 // Last
+#define xlLastCell 11 // Last Cell
+#define xlLatin -5001 // Latin
+//#define xlLeft -4131 // Left
+#define xlLeftToRight 2 // Left To Right
+#define xlLightDown 13 // Light Down
+#define xlLightHorizontal 11 // Light Horizontal
+#define xlLightUp 14 // Light Up
+#define xlLightVertical 12 // Light Vertical
+#define xlList1 10 // List1
+#define xlList2 11 // List2
+#define xlList3 12 // List3
+#define xlLocalFormat1 15 // Local Format1
+#define xlLocalFormat2 16 // Local Format2
+#define xlLogicalCursor 1 // Logical Cursor
+#define xlLong 3 // Long
+#define xlLotusHelp 2 // Lotus Help
+#define xlLow -4134 // Low
+#define xlLTR -5003 // LTR
+#define xlMacrosheetCell 7 // MacrosheetCell
+#define xlManual -4135 // Manual
+#define xlMaximum 2 // Maximum
+#define xlMinimum 4 // Minimum
+#define xlMinusValues 3 // Minus Values
+#define xlMixed 2 // Mixed
+#define xlMixedAuthorizedScript 4 // Mixed Authorized Script
+#define xlMixedScript 3 // Mixed Script
+#define xlModule -4141 // Module
+#define xlMultiply 4 // Multiply
+#define xlNarrow 1 // Narrow
+#define xlNextToAxis 4 // Next To Axis
+#define xlNoDocuments 3 // No Documents
+#define xlNone -4142 // None
+#define xlNotes -4144 // Notes
+#define xlOff -4146 // Off
+#define xlOn 1 // On
+#define xlOpaque 3 // Opaque
+#define xlOpen 2 // Open
+#define xlOutside 3 // Outside
+#define xlPartial 3 // Partial
+#define xlPartialScript 2 // Partial Script
+#define xlPercent 2 // Percent
+#define xlPlus 9 // Plus
+#define xlPlusValues 2 // Plus Values
+#define xlReference 4 // Reference
+//#define xlRight -4152 // Right
+#define xlRTL -5004 // RTL
+#define xlScale 3 // Scale
+#define xlSemiautomatic 2 // Semiautomatic
+#define xlSemiGray75 10 // SemiGray75
+#define xlShort 1 // Short
+#define xlShowLabel 4 // Show Label
+#define xlShowLabelAndPercent 5 // Show Label and Percent
+#define xlShowPercent 3 // Show Percent
+#define xlShowValue 2 // Show Value
+#define xlSimple -4154 // Simple
+#define xlSingle 2 // Single
+#define xlSingleAccounting 4 // Single Accounting
+#define xlSingleQuote 2 // Single Quote
+#define xlSolid 1 // Solid
+#define xlSquare 1 // Square
+#define xlStar 5 // Star
+#define xlStError 4 // St Error
+#define xlStrict 2 // Strict
+#define xlSubtract 3 // Subtract
+#define xlSystem 1 // System
+#define xlTextBox 16 // Text Box
+#define xlTiled 1 // Tiled
+#define xlTitleBar 8 // Title Bar
+#define xlToolbar 1 // Toolbar
+#define xlToolbarButton 2 // Toolbar Button
+#define xlTop -4160 // Top
+#define xlTopToBottom 1 // Top To Bottom
+#define xlTransparent 2 // Transparent
+#define xlTriangle 3 // Triangle
+#define xlVeryHidden 2 // Very Hidden
+#define xlVisible 12 // Visible
+#define xlVisualCursor 2 // Visual Cursor
+#define xlWatchPane 11 // Watch Pane
+#define xlWide 3 // Wide
+#define xlWorkbookTab 6 // Workbook Tab
+#define xlWorksheet4 1 // Worksheet4
+#define xlWorksheetCell 3 // Worksheet Cell
+#define xlWorksheetShort 5 // Worksheet Short
+#define xlDownward -4170 // Text runs downward. 
+#define xlHorizontal -4128 // Text runs horizontally. 
+#define xlUpward -4171 // Text runs upward. 
+#define xlVertical -4166 // Text runs downward and is centered in the cell. 
+
+
+// Chart related Constants
+//
+// xlChartType enumeriation
+#define xl3DArea -4098 //3D Area. 
+#define xl3DAreaStacked 78 //3D Stacked Area. 
+#define xl3DAreaStacked100 79 //100% Stacked Area. 
+#define xl3DBarClustered 60 //3D Clustered Bar. 
+#define xl3DBarStacked 61 //3D Stacked Bar. 
+#define xl3DBarStacked100 62 //3D 100% Stacked Bar. 
+#define xl3DColumn -4100 //3D Column. 
+#define xl3DColumnClustered 54 //3D Clustered Column. 
+#define xl3DColumnStacked 55 //3D Stacked Column.  
+#define xl3DColumnStacked100 56 //3D 100% Stacked Column. 
+#define xl3DLine -4101 //3D Line. 
+#define xl3DPie -4102 //3D Pie. 
+#define xl3DPieExploded 70 //Exploded 3D Pie. 
+#define xlArea 1 //Area 
+#define xlAreaStacked 76 //Stacked Area. 
+#define xlAreaStacked100 77 //100% Stacked Area. 
+#define xlBarClustered 57 //Clustered Bar. 
+#define xlBarOfPie 71 //Bar of Pie. 
+#define xlBarStacked 58 //Stacked Bar. 
+#define xlBarStacked100 59 //100% Stacked Bar. 
+#define xlBubble 15 //Bubble. 
+#define xlBubble3DEffect 87 //Bubble with 3D effects. 
+#define xlColumnClustered 51 //Clustered Column. 
+#define xlColumnStacked 52 //Stacked Column. 
+#define xlColumnStacked100 53 //100% Stacked Column. 
+#define xlConeBarClustered 102 //Clustered Cone Bar. 
+#define xlConeBarStacked 103 //Stacked Cone Bar. 
+#define xlConeBarStacked100 104 //100% Stacked Cone Bar. 
+#define xlConeCol 105 //3D Cone Column. 
+#define xlConeColClustered 99 //Clustered Cone Column. 
+#define xlConeColStacked 100 //Stacked Cone Column. 
+#define xlConeColStacked100 101 //100% Stacked Cone Column. 
+#define xlCylinderBarClustered 95 //Clustered Cylinder Bar. 
+#define xlCylinderBarStacked 96 //Stacked Cylinder Bar. 
+#define xlCylinderBarStacked100 97 //100% Stacked Cylinder Bar. 
+#define xlCylinderCol 98 //3D Cylinder Column. 
+#define xlCylinderColClustered 92 //Clustered Cone Column. 
+#define xlCylinderColStacked 93 //Stacked Cone Column. 
+#define xlCylinderColStacked100 94 //100% Stacked Cylinder Column. 
+#define xlDoughnut -4120 //Doughnut. 
+#define xlDoughnutExploded 80 //Exploded Doughnut. 
+#define xlLine 4 //Line. 
+#define xlLineMarkers 65 //Line with Markers. 
+#define xlLineMarkersStacked 66 //Stacked Line with Markers. 
+#define xlLineMarkersStacked100 67 //100% Stacked Line with Markers. 
+#define xlLineStacked 63 //Stacked Line. 
+#define xlLineStacked100 64 //100% Stacked Line. 
+#define xlPie 5 //Pie. 
+#define xlPieExploded 69 //Exploded Pie. 
+#define xlPieOfPie 68 //Pie of Pie. 
+#define xlPyramidBarClustered 109 //Clustered Pyramid Bar. 
+#define xlPyramidBarStacked 110 //Stacked Pyramid Bar. 
+#define xlPyramidBarStacked100 111 //100% Stacked Pyramid Bar. 
+#define xlPyramidCol 112 //3D Pyramid Column. 
+#define xlPyramidColClustered 106 //Clustered Pyramid Column. 
+#define xlPyramidColStacked 107 //Stacked Pyramid Column. 
+#define xlPyramidColStacked100 108 //100% Stacked Pyramid Column. 
+#define xlRadar -4151 //Radar. 
+#define xlRadarFilled 82 //Filled Radar. 
+#define xlRadarMarkers 81 //Radar with Data Markers. 
+#define xlStockHLC 88 //High-Low-Close. 
+#define xlStockOHLC 89 //Open-High-Low-Close. 
+#define xlStockVHLC 90 //Volume-High-Low-Close. 
+#define xlStockVOHLC 91 //Volume-Open-High-Low-Close. 
+#define xlSurface 83 //3D Surface. 
+#define xlSurfaceTopView 85 //Surface (Top View). 
+#define xlSurfaceTopViewWireframe 86 //Surface (Top View wireframe). 
+#define xlSurfaceWireframe 84 //3D Surface (wireframe). 
+#define xlXYScatter -4169 //Scatter. 
+#define xlXYScatterLines 74 //Scatter with Lines. 
+#define xlXYScatterLinesNoMarkers 75 //Scatter with Lines and No Data Markers. 
+#define xlXYScatterSmooth 72 //Scatter with Smoothed Lines. 
+#define xlXYScatterSmoothNoMarkers 73 //Scatter with Smoothed Lines and No Data Markers. 
+//
+// xlaxistype enumeration
+#define xlCategory 1 //Axis displays categories. 
+#define xlSeriesAxis 3 //Axis displays data series. 
+#define xlValue 2 //Axis displays values. 
+// xlaxisgroup enumeration
+#define xlPrimary 1 //Primary axis group. 
+#define xlSecondary 2 //Secondary axis group. 
+//
+// xlCategoryType Enumaeration
+#define xlAutomaticScale -4105 //Excel controls the axis type. 
+#define xlCategoryScale 2 //Axis groups data by an arbitrary set of categories. 
+#define xlTimeScale 3 //Axis groups data on a time scale. 
+// xlRowCol Enumaeration
+#define xlRows 1 // data series is in a COLUMN
+#define xlColumns 2 // data series is in a ROW
+
+#define XL_FORMAT_INTEGER "###,###,##0"
+#define XL_FORMAT_DOLLAR "$###,###,##0.00"
+#define XL_FORMAT_PERCENT "###,###,##0.00%"
+#define XL_FORMAT_NO_ZERO '###,##0_ ;[RED]-###,##0_ ;\-_\ '
+#define XL_FORMAT_NO_ZERO_2DP '###,##0.00_ ;[RED]-###,##0.00_ ;\-_\ '
+		
+
+#define ERROR_HANDLE(EXIT)\
+	if ws-error != SPACE \
+		set ws-xl = ole-release(ws-worksheet-id)\
+		set ws-xl = ole-call-method(ws-workbook-id,"Close",ws-dummy-ret )\
+		set ws-xl = ole-release(ws-workbook-id)\
+		set ws-xl = ole-release(ws-instance-id)\
+		message ws-error\
+		if EXIT\
+			exit 1\
+		endif\
+	endif 
+
+#define XL_ADDR(R,C)  \
+	str-concat(if-then-else(C > 26,ascii-char(integer((C - 1) / 26) + 64)," ") , ascii-char(((C - 1) % 26) + 65),str(R))
+
+#define XL_COL(C) \
+	str-concat(if-then-else(C > 26,ascii-char(integer((C - 1) / 26) + 64)," ") , ascii-char(((C - 1) % 26) + 65))
+
+
+
+field 
+	ws-instance-id						type ole-interface
+	ws-workbook-id						type ole-interface
+	ws-worksheet-id						type ole-interface
+	ws-dummy-ret						pic s9(8)
+	ws-range-id							pic s9(8)
+	ws-xl								pic s9(8)
+	ws-error							pic x(80)
+//	ws-ok								type boolean
+	ws-chart							type ole-interface
+
+
+
+procedure library-init
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8proglogparam-write-log parameters are "clibvxlole"
+end-procedure
+
+//------------------------------------------------------------------------------
+//  Generic Errors
+//------------------------------------------------------------------------------
+
+procedure clibvxlole-last-error export
+returning
+	lr-error							like ws-error
+	set lr-error = ws-error
+end-procedure
+
+/* 
+	Bulk put makes any updates and inserts CONSIDERABLY faster
+*/
+
+procedure clibxvlole-enable-bulk-put export
+	if ole-bulk-put(TRUE) endif
+end-procedure
+
+procedure clibxvlole-disable-bulk-put export
+	if ole-bulk-put(FALSE) endif
+end-procedure
+
+//------------------------------------------------------------------------------
+//   Enumerations
+//------------------------------------------------------------------------------
+
+procedure clibvxlole-enumerate-workbooks export
+returning
+	lr-list								pic x(16000) type varchar
+	lr-count							type number // count of open workbooks
+local
+	i 									type number
+	lf-workbook-id						type ole-interface
+	lf-xl								type ole-interface
+	lf-open-file						pic x(528) type string
+	//
+	do set-instance-id
+	if exit-status != 0
+		exit 1
+	endif
+	for i = 1 to MAX_OPEN_WORKBOOKS // that is enough - who has 25 simulatneous spreadsheets open
+		if ole-get-property (ws-instance-id, "Application.Workbooks.Item", lf-workbook-id, i)
+			if ole-get-property (lf-workbook-id, "Name",lf-open-file)
+				if lr-list = spaces
+					set lr-list = lf-open-file
+				else
+					string lr-list appending str-concat("|",lf-open-file)
+				endif
+				set lr-count += 1
+			else	
+				set lf-xl = ole-release (lf-workbook-id)
+			endif 
+		else	
+			//no more sheets open
+			break
+		endif
+	end-for
+end-procedure
+	
+procedure clibvxlole-enumerate-worksheets export
+//
+// returns a list of the sheets in the workbook
+// The workbook MUST already be open
+//
+parameters
+	lp-workbook-name				pic x(128) type string
+returning
+	lr-sheet-list					pic x(16000) type varchar
+	lr-count						type number
+local
+	i 								type number
+	lf-workbook-id					type ole-interface
+	lf-worksheet-id					type ole-interface
+	lf-itemname						type string pic x(128)
+	lf-file-found					type boolean
+	lf-xl							type ole-interface
+	//
+	if ws-instance-id = 0
+		set ws-error = "No Link to Excel established yet"
+		exit 1
+	endif
+	//  Find the workbook
+	for i = 1 to MAX_OPEN_WORKBOOKS // that is enough - who has 25 simulatneous spreadsheets open
+		if ole-get-property (ws-instance-id, "Application.Workbooks.Item", lf-workbook-id, i)
+			if ole-get-property (lf-workbook-id, "Name",lf-itemname)
+				if pattern(lf-itemname,lp-workbook-name) 
+					set lf-file-found = TRUE
+					break 
+				endif 
+			else	
+				set lf-xl = ole-release (lf-workbook-id)
+			endif 
+		else	
+			//no more sheets open
+			break
+		endif
+	endfor	
+	if not lf-file-found
+		set ws-error = "Workbook not open"
+		exit 1
+	endif
+	set ws-workbook-id = lf-workbook-id
+	//
+	// Find the sheet
+	//
+	if ole-get-property(ws-workbook-id,"Worksheets.Count",lr-count) endif
+	if lr-count <= 0
+		set ws-error = "No sheets in workbook"
+		exit 1
+	endif
+	for i = 1 to lr-count
+		if ole-get-property(lf-workbook-id,"Worksheets.item",lf-worksheet-id, i)
+			if ole-get-property(lf-worksheet-id,"Name", lf-itemname)
+				if lr-sheet-list = spaces
+					set lr-sheet-list = lf-itemname
+				else
+					string lr-sheet-list appending concat("|", lf-itemname)
+				endif
+			endif
+		endif
+	end-for
+end-procedure 
+
+procedure clibvxlole-set-active-workbook export
+parameters
+	lp-workbook-name				pic x(128) type string
+local
+	i 								type number
+	lf-workbook-id					type ole-interface
+	lf-itemname						type string pic x(128)
+	lf-file-found					type boolean
+	lf-xl							type ole-interface
+	//
+	if ws-instance-id = 0
+		set ws-error = "No Link to Excel established yet"
+		exit 1
+	endif
+	//  Find the workbook
+	for i = 1 to MAX_OPEN_WORKBOOKS // that is enough - who has 25 simulatneous spreadsheets open
+		if ole-get-property (ws-instance-id, "Application.Workbooks.Item", lf-workbook-id, i)
+			if ole-get-property (lf-workbook-id, "Name",lf-itemname)
+				if pattern(lf-itemname,lp-workbook-name) 
+					set lf-file-found = TRUE
+					break 
+				endif 
+			else	
+				set lf-xl = ole-release (lf-workbook-id)
+			endif 
+		else	
+			//no more sheets open
+			break
+		endif
+	endfor	
+	if not lf-file-found
+		set ws-error = "Workbook not open"
+		exit 1
+	endif
+	set ws-workbook-id = lf-workbook-id
+end-procedure
+
+procedure clibvxlole-set-active-sheet export
+parameters are
+	lp-sheet-name						type string pic x(500)
+local
+	lf-name								type string pic x(500)
+	lf-count							type number
+	i									type number
+	//
+	if ws-workbook-id = 0
+		set ws-error = "No Connection to workbook"
+		exit 1
+	endif
+	//
+	if ole-get-property(ws-workbook-id,"Worksheets.Count",lf-count)
+		for i = 1 to lf-count
+			set ws-xl = ole-get-property (ws-workbook-id, "WorkSheets.item", ws-worksheet-id,i)
+			set ws-xl = ole-get-property (ws-worksheet-id, "Name", lf-name)
+			if lf-name = lp-sheet-name
+				break
+			endif
+		endfor
+	endif
+end-procedure
+
+//------------------------------------------------------------------------------
+//  Starting routines
+//------------------------------------------------------------------------------
+
+procedure clibvxlole-create-new export
+	do clibvxlole-start-excel parameter are spaces spaces
+	if exit-status != 0
+		exit 1
+	endif
+end-procedure
+
+procedure clibvxlole-open-sheet export
+parameters
+	lp-filename							pic x(200) type string
+	lp-sheetname						type string
+	do clibvxlole-start-excel
+		parameters are lp-filename lp-sheetname
+	if exit-status != 0
+		exit 1
+	endif
+end-procedure
+
+procedure set-instance-id
+	set ws-error = SPACE 
+	set ws-instance-id = ole-get-active-object("Excel.Application")
+	if ws-instance-id <= 0
+		set ws-error = concat("Could not find excel - error ",ole-error-description(ole-status()))
+		exit 1
+	endif
+end-procedure
+
+procedure clibvxlole-create-from-template export
+parameters
+	lp-template							pic x(200) type string
+	lp-sheetname						type string
+	do clibvxlole-start-excel
+		parameters are lp-template lp-sheetname
+	if exit-status != 0
+		exit 1
+	endif
+end-procedure
+
+
+procedure clibvxlole-start-excel export
+// note that it is important to add-new-workbook and add-new-worksheet
+// even if you are not adding.  You need to do this to get currency on a
+// worksheet that all of the other operations will work on,.
+//
+// This routine does a number of things dependant on the parameters passed:
+	//
+parameter 
+	lp-spreadsheet-name					pic x(200) type string
+	lp-sheet-name						type string
+local
+	lf-spreadsheet-currently-open		type boolean
+	lf-count							type number
+	i									type number
+	lf-name								type string
+	//
+	do clib100-start-excel
+		returning
+			ws-error
+			ws-instance-id
+	ERROR_HANDLE(TRUE)
+	if lp-spreadsheet-name = spaces
+		do clib100-add-new-workbook 
+			parameter ws-instance-id SPACE 
+			returning ws-error	ws-workbook-id
+		ERROR_HANDLE(TRUE)
+		set ws-xl = ole-put-property (ws-instance-id, "Application.Visible", true)
+	// Now need worksheet.
+		do clib100-add-new-worksheet 
+			parameter ws-instance-id 1
+			returning ws-error	ws-worksheet-id
+		ERROR_HANDLE(TRUE)
+		set ws-xl = ole-bulk-put(TRUE)
+		if lp-sheet-name <> spaces
+			set ws-xl = ole-put-property (ws-worksheet-id,"Name",lp-sheet-name)
+		endif
+		// To clear Cells
+		if not ole-call-method (ws-worksheet-id, "Cells.Clear", ws-dummy-ret)
+		end
+	else
+		if pattern(lp-spreadsheet-name,".xlt$")
+		or pattern(lp-spreadsheet-name,".xltm$")
+		or not pattern(lp-spreadsheet-name,".")
+			do clib100-add-new-workbook 
+				parameter ws-instance-id lp-spreadsheet-name 
+				returning ws-error	ws-workbook-id
+			ERROR_HANDLE(TRUE)
+			if lp-sheet-name <> spaces
+				if ole-get-property(ws-workbook-id,"Worksheets.Count",lf-count)
+					for i = 1 to lf-count
+						set ws-xl = ole-get-property (ws-workbook-id, "WorkSheets.item", ws-worksheet-id,i)
+						set ws-xl = ole-get-property (ws-worksheet-id, "Name", lf-name)
+						message lf-name
+						if lf-name = lp-sheet-name
+							break
+						endif
+					endfor
+				endif
+			else
+				// get currency on first sheet
+				do clib100-add-new-worksheet 
+					parameter ws-instance-id 1
+					returning ws-error	ws-worksheet-id
+				ERROR_HANDLE(TRUE)
+			endif
+			set ws-xl = ole-put-property (ws-instance-id, "Application.Visible", true)
+		else
+			do clib100-open-workbook
+				parameter ws-instance-id lp-spreadsheet-name
+				returning ws-error	ws-workbook-id lf-spreadsheet-currently-open
+			ERROR_HANDLE(TRUE)
+			// Make Opened WorkBook Current
+			set lf-count = 1	
+			while ole-get-property (ws-instance-id,"Application.Workbooks.Item",ws-workbook-id,lf-count)
+				set lf-count += 1
+			end-while
+			if lf-count > 1 
+				set lf-count -= 1
+		endif
+			if not ole-get-property (ws-instance-id,"Application.Workbooks.Item",ws-workbook-id,lf-count)
+			endif
+		endif
+	endif
+end-procedure 
+
+//------------------------------------------------------------------------------
+//  Sheet routines
+//------------------------------------------------------------------------------
+
+
+procedure clibvxlole-add-worksheet export
+// note that it is important to add-new-workbook and add-new-worksheet
+// even if you are not adding.  You need to do this to get currency on a
+// worksheet that all of the other operations will work on,.
+parameter 
+	lp-sheet-name					type string
+local
+	lf-count						type number
+	//
+	//
+	if ws-workbook-id = 0
+		set ws-error = "No Connection to workbook"
+		exit 1
+	endif
+	//
+	if ole-get-property(ws-workbook-id,"Worksheets.Count",lf-count) endif
+	do clib100-add-new-worksheet 
+		parameter ws-instance-id lf-count + 1
+		returning ws-error	ws-worksheet-id
+	ERROR_HANDLE(TRUE)
+	set ws-xl = ole-bulk-put(TRUE)
+	if lp-sheet-name <> spaces
+		set ws-xl = ole-put-property (ws-worksheet-id,"Name",lp-sheet-name)
+	endif
+	// To clear Cells
+	if not ole-call-method (ws-worksheet-id, "Cells.Clear", ws-dummy-ret)
+	end
+end-procedure 
+
+procedure clibvxlole-rename-sheet export
+parameters are
+	lp-sheet-name						type string pic x(500)
+	//
+	if ws-worksheet-id = 0
+		set ws-error = "No Connection to worksheet"
+		exit 1
+	endif
+	//
+	set ws-xl = ole-put-property (ws-worksheet-id, "Name", lp-sheet-name)
+endprocedure //iolexl-send-mail
+
+procedure clibvxlole-send-mail export
+parameters are
+	lp-recipient						type string pic x(500)
+	lp-subject							type string pic x(150)
+	//
+	if ws-workbook-id = 0
+		set ws-error = "No Connection to workbook"
+		exit 1
+	endif
+	//
+	set ws-xl = ole-call-method(ws-workbook-id,"Sendmail",ws-dummy-ret,lp-recipient,lp-subject ) 
+endprocedure //iolexl-send-mail
+
+procedure clibvxlole-close export
+	//
+	if ws-workbook-id = 0
+		set ws-error = "No Connection to workbook"
+		exit 1
+	endif
+	//
+	set ws-xl = ole-call-method(ws-workbook-id,"Close",ws-dummy-ret ) 
+endprocedure 
+
+procedure clibvxlole-put export
+parameters are 
+	l-row		type number
+	l-col		type number
+	l-text 		pic x(400) type string
+	//
+	if ws-worksheet-id = 0
+		set ws-error = "No Connection to worksheet"
+		exit 1
+	endif
+	//
+	do clib100-fill-a-cell parameters 
+		ws-worksheet-id  
+		XL_ADDR(l-row,l-col)
+		l-text
+end-procedure
+
+procedure clibvxlole-minimise export
+	//
+	if ws-instance-id = 0
+		set ws-error = "No Connection to Excel"
+		exit 1
+	endif
+	//
+	set ws-xl = ole-put-property (ws-instance-id, "Application.Visible", false)
+	set ws-xl = ole-put-property (ws-instance-id, "Application.WindowState",xlMinimized)
+end-procedure
+
+procedure clibvxlole-maximise export
+	//
+	if ws-instance-id = 0
+		set ws-error = "No Connection to Excel"
+		exit 1
+	endif
+	//
+	set ws-xl = ole-put-property (ws-instance-id, "Application.Visible", true)
+	set ws-xl = ole-put-property (ws-instance-id, "Application.WindowState",xlMaximized)
+end-procedure
+
+procedure clibvxlole-format export
+parameters are
+	l-start-row					type number
+	l-start-column				type number
+	l-end-row					type number
+	l-end-column				type number
+	l-format-string				pic x(400) type string
+	//
+	if ws-worksheet-id = 0
+		set ws-error = "No Connection to worksheet"
+		exit 1
+	endif
+	switch l-format-string
+	case "XL_FORMAT_INTEGER "
+		set l-format-string = XL_FORMAT_INTEGER 
+	case "XL_FORMAT_DOLLAR "
+		set l-format-string = XL_FORMAT_DOLLAR 
+	case "XL_FORMAT_PERCENT "
+		set l-format-string = XL_FORMAT_PERCENT 
+	case "XL_FORMAT_NO_ZERO"
+		set l-format-string = XL_FORMAT_NO_ZERO
+	case "XL_FORMAT_NO_ZERO_2DP "
+		set l-format-string = XL_FORMAT_NO_ZERO_2DP 
+	end-switch
+	//
+	if ole-get-property (ws-worksheet-id,"Range",ws-range-id,
+		XL_ADDR(l-start-row,l-start-column),XL_ADDR(l-end-row,l-end-column))
+		set ws-xl = ole-put-property (ws-range-id, "NumberFormat",l-format-string)
+		set ws-xl = ole-release (ws-range-id)
+	endif			
+end-procedure
+
+procedure clibvxlole-column-width export
+parameters are
+	l-start-column				type number
+	l-end-column				type number
+	l-width						type number
+	//
+	if ws-worksheet-id = 0
+		set ws-error = "No Connection to worksheet"
+		exit 1
+	endif
+	//
+	if ole-get-property (ws-worksheet-id,"Range",ws-range-id,str-concat(XL_COL(l-start-column),":",XL_COL(l-end-column)))
+		set ws-xl = ole-put-property (ws-range-id, "ColumnWidth",l-width)
+		set ws-xl = ole-release (ws-range-id)
+	endif
+end-procedure
+
+procedure clibvxlole-row-height export
+parameters are
+	l-start-row							type number
+	l-end-row							type number
+	l-height							type number
+	//
+	if ws-worksheet-id = 0
+		set ws-error = "No Connection to worksheet"
+		exit 1
+	endif
+	//
+	if ole-get-property (ws-worksheet-id,"Range",ws-range-id,
+		str-concat(str(l-start-row),":",str(l-end-row)))
+		set ws-xl = ole-put-property (ws-range-id, "RowHeight",l-height)
+		set ws-xl = ole-release (ws-range-id)
+	endif
+end-procedure
+
+procedure clibvxlole-auto-fit export
+parameters are
+	l-start-row							type number
+	l-start-column						type number
+	l-end-row							type number
+	l-end-column						type number
+	//
+	if ws-worksheet-id = 0
+		set ws-error = "No Connection to worksheet"
+		exit 1
+	endif
+	//
+	if ole-get-property (ws-worksheet-id,"Range",ws-range-id,
+		str-concat(XL_COL(l-start-column),":",XL_COL(l-end-column)))
+		set ws-xl = ole-call-method (ws-range-id, "Columns.AutoFit", ws-dummy-ret)
+		set ws-xl = ole-release (ws-range-id)
+	endif
+end-procedure
+
+procedure clibvxlole-auto-fit-row export
+parameters are
+	l-start-row							type number
+	l-end-row							type number
+	//
+	if ws-worksheet-id = 0
+		set ws-error = "No Connection to worksheet"
+		exit 1
+	endif
+	//
+	if ole-get-property (ws-worksheet-id,"Range",ws-range-id,
+		str-concat(str(l-start-row),":",str(l-end-row)))
+		set ws-xl = ole-call-method (ws-range-id, "EntireRow.AutoFit", ws-dummy-ret)
+		set ws-xl = ole-release (ws-range-id)
+	endif
+end-procedure
+
+procedure clibvxlole-merge export
+parameters are
+	l-start-row							type number
+	l-start-column						type number
+	l-end-row							type number
+	l-end-column						type number
+	//
+	if ws-worksheet-id = 0
+		set ws-error = "No Connection to worksheet"
+		exit 1
+	endif
+	//
+	if ole-get-property (ws-worksheet-id,"Range",ws-range-id,
+		XL_ADDR(l-start-row,l-start-column),XL_ADDR(l-end-row,l-end-column))
+		set ws-xl = ole-call-method (ws-range-id, "Merge", ws-dummy-ret)
+		set ws-xl = ole-release (ws-range-id)
+	endif
+end-procedure
+
+procedure clibvxlole-comment export
+parameters are
+	l-row							type number
+	l-column						type number
+	l-text							pic x(1024) type string
+	//
+	if ws-worksheet-id = 0
+		set ws-error = "No Connection to worksheet"
+		exit 1
+	endif
+	//
+	if ole-get-property (ws-worksheet-id,"Range",ws-range-id,
+		XL_ADDR(l-row,l-column))
+		set ws-xl = ole-call-method (ws-range-id, "AddComment", ws-dummy-ret,l-text)
+		set ws-xl = ole-release (ws-range-id)
+	endif
+end-procedure
+
+procedure clibvxlole-print export
+	//
+	if ws-worksheet-id = 0
+		set ws-error = "No Connection to worksheet"
+		exit 1
+	endif
+	//
+	set ws-xl = ole-call-method(ws-worksheet-id, "PrintOut", ws-dummy-ret)
+end-procedure
+
+
+procedure clibvxlole-outline-border export
+parameters are
+	l-start-row					type number
+	l-start-column				type number
+	l-end-row					type number
+	l-end-column				type number
+	//
+	if ws-worksheet-id = 0
+		set ws-error = "No Connection to worksheet"
+		exit 1
+	endif
+	//
+	if ole-get-property (ws-worksheet-id,"Range",ws-range-id,
+		XL_ADDR(l-start-row,l-start-column),XL_ADDR(l-end-row,l-end-column))
+		do clib100-draw-border parameter
+			ws-range-id xlEdgeLeft xlContinuous xlColorIndexAutomatic xlThin 
+		do clib100-draw-border parameter
+			ws-range-id xlEdgeTop xlContinuous xlColorIndexAutomatic xlThin 
+		do clib100-draw-border parameter
+			ws-range-id xlEdgeBottom xlContinuous xlColorIndexAutomatic xlThin 
+		do clib100-draw-border parameter
+			ws-range-id xlEdgeRight xlContinuous xlColorIndexAutomatic xlThin 
+		set ws-xl = ole-release (ws-range-id)
+	endif			
+end-procedure
+
+procedure clibvxlole-box-border export
+parameters are
+	l-start-row					type number
+	l-start-column				type number
+	l-end-row					type number
+	l-end-column				type number
+	//
+	if ws-worksheet-id = 0
+		set ws-error = "No Connection to worksheet"
+		exit 1
+	endif
+	//
+	if ole-get-property (ws-worksheet-id,"Range",ws-range-id,
+		XL_ADDR(l-start-row,l-start-column),XL_ADDR(l-end-row,l-end-column))
+		do clib100-draw-border parameter
+			ws-range-id xlEdgeLeft xlContinuous xlColorIndexAutomatic xlThin 
+		do clib100-draw-border parameter
+			ws-range-id xlEdgeTop xlContinuous xlColorIndexAutomatic xlThin 
+		do clib100-draw-border parameter
+			ws-range-id xlEdgeBottom xlContinuous xlColorIndexAutomatic xlThin 
+		do clib100-draw-border parameter
+			ws-range-id xlEdgeRight xlContinuous xlColorIndexAutomatic xlThin 
+		do clib100-draw-border parameter
+			ws-range-id xlInsideVertical xlContinuous xlColorIndexAutomatic xlThin 
+		do clib100-draw-border parameter
+			ws-range-id xlInsideHorizontal xlContinuous xlColorIndexAutomatic xlThin 
+		set ws-xl = ole-release (ws-range-id)
+endif			
+end-procedure
+
+
+procedure clibvxlole-horiz-text export
+// note that it pays to do this after re-sizing columns
+parameters are
+	l-start-row					type number
+	l-start-column				type number
+	l-end-row					type number
+	l-end-column				type number
+	l-format-code				type number
+local 
+	lf-format					type number
+	//
+	if ws-worksheet-id = 0
+		set ws-error = "No Connection to worksheet"
+		exit 1
+	endif
+	//
+	switch l-format-code
+	case 1
+		set lf-format = xlGeneral
+	case 2
+		set lf-format = xlLeft
+	case 3
+		set lf-format = xlCenter
+	case 4
+		set lf-format = xlRight
+	case 5
+		set lf-format = xlFill
+	case 6
+		set lf-format = xlJustify
+	case 7
+		set lf-format = xlCenterAcrossSelection
+	end-switch
+	if ole-get-property (ws-worksheet-id,"Range",ws-range-id,
+		XL_ADDR(l-start-row,l-start-column),XL_ADDR(l-end-row,l-end-column))
+		set ws-xl = ole-put-property (ws-range-id,"HorizontalAlignment",lf-format)
+		set ws-xl = ole-release (ws-range-id)
+	endif			
+end-procedure
+
+procedure clibvxlole-wrap-text export
+// note that it pays to do this after re-sizing columns
+// if you are using code 7 - center accross columns.
+parameters are
+	l-start-row					type number
+	l-start-column				type number
+	l-end-row					type number
+	l-end-column				type number
+	//
+	if ws-worksheet-id = 0
+		set ws-error = "No Connection to worksheet"
+		exit 1
+	endif
+	//
+	if ole-get-property (ws-worksheet-id,"Range",ws-range-id,
+		XL_ADDR(l-start-row,l-start-column),XL_ADDR(l-end-row,l-end-column))
+		set ws-xl = ole-put-property (ws-range-id,"WrapText",True)
+		set ws-xl = ole-release (ws-range-id)
+	endif			
+end-procedure
+
+
+procedure clibvxlole-vert-text export
+// note that it pays to do this after re-sizing columns
+parameters are
+	l-start-row					type number
+	l-start-column				type number
+	l-end-row					type number
+	l-end-column				type number
+	l-format-code				type number
+local
+	lf-format					type number
+	//
+	if ws-worksheet-id = 0
+		set ws-error = "No Connection to worksheet"
+		exit 1
+	endif
+	//
+	/*
+		1	Top
+			2	Center 
+			3	Bottom
+			4	Justify
+	*/
+	switch l-format-code
+	case 1
+		set lf-format = xlTop
+	case 2
+		set lf-format = xlCenter
+	case 3
+		set lf-format = xlBottom
+	case 4
+		set lf-format = xlFill
+	end-switch
+	if ole-get-property (ws-worksheet-id,"Range",ws-range-id,
+		XL_ADDR(l-start-row,l-start-column),XL_ADDR(l-end-row,l-end-column))
+		set ws-xl = ole-put-property (ws-range-id,"VerticalAlignment",lf-format)
+		set ws-xl = ole-release (ws-range-id)
+	endif			
+end-procedure
+
+procedure clibvxlole-orient-text export
+// note that it pays to do this after re-sizing columns
+parameters are
+	l-start-row					type number
+	l-start-column				type number
+	l-end-row					type number
+	l-end-column				type number
+	l-format-code				type number
+local
+	lf-format					type number
+	//
+	if ws-worksheet-id = 0
+		set ws-error = "No Connection to worksheet"
+		exit 1
+	endif
+	//
+	/*
+			0	Horizontal
+			1	Vertical 
+			2	Upward
+			3	Downward
+	*/
+	switch l-format-code
+	case 0
+		set lf-format = xlHorizontal
+	case 1
+		set lf-format = xlVertical
+	case 2
+		set lf-format = xlUpward // "90"
+	case 3
+		set lf-format = xlDownward //"-90"
+	end-switch
+	if ole-get-property (ws-worksheet-id,"Range",ws-range-id,
+		XL_ADDR(l-start-row,l-start-column),XL_ADDR(l-end-row,l-end-column))
+		set ws-xl = ole-put-property (ws-range-id,"Orientation",lf-format)
+		set ws-xl = ole-release (ws-range-id)
+	endif			
+end-procedure
+
+procedure clibvxlole-format-text export
+parameters are
+	l-start-row					type number
+	l-start-column				type number
+	l-end-row					type number
+	l-end-column				type number
+	l-format-codes				type string
+	//
+	if ws-worksheet-id = 0
+		set ws-error = "No Connection to worksheet"
+		exit 1
+	endif
+	//
+	if ole-get-property (ws-worksheet-id,"Range",ws-range-id,
+		XL_ADDR(l-start-row,l-start-column),XL_ADDR(l-end-row,l-end-column))
+	if valid-number(l-format-codes)
+		set ws-xl = ole-put-property (ws-range-id, "Font.Size",num(l-format-codes))
+	else
+		if pattern(l-format-codes,"B")
+			set ws-xl = ole-put-property (ws-range-id, "Font.Bold",TRUE)
+		endif
+		if pattern(l-format-codes,"I")
+			set ws-xl = ole-put-property (ws-range-id, "Font.Italic",TRUE)
+		endif
+		if pattern(l-format-codes,"U")
+			set ws-xl = ole-put-property (ws-range-id, "Font.Underline",2)
+		endif
+	endif
+		set ws-xl = ole-release (ws-range-id)
+	endif			
+end-procedure
+
+procedure clibvxlole-msgs export
+parameters
+	lp-msg 							pic x(29)
+	lp-pause					 	type boolean
+	//
+	if batched()
+		if operating-system() != 'WINDOWS'
+			message lp-msg   // write to mail
+		endif
+	else
+		display lp-msg @20,50
+		if lp-pause
+			pause
+		endif
+	endif
+endprocedure 
+
+procedure clibvxlole-save export
+parameters are 
+	lp-spreadsheet-name					pic x(200) type string
+	//
+	if ws-workbook-id = 0
+		set ws-error = "No Connection to workbook"
+		exit 1
+	endif
+	//
+	if not ole-call-method(ws-workbook-id, "SaveAs",ws-dummy-ret,lp-spreadsheet-name)
+		message "Spreadsheet was not saved"
+	endif 
+endprocedure
+
+/*
+procedure clibvxlole-get export
+parameters are
+	lp-row								type number
+	lp-col								type number
+returning
+	lr-value							type varchar pic x(16000)
+	//
+	if ws-worksheet-id = 0
+		set ws-error = "No Connection to worksheet"
+		exit 1
+	endif
+	//
+	do clib100-get-alpha-cell parameters are ws-worksheet-id
+		XL_ADDR(lp-row,lp-col)
+		returning lr-value
+end-procedure
+*/
+
+procedure clibvxlole-get export										
+parameters
+	lp-row								type number
+	lp-col								type number
+returning 	
+	lr-value							pic x(1024) type string
+//	lr-value							pic x(16000) type varchar
+local	
+	lf-xl								type ole-interface
+	lf-range-id							type ole-interface
+	//
+	if ws-worksheet-id = 0
+		set ws-error = "No Connection to worksheet"
+		exit 1
+	endif
+	//
+	if not ole-get-property (ws-worksheet-id, "Range", lf-range-id, 
+		XL_ADDR(lp-row,lp-col),
+		XL_ADDR(lp-row,lp-col))
+		set ws-error = concat("unable to get range for "  XL_ADDR(lp-row, lp-col))
+		exit 1
+	endif
+	//  Big important note - Use the "text" property.  Do NOT use the "value"
+	//  property.  The value property will return the cell contents ONLY if
+	//  the cell contains text.  If it contains numbers or dates you will get
+	//  zero.  The text property contains the right stuff.
+	if not ole-get-property (lf-range-id, "Text", lr-value)
+		set ws-error = concat("unable to get contents for "  XL_ADDR(lp-row, lp-col))
+		exit 1
+	endif
+	set lf-xl = ole-release (lf-range-id)
+endprocedure //clib100-get-alpha-cell ----------------------------------------
+
+
+procedure clibvxlole-freeze-panes export
+parameters are
+	lp-row								type number
+	lp-col								type number
+//
+local
+	lf-range-id							type ole-interface
+	//
+	if ws-worksheet-id = 0
+		set ws-error = "No Connection to worksheet"
+		exit 1
+	endif
+	//
+	set ws-xl = ole-put-property (ws-instance-id, "Application.Visible", true)
+	set ws-xl = ole-put-property (ws-instance-id, "Application.WindowState",xlMaximized)
+	set ws-xl = ole-get-property (ws-worksheet-id, "Range", lf-range-id, XL_ADDR(lp-row,lp-col))
+	if not ole-call-method(lf-range-id,"Select",ws-dummy-ret) 
+		message "Trouble Selecting Range.  Resolved Range was:" lf-range-id ole-error-description(ole-status())
+		pause
+	endif
+	set ws-xl = ole-put-property (ws-instance-id, "Application.ActiveWindow.FreezePanes", true)
+end-procedure
+
+procedure clibvxlole-release-resources export
+	if ole-release(ws-range-id) endif
+	if ole-release(ws-worksheet-id) endif
+	if ole-release(ws-workbook-id) endif
+	if ole-release(ws-instance-id) endif
+	if ole-release(ws-chart) endif
+end-procedure
+
+
+//----------------------------------------------------------------------
+//  Chart Functions
+//----------------------------------------------------------------------
+
+
+procedure clibvxlole-chart-add export
+parameters 
+	lp-name								pic x(128) type string
+	lp-x-axis							type number // the number of the colomn of the x axis
+	lp-y-axis							type number // the number of the column of the y axis
+	lp-x-type							pic x // space makes it a normal x axis, "D" makes it a Date type axis
+	lp-charttype						type number
+	lp-firstrow							type number
+local
+//	lf-count							type number
+	lf-used-rows						type number
+	lf-axis								type ole-interface
+	lf-range							pic x(100) type string
+	lo-range							type ole-interface
+	// Select the x and y axis first
+	//
+	if ws-worksheet-id = 0
+		set ws-error = "No Connection to worksheet"
+		exit 1
+	endif
+	//
+	if ws-chart <> 0
+		if not ole-release(ws-chart)
+			message "Trouble Releasing Chart Resources:" ole-error-description(ole-status())
+		endif
+	endif
+	// The worksheet with the data in it must be active....
+	if not ole-call-method(ws-worksheet-id,"Activate",ws-dummy-ret)
+		message "Trouble Activating Worksheet"
+	endif
+	// Define the range
+	if lp-firstrow <= 2
+		set lf-range = //str-concat creates a string like this:	"$A:$A,$D:$D")
+			str-concat("$",XL_COL(lp-x-axis),":$",XL_COL(lp-x-axis),
+				",$",XL_COL(lp-y-axis),":$",XL_COL(lp-y-axis))
+	else
+		if ole-get-property(ws-worksheet-id,"UsedRange.Rows.Count",lf-used-rows) endif
+//  create a string like this
+//			=XXXX!$A$1,XXXX!$A$3:$A$29,XXXX!$C$1,XXXX!$C$3:$C$29
+		set lf-range = str-concat(
+				"$",XL_COL(lp-x-axis),"$1",
+				",$",XL_COL(lp-x-axis),str(lp-firstrow),":$",XL_COL(lp-x-axis),str(lf-used-rows),
+				",$",XL_COL(lp-y-axis),"$1",
+				",$",XL_COL(lp-y-axis),str(lp-firstrow),":$",XL_COL(lp-y-axis),str(lf-used-rows)
+				)
+	endif
+	// Create a range object
+	if not ole-get-property (ws-worksheet-id,"Range",lo-range,lf-range)
+		message "Trouble Defining Range.  Resolved Range was:" lf-range ole-error-description(ole-status())
+		exit
+	endif
+	// Select the range object. Note that this will fail if the worksheet is
+	// not active
+	if not ole-call-method(lo-range,"Select",ws-dummy-ret) 
+		message "Trouble Selecting Range.  Resolved Range was:" lf-range ole-error-description(ole-status())
+		pause
+	endif
+	// add the chart - add a chrt sheet
+	if not ole-call-method(ws-workbook-id, "charts.add",ws-chart)
+		message "Could Not Add Chart" ole-error-description(ole-status())
+		exit
+	endif
+	//
+	// Set the name
+	if ole-put-property(ws-chart,"Name",lp-name) endif
+	// specify the default chart type
+	if lp-charttype = 0
+		set lp-charttype  = xlLine
+	endif
+	set ws-xl = ole-put-property (ws-chart, "ChartType",lp-charttype)
+	//
+	if lp-x-type = "D"
+		if ole-get-property(ws-chart,"Axes",lf-axis,xlCategory)
+			if ole-put-property(lf-axis,"CategoryType",xlTimeScale) endif
+		endif
+	endif
+//	if ole-get-property(ws-chart,"SeriesCollection.Count",lf-count) endif
+	if ole-release(lo-range) endif
+end-procedure
+
+
+procedure clibvxlole-chart-add-series export
+parameters 
+	lp-source-name						pic x(100) type string
+	lp-y-axis							type number
+	lp-secondary						type boolean
+	lp-type								type number
+	lp-name								pic x(100) type string
+local
+	lo-series							type ole-interface
+//
+	//
+	if ws-worksheet-id = 0
+		set ws-error = "No Connection to worksheet"
+		exit 1
+	endif
+	//
+	if ws-chart = 0
+		set ws-error = "No Chart Defined"
+		exit 1
+	endif
+//
+//	if not ole-call-method(ws-chart,"SeriesCollection.NewSeries",lo-series) 
+//		message "New Series Failed"
+//		exit
+//	endif
+//	if not ole-call-method(lo-series,"SeriesCollection.Add",ws-dummy-ret,
+	if not ole-call-method(ws-chart,"SeriesCollection.Add",lo-series,
+		str-concat(lp-source-name,"!$",XL_COL(lp-y-axis),":$",XL_COL(lp-y-axis)),xlColumns,true)
+		message-box param-text("<<P1>><<BR>><<p2>><<BR>><<p3>>"
+			,concat( "Could not add Series:" ole-error-description(ole-status()))
+			,concat("To Sheet " lp-source-name)
+			,concat("Range " str-concat(lp-source-name,"!$",XL_COL(lp-y-axis),":$",XL_COL(lp-y-axis)))
+			)
+			title is "Chart Series Add"
+			message-buttons MSG_BOX_OK
+			icon MSG_BOX_WARNING
+			optional
+		message "Could not add Series:" ole-error-description(ole-status())
+		exit
+	endif
+	if not ole-put-property(lo-series,"ChartType",lp-type) 
+		message "Could not set chart type"
+	endif
+	if lp-secondary
+		if ole-put-property(lo-series,"AxisGroup",xlSecondary) endif
+	endif
+	if lp-name <> spaces
+		if ole-put-property(lo-series,"Name",lp-name) endif
+	endif
+	if ole-release(lo-series) endif
+end-procedure
+
+
+procedure clibvxlole-chart-title export
+parameters
+	lp-title							pic x(256) type string
+	lp-type								pic xx // M)ain title X)axis YP) Y primary YS) Y secondary
+local
+	lo-axis								type ole-interface
+//
+	if ws-chart = 0
+		set ws-error = "No Chart Defined"
+		exit 1
+	endif
+//
+	switch lp-type
+	case  "M"
+		if ole-put-property(ws-chart,"HasTitle",1)
+		endif
+		if ole-put-property(ws-chart,"ChartTitle.Text",lp-title)
+		endif
+	case "X"
+		if ole-get-property(ws-chart,"Axes",lo-axis,xlCategory)
+			if ole-put-property(lo-axis,"HasTitle",true) endif
+			if ole-put-property(lo-axis,"AxisTitle.text",lp-title) endif
+		endif
+	case "YP"
+		if ole-get-property(ws-chart,"Axes",lo-axis,xlValue,xlPrimary)
+			if ole-put-property(lo-axis,"HasTitle",true) endif
+			if ole-put-property(lo-axis,"AxisTitle.text",lp-title) endif
+		endif
+	case "YS"
+		if ole-get-property(ws-chart,"Axes",lo-axis,xlValue,xlSecondary)
+			if ole-put-property(lo-axis,"HasTitle",true) endif
+			if ole-put-property(lo-axis,"AxisTitle.text",lp-title) endif
+		endif
+	end-switch
+	if ole-release(lo-axis) endif
+end-procedure
+
+procedure clibvxlole-move-chart-to-sheet export
+parameters
+	lp-sheet							pic x(256) type string
+//
+	if ws-chart = 0
+		set ws-error = "No Chart Defined"
+		exit 1
+	endif
+//
+	if not ole-call-method(ws-chart,"Location",ws-dummy-ret,2,lp-sheet)
+		message "Could not move chart"
+	endif
+end-procedure
+
+
+
+//----------------------------------------------------------------------

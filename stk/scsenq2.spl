@@ -1,0 +1,108 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : Size Colour Style Enquiry 2.
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2018
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: stk/scsenq2.spl
+//
+// The purpose of this code is to follow on from m50lengths with the -e option
+// which can be stitched into the niventory console but shows size and colour
+// combinations fo a specific warehouse
+//
+// The idea with this is that it will be called via procscreen from m50lenghts
+// adding a new button, and will pass the stock and colour, and the user will
+// select size and then go straight to the all balance enquiry from there.
+//
+// Modification History
+// Date		Who	SDR		What
+// 18Apr18  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/bmsdef.spl"
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+#include "../include/i8gparam.spl"
+ 
+field
+	ws-function-title					type string
+	ws-stock-code						like stock-code
+	ws-colour							type string
+
+mode md-full
+	prompt "Console"
+	help "Full stock console enquiry"
+mode md-select
+	prompt "Whses"
+	help "Stock in all warehouses"
+
+procedure main
+local
+	lf-count							type number
+	lf-stock-code						like stock-code
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+//	do i8secabt-check-abort
+//		parameters are sys-consolidation-division login-id() "ZUSR" "R004"
+//		returning ws-function-title 
+	do i8proglog-write-log
+	I8GPARAM_ALPHA("-stock",spaces,ws-stock-code)
+	I8GPARAM_ALPHA("-colour",spaces,ws-colour)
+	set lf-stock-code = str-concat(ws-stock-code,ws-colour,"%")
+	select lf-count = count(*)
+		from stock-master
+		where stock-code like :lf-stock-code
+	end-select
+	if lf-count <= 0
+		message-box param-text("<<P1>><<BR>><<p2>>"
+			,"No Size Combinations for this Stock code and colour"
+			,str-concat(ws-stock-code,"/",ws-colour))
+			title is ws-function-title
+			message-buttons MSG_BOX_CANCEL
+			icon MSG_BOX_STOP
+		exit
+	endif
+	do select-size
+end-procedure
+
+screen select-size
+local
+	lf-stock-code						like stock-code
+	lf-size-code						type string
+	lf-style-col-len					type number
+	lf-size-desc						type string
+	window @1,1 to @10,30
+	title "Select Size"
+		window-position 5
+	datagrid occurs 8
+	allowed search md-select md-full
+	select stock-code,stk-description,sys-description,
+		lf-size-code = sql-substring(stock-code,lf-style-col-len + 1, strlen(stock-code) )
+		lf-size-desc = if-then-else(sys-description is null,lf-size-code, sys-description)
+		from stock-master
+		left outer join system-table on sys-tbl-type = 'CF' and sys-tbl-code = lf-size-code
+		where stock-code like :lf-stock-code
+		order by stock-code
+	no-prompt-for-search
+before
+	set lf-style-col-len = BMSDEF_STYLE_AND_COLOUR_SIZE 
+	set lf-stock-code = str-concat(ws-stock-code,ws-colour,"%")
+detail
+	if screenmode = md-select
+		spl "stk/m4stkqenq" parameters are  stock-code "B"
+	endif
+	if screenmode = md-full
+		spl "stk/m4stkconsol" parameters are "-drill" stock-code
+	endif
+	accept lf-size-desc @1,1 pic x(10)
+		title "Size"
+	display stock-code @1,2 
+		title "Stock Code"
+end-screen
+	

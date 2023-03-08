@@ -1,0 +1,267 @@
+
+#define RANDOM_BETWEEN(A,B) \
+	(((RANDOM(0) / 32767) * (B - A)) + A)
+
+
+procedure main
+	// seed the random number
+	if random(tod()) endif
+	confirm prompt "set system dates to today"
+	confirmed
+		get system-control first
+			lock
+		on error
+			message "Record locked"
+		else
+			set sys-gl-yr = year(today)
+			set sys-dl-yr = year(today)
+			set sys-cl-yr = year(today)
+			set sys-stk-yr = year(today)
+			set sys-gl-per = month(today)
+			set sys-dl-per = month(today)
+			set sys-cl-per = month(today)
+			set sys-stk-per = month(today)
+//			for i = 1 to 12
+//				set sys-period-start[i] = julian(1,i,year(today))
+//			endfor
+			update system-control
+			message "Completed.  Stock period is " month(today) "/" year(today)
+			// Service - contract dates
+			do set-contract-dates
+			// Sales - recurring sales orders
+			do recurring-so
+			// PM - monitor Point Readings
+			do monitor-points
+			// Debtor follow up notes
+			do deb-follow-up-notes
+		endon
+	end-confirm
+end-procedure
+
+procedure deb-follow-up-notes
+	select
+		*
+		from deb-cust-notes
+		where dcn-type = "DF"
+		for update
+	detail
+		set dcn-follow-up-date = today() + (dcn-follow-up-date - dcn-entry-date)
+		set dcn-entry-date = today()
+		update deb-cust-notes
+	end-select
+end-procedure
+
+procedure set-contract-dates
+	select * 
+		from contract-options
+		for update
+	detail
+		set co-invoiced-from-date = julian(1,1,year(today))
+		set co-invoiced-to-date = julian(1,1,year(today))
+		update contract-options
+	end-select
+	//
+	select *
+		from contract-equipment-pm-details
+		for update
+	detail
+		set cepd-next-service-date = addmonths((today() - day(today) + 1),1,TRUE)
+		update contract-equipment-pm-details
+	end-select
+	//
+	select *
+		from contract-equipment-summary
+		for update
+	detail
+		set ces-invoiced-from-date = julian(1,1,year(today()))
+		set ces-invoiced-to-date = julian(1,1,year(today()))
+		update contract-equipment-summary
+	end-select
+	//
+	select *
+		from contract-master
+		for update
+	detail
+		set contract-start-date = julian(1,1,year(today()))
+		set contract-end-date = add-months(contract-start-date,12,true) - 1
+		set contract-invoiced-from-date = julian(1,1,year(today()))
+		set contract-invoiced-to-date = julian(1,1,year(today()))
+		set contract-last-change = julian(1,1,year(today()))
+		set contract-review-date = add-months(contract-end-date,-1,true)
+		update contract-master
+		// Make one item not under warranty
+		select *
+			from stock-serial-number
+			where contract-no = :contract-no
+			and serial-no = '56487231' 
+			for-update
+		detail
+			set serial-warranty-date = add-months(today,-3,true)
+			update stock-serial-number
+		end-select
+		//
+		// Now deal with PM Routines
+		//
+		select *
+			from contract-equipment-pm-details
+			where contract-no = :contract-no
+			for update
+		detail
+			// contact-equipment-pm-details contains the stuff we want to update.
+			// there are two fields cepd-next-service-date and
+			// cepd-last-service-date.
+			set cepd-next-service-date = today() + 10  // make it yesterday so it gets selected
+			//
+			// we need the stock code and the comes from contract equiment
+			// summmary:
+			//
+			get contract-equipment-summary
+				on index  contract-no ces-sequence-no
+				key is contract-no cepd-sequence-no
+			on error ENOREC
+				continue
+			endon
+			// get the routines using the stock-code on the summary table
+			get service-stock-pm-routines
+				on index stock-code sspr-pm-routine-code
+				key is stock-code cepd-pm-routine-code
+			on error ENOREC
+			else
+				get system-table
+					on index sys-tbl-type sys-tbl-code
+					key is "S7" sspr-freq-code
+				on error ENOREC
+				else
+					switch sys-tbl-alpha-1 // Frequency Code
+					case "D"
+						set cepd-last-service-date = cepd-next-service-date - sys-tbl-sales-mtd
+					case "W"
+						set cepd-last-service-date = cepd-next-service-date - (sys-tbl-sales-mtd * 7)
+					case "M"
+						set cepd-last-service-date 
+							= addmonths(cepd-next-service-date, 0 - sys-tbl-sales-mtd, TRUE)
+					case "Y"
+						set cepd-last-service-date 
+							= addmonths(cepd-next-service-date, 0 - (sys-tbl-sales-mtd * 12), TRUE)
+					end-switch
+				endon
+			endon
+			update contract-equipment-pm-details
+		end-select
+	end-select
+	do set-serial-dates  parameters are '56487231' 'EQ250'  // make the warranty expired
+		add-months(today(),-24,TRUE)
+		add-months(today(),-12,TRUE)
+		add-months(today(),-1,TRUE)
+	do set-serial-dates  parameters are '65487321' 'EQ250'  // under warrancy
+		add-months(today(),-12,TRUE)
+		add-months(today(),3,TRUE)
+		add-months(today(),-1,TRUE)
+	//
+end-procedure
+
+
+procedure set-serial-dates
+parameters
+	lp-serial-no			like serial-no
+	lp-stock-code			like stock-code
+	lp-serial-install-date	type date
+	lp-serial-warranty-date	type date
+	lp-serial-action-date	type date
+	//
+	get stock-serial-number
+		on index serial-no stock-code 
+		key is lp-serial-no lp-stock-code
+		lock
+	on error
+	else
+		set serial-install-date = lp-serial-install-date
+		set serial-warranty-date = lp-serial-warranty-date
+		set serial-action-date = lp-serial-action-date
+		update stock-serial-number
+	endon
+end-procedure
+
+procedure recurring-so
+local
+	i							type number
+	select *
+		from sales-order
+		where so-order-type-code = "P"
+		for update
+	detail
+		set so-order-date = today() - day(today()) + 1
+		set so-delivery-date = so-order-date
+		update sales-order
+	end-select
+//
+	select *
+		from recurring-schedule-master
+		for update
+	detail
+		set rsm-recurr-start-date = today() - day(today()) + 1
+		set rsm-recurr-end-date = add-months(rsm-recurr-start-date,12,true) - 1
+		set i = pattern(rsm-recurrence-text ,  "effective")
+		if i != 0
+			string rsm-recurrence-text deleting i + 10
+			string rsm-recurrence-text appending concat(
+				format-picture(rsm-recurr-start-date, "dd-mmm-yyyy")
+				" until "
+				format-picture(rsm-recurr-end-date, "dd-mmm-yyyy")
+				".")
+		endif
+		update recurring-schedule-master
+	end-select
+end-procedure
+
+procedure monitor-points
+local
+	lf-date					type date
+	lf-time					type time
+	lf-last-date			type date
+	select plant-no
+		from plant-master
+	detail
+		select * //plt-monitor-point, plt-monitor-reading-date
+			from plant-monitor-readings
+			where plant-no = :plant-no
+			for-update
+		before
+			set lf-last-date = 0
+		detail
+			set lf-date = date-from-date-time(plt-monitor-reading-date,TRUE)
+			set lf-time = time-from-date-time(plt-monitor-reading-date,True)
+			if lf-last-date = 0
+				set lf-date = today - RANDOM_BETWEEN(1,10)
+			else
+				// make them about 5 days from the current value
+				set lf-date = lf-last-date + ( RANDOM_BETWEEN(1,10) - 5 )
+			endif
+			set plt-monitor-reading-date = date-time(lf-date,lf-time,TRUE)
+			update plant-monitor-readings
+			on error
+			endon
+			set lf-last-date = lf-date
+		end-select
+		// Now look for the tasks
+		select *
+			from plant-master-pm-tasks
+			where plant-no = :plant-no
+			for-update
+		detail
+			set plt-pm-last-done = today - RANDOM_BETWEEN(20,90)
+			update plant-pm-task
+			on error
+			endon
+		end-select
+	end-select
+	select *
+		from plant-pm-task
+		for-update
+	detail
+		set plt-pm-last-done = today - RANDOM_BETWEEN(20,90)
+		update plant-pm-task
+		on error
+		endon
+	end-select
+end-procedure

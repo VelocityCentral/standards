@@ -1,0 +1,206 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : Application lock monitor - report stale locks
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2021
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: sys/monapplock.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 17Mar21  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+#include "../include/i8gparam.spl"
+#include "../include/bmsdef.spl"
+
+ 
+field
+	ws-function-title						type string
+	ws-minutes								type number
+	ws-email								type string pic x(256)
+	ws-coy									type string
+
+object logfile
+	type is external 
+	file is "applock.log"
+	record is 
+		lf-now-date						type string
+		lf-now-time						type string
+		lf-lock-date					type string
+		lf-lock-time					type string 
+		lf-lock-type					like ap-lock-type
+		lf-lock-user-id					like ap-lock-user-id
+		lf-lock-prog-name				like ap-lock-prog-name
+		lf-lock-module					like ap-lock-module
+		lf-lock-function				like ap-lock-function
+		lf-upto-field-one				like ap-upto-field-one
+	end-record
+
+procedure main
+returning 
+	lf-app-services-return				pic x(1024) type string
+	lf-delete-mode						type boolean
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8secabt-check-abort
+		parameters are sys-consolidation-division login-id() "ZVG" "R016"
+		returning ws-function-title 
+	I8GPARAM_NUM("-minutes",5,ws-minutes)
+	I8GPARAM_ALPHA("-email","psd",ws-email)
+	// -coy is used at the beginning of the subject line.
+	// Useful when the coy code does not easily identify the customer (eg.
+	// "L01"
+	I8GPARAM_ALPHA("-coy",spaces,ws-coy)
+	if ws-coy = spaces
+		set ws-coy = sys-consolidation-division
+	endif
+	do i8proglog-write-log
+	I8GPARAM_FLAG("-clear",FALSE,lf-delete-mode)
+	if lf-delete-mode
+		do clear-locks
+			returning lf-app-services-return
+	else
+		do stale-locks
+			returning lf-app-services-return
+	endif
+end-procedure
+
+procedure report-header
+	print
+		company-name
+		concat("Application Locks older than " str(ws-minutes) " minutes") col 40
+		today() col 80
+		tod() col 90
+		"Page" col 100
+		page-no()
+	skip
+	print "Use SYS.M309 to Remove"
+	print "Lock Date"
+		"Type" col 22
+		"User" col 33
+		"Program" col 64
+		"Mod/Func" col 95
+		"Key" col 105
+	print 132"-"
+end-procedure
+
+procedure stale-locks
+returning
+	lr-app-serv-return						pic x(1024) type string
+local
+	lf-sql-dt								type datetime
+	lf-spool								type string
+	lf-count								type number
+	open logfile
+	on error ENOENT
+		open logfile create permanent
+	endon
+	set lf-sql-dt = gmt()
+	set lf-sql-dt -= ws-minutes * 60
+	set lr-app-serv-return  = concat("No locks older than " str(ws-minutes) " minutes")
+	select *
+		from application-lock
+		where ap-lock-date-time < lf-sql-dt
+#ifdef BMSDEF_PREVENT_TABLE_LOCK_TYPE
+		and ap-lock-type != BMSDEF_PREVENT_TABLE_LOCK_TYPE
+#endif
+	before
+		report "old events"
+			header report-header
+		page
+	detail
+		initialise logfile
+		set lf-now-date = format-picture(today(),"dd-mmm-yyyy")
+		set lf-now-time = format-picture(tod(),"HH:MM:SS")
+		set lf-lock-date = format-picture(date-from-date-time(ap-lock-date-time,FALSE),"dd-mmm-yyyy")
+		set lf-lock-time = format-picture(time-from-date-time(ap-lock-date-time,FALSE),"HH:MM:SS")
+		set lf-lock-type = ap-lock-type
+		set lf-lock-user-id = ap-lock-user-id
+		set lf-lock-prog-name = ap-lock-prog-name
+		set lf-lock-module = ap-lock-module
+		set lf-lock-function = ap-lock-function
+		set lf-upto-field-one = ap-upto-field-one
+		insert logfile
+		on error
+		endon
+		print ap-lock-date-time
+			ap-lock-type
+			ap-lock-user-id
+			ap-lock-prog-name
+			ap-lock-module
+			ap-lock-function
+			ap-upto-field-one
+		set lf-count += 1
+	end-select
+	set lf-spool = spool-file-name()
+	report finished
+	if lf-count > 0
+		set lr-app-serv-return  = concat(str(lf-count) " locks older than " str(ws-minutes) " minutes")
+		if mail-start(concat(ws-coy ": Stale Application Locks:" str(lf-count))) 
+			if mail-attach(lf-spool,"evetns",TRUE,TRUE,TRUE) endif
+			if mail-send(ws-email,TRUE,FALSE) endif
+		endif
+	endif
+end-procedure
+
+procedure clear-locks
+returning
+	lr-app-serv-return						pic x(1024) type string
+local
+	lf-sql-dt								type datetime
+	lf-spool								type string
+	lf-count								type number
+	open logfile
+	on error ENOENT
+		open logfile create permanent
+	endon
+	set lf-sql-dt = gmt()
+	set lf-sql-dt -= ws-minutes * 60
+	set lr-app-serv-return  = concat("No locks older than " str(ws-minutes) " minutes")
+	select *
+		from application-lock
+		where ap-lock-date-time < lf-sql-dt
+#ifdef BMSDEF_PREVENT_TABLE_LOCK_TYPE
+		and ap-lock-type != BMSDEF_PREVENT_TABLE_LOCK_TYPE
+#endif
+		for update
+	before
+		report "Deleted Locks"
+			header report-header
+		page
+	detail
+		print ap-lock-date-time
+			ap-lock-type
+			ap-lock-user-id
+			ap-lock-prog-name
+			ap-lock-module
+			ap-lock-function
+			ap-upto-field-one
+		delete application-lock
+		on error
+		else
+			set lf-count += 1
+		endon
+		set lf-count += 1
+	end-select
+	set lf-spool = spool-file-name()
+	report finished
+	if lf-count > 0
+		set lr-app-serv-return  = concat(str(lf-count) " locks older than " str(ws-minutes) " minutes deleted")
+		if mail-start(concat(ws-coy ": Stale Application Locks:" str(lf-count))) 
+			if mail-attach(lf-spool,"evetns",TRUE,TRUE,TRUE) endif
+			if mail-send(ws-email,TRUE,FALSE) endif
+		endif
+	endif
+end-procedure
+
+

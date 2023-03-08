@@ -1,0 +1,967 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : 
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2016
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: utility/ldapmaint.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 18Oct16  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+#include "../include/bmsdef.spl"
+#include "../include/idatagridview.spl"
+
+#define REDHAT7
+
+#define PRIVATEKEY "Thisisthekeyfortheldapmasterpassword"
+#define PUBLICKEY "Thisistheprivatekeyforthepassword"
+
+/*
+Already in include above
+
+#define RGB(R,G,B) \
+     RGB_TO_PRONTO(R,G,B)
+#define RGB_TO_PRONTO(R,G,B) \
+     rgb-to-colour((B * 256 * 256) + (G * 256) + R)
+*/
+
+//#define DEBUG(A) print A ":" get-field-value(A)
+
+#define INSERTTEXT(A) \
+	 set tf-text = A \
+	 insert text-file \
+	 on error \
+	 endon 
+
+link "clib/clibhost"
+link "clib/clibvfile"
+#if BMS_DICT_VER >= 7300
+link "clib/clibdatagridview"
+link "clib/clibpersonalise"
+#else
+link "clib/clibvdgview"
+#endif
+ 
+
+field
+	ws-function-title						type string
+	// ws-hostname is the FQDN as an array for each component
+	ws-hostname							pic x(256) type string occurs 6
+	// ws-dc-bits is the domain part of the FQDN in ldap format
+	// (dc=velocityglobal,dc=co,dc=nz)
+	ws-dc-bits							pic x(256) type string
+	// the master password is the password that was used to setup ldap.
+	// Is is stored on the useronly table using the encpytion function
+	// What is stored in the string is the clear text value
+	ws-master-password					pic x(20) type string
+
+// text-file is a multi-use text file.  
+object text-file
+	type is text
+	record is 
+		tf-text 						pic x(124) type string
+	end-record
+
+// contains all records currently in the ldap store
+object ldap-accounts
+	type is memory
+	record is 
+		la-uid							type number
+		la-user-id						pic x(30) type string
+		la-name							pic x(60) type string
+	end-record
+	key is la-user-id
+
+// etc passwd is a memory file of /etc/passwd
+object etc-passwd
+	type is memory
+	record is
+		ep-user-id						pic x(30) type string
+		ep-uid							pic 9(7)
+		ep-group						pic 9(7)
+		ep-name							pic x(30) type string
+		ep-home							pic x(60) type string
+		ep-shell						pic x(60) type string
+	endrecord
+	key is ep-user-id
+
+// consolidated users contains a single record for each
+// userid and consolidates ldapusers, /etc/passws and the pronto file
+// system-users.  This is to ensure that we have visibility of which accounts
+// exist in which files.
+object consolidated-users
+	type is memory
+	record is
+		cu-user-id						pic x(30) type string
+		cu-name							pic x(60) type string
+		// these fields are a flag to say whether they occur in each location
+		cu-in-pronto					type boolean
+		cu-in-ldap						type boolean
+		cu-in-passwd					type boolean
+		// uid in etc password
+		cu-passwd-uid					pic 9(7)
+		// uid in system-users
+		cu-pronto-uid					pic 9(7) 
+		// uid in ldap
+		cu-ldap-uid						pic 9(7)
+	end-record
+	key is cu-user-id
+
+mode md-ldap-passwd
+	prompt "Password"
+	help "Change Password"
+	when cu-in-ldap
+	always-show
+mode md-ldap-add
+	prompt "Add Ldap User"
+	help "Add to LDAP user file"
+	when cu-in-passwd and cu-in-pronto and (not cu-in-ldap)
+	always-show
+mode md-ldap-delete
+	prompt "Delete"
+	help "Delete Ldap Entry"
+	when cu-in-ldap
+	always-show
+mode md-ldap-verify
+	prompt "Verify"
+	help "Verify Ldap Password"
+	when cu-in-ldap
+	always-show
+mode md-master-password
+	prompt "Master"
+	help "Set Master Password"
+
+procedure main
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8secabt-check-abort
+		parameters are sys-consolidation-division login-id() "ZVG" "M008"
+		returning ws-function-title 
+	do i8proglog-write-log
+#ifdef DEBUG
+	report "Debug"
+#endif
+	do initialisation
+#ifdef DEBUG
+	do mainmenu
+#else
+	do display-consolidated-users
+#endif
+end-procedure
+
+#ifdef DEBUG
+menu mainmenu
+	window
+	tree-view
+detail
+	option "Manage Users" @1,1
+		do display-consolidated-users
+	option "View PRONTO Users" @1,1
+		do display-pronto-users
+	option "View LDAP Users" @1,2
+		do display-ldap-records
+	option "View /etc/passwd" @1,3
+		do display-etc-passwd
+	option "List LdapSearch" @1,4
+		do print-ldap-search
+end-menu
+#endif
+
+procedure initialisation
+	do get-host-name
+	do get-master-password
+	do load-ldap-users
+	do load-etc-passwd
+	do create-consolidated-users
+	do create-filter
+end-procedure
+
+#if BMS_DICT_VER >= 7300
+
+procedure create-filter
+local field
+	lf-screen							type string pic x(256)
+	lf-screen-path						type string pic x(256)
+	lf-dg-view-name						type string pic x(256)
+	lf-actual-value						pic x
+	lf-login-id							like user-id
+	lf-views-loaded						type boolean
+	lf-col-to-filter					like rdcf-dg-col-num
+#ifdef DEBUG
+		print "in create-filter"
+	sql-delete runtime-datagrid-col-filters
+		where rdcf-screen-path like '%ldapmaint%'
+	sql-delete runtime-datagrid-views
+		where rdv-screen-path like '%ldapmaint%'
+	sql-delete user-screen-settings
+		where uss-program-name like '%ldapmaint%'
+	sql-delete runtime-datagrid-dev-settings
+		where rdds-screen-path like '%ldapmaint%'
+#endif
+//
+	set lf-screen = "display-consolidated-users"
+	set lf-screen-path = strconcat(get-param(0),"/",lf-screen)
+	// DO NOT use get-param(0).  get-param(0) is different
+	// depending on how you call the program.  If you run it from the menu
+	// it has a different value than if you run it from proman.
+	set lf-screen-path = strconcat("sys/ldapmaint/",lf-screen)
+	set lf-login-id = loginid()
+	do clibpersonalise-get-user-screen-setting
+		parameters
+			lf-login-id
+			sys-consolidation-division
+			get-param(0)
+			lf-screen
+			SPACES
+			"VIEWS_AUTO_LOADED"
+		returning
+			lf-views-loaded
+	if not lf-views-loaded
+		set lf-dg-view-name = "NonSys"
+			set lf-col-to-filter = 5
+			set lf-actual-value = "N"
+		do clibdatagridview-delete-datagrid-view
+			parameters
+				lf-login-id
+				lf-screen-path
+				lf-dg-view-name
+		do clibdatagridview-insert-datagrid-view
+			parameters
+				lf-login-id
+				lf-screen-path
+				lf-dg-view-name
+				ZERO					//Hilite type
+				ZERO					//Hilite fore
+				ZERO					//Hilite back
+				SPACES					//Sort columns
+				SPACES					//Column order
+				SPACES					//App view
+				YES						//Default view
+		do clibdatagridview-insert-datagrid-col-filter
+			parameters
+				lf-login-id
+				lf-screen-path
+				lf-dg-view-name
+				5		//Column
+				0						//Filter type
+				IDATAGRIDVIEW_FILTER_GREATER_THAN_OR_EQUAL_TO	//Filter op
+#ifdef REDHAT7
+				"1000"			//Filter value
+#else
+				"500"			//Filter value
+#endif
+				0						//Hilite fore
+				0						//Hilite back
+				5		//Column	
+				0						//Hilite flags
+		do clibpersonalise-set-user-screen-setting		
+			parameters
+				lf-login-id
+				sys-consolidation-division
+				get-param(0)
+				lf-screen
+				SPACES
+				"VIEWS_AUTO_LOADED"
+				SPACES
+	endif
+endprocedure 
+
+#else
+
+procedure create-filter
+	do clibvdgview-add-filter parameters
+		"display-consolidated-users"
+		"Non System"
+		"FALSE"
+		spaces
+	do clibvdgview-add-condition parameters
+		"display-consolidated-users"
+		"Non System"	
+		6 ">=" "500" false
+end-procedure
+
+#endif
+
+procedure get-host-name
+local
+	lf-host								pic x(256) type string
+	i									type number
+	j									type number
+	// Establish the host name
+	set lf-host = get-env("HOSTNAME")
+	set j = 1
+	for i = 1 to str-len(lf-host)
+		if substring(lf-host,i,i) in ( " " ".")
+			set j += 1
+		else
+			string ws-hostname[j] appending substring(lf-host,i,i)
+		endif
+	endfor
+	// ws-dc-bits is the domain part of the FQDN in ldap format
+	// (dc=velocityglobal,dc=co,dc=nz)
+	for j = 2 to 6
+		if ws-hostname[j] <> spaces
+			if ws-dc-bits <> spaces
+				string ws-dc-bits appending ","
+			endif
+			string ws-dc-bits appending "dc="
+			string ws-dc-bits appending ws-hostname[j]
+		endif
+	end-for
+end-procedure
+
+procedure reset-master-password
+	get system-user-only-table
+		on index suot-tbl-type suot-tbl-code
+		key is "LDAP" "PASSWORD"
+		lock
+	on error
+	else
+		delete system-user-only-table
+	endon
+	do get-master-password
+end-procedure
+
+procedure load-ldap-users
+// this procedure gets all the data fro a specific class
+//
+local
+	lf-command							pic x(256) 
+	lf-tmp-file							pic x(256) type string
+	lf-prefix							pic x(256) type string
+	lf-suffix							pic x(256) type string
+	lf-exit								type number
+	lf-record-started					type boolean
+#ifdef DEBUG
+	print 80"-"
+	print "load-ldap-users"
+	print 80"-"
+#endif
+	set lf-tmp-file = str-concat("/tmp/ldap",str(pid()))
+	set lf-command = "ldapsearch -x -h localhost "
+	string lf-command appending concat(" -w " ws-master-password)
+	string lf-command appending " -D cn=manager,"
+	string lf-command appending ws-dc-bits
+#ifdef REDHAT7
+	string lf-command appending ' -b '
+	string lf-command appending ws-dc-bits
+#endif
+	string lf-command appending ' -s sub "(objectClass=account)"'
+	string lf-command appending concat( " > " lf-tmp-file " 2>&1 ")
+	do execute-command parameter are lf-command returning lf-exit
+	if lf-exit <> 0
+		message "Unable to access existing ldap records"
+		exit
+	endif
+	open text-file
+		file is lf-tmp-file
+	open ldap-accounts
+		temporary
+	set lf-record-started = FALSE
+	select * from text-file
+	detail
+		if substring(tf-text,1,1) = "#" or tf-text = spaces
+			continue
+		endif
+		set lf-prefix = substring(tf-text,1,pattern(tf-text,":") - 1)
+		set lf-suffix = substring(tf-text,pattern(tf-text,":") + 2,strlen(tf-text))
+		switch lf-prefix
+		case  "dn"
+			if lf-record-started 
+				insert ldap-accounts
+			endif
+#ifdef DEBUG
+			DEBUG(tf-text)
+#endif
+			initialise ldap-accounts
+		case "uid"
+			set  la-user-id = lf-suffix
+			set lf-record-started = TRUE
+		case "cn"
+			set la-name = lf-suffix
+		case "uidNumber"
+			set la-uid = num(lf-suffix)
+		end-switch
+	end-select
+	if lf-record-started 
+		insert ldap-accounts
+	endif
+	close text-file and remove
+end-procedure
+
+procedure get-master-password
+local
+	lf-password						pic x(30) type string
+	//
+	// get the master password
+	//
+	get system-user-only-table
+		on index suot-tbl-type suot-tbl-code
+		key is "LDAP" "PASSWORD"
+	on error
+		// insert a blank record
+		initialise system-user-only-table
+			leaving suot-tbl-type suot-tbl-code
+		insert system-user-only-table
+		on error
+			message-box 
+				bell  "Could not create master password record"
+				title is ws-function-title
+				message-buttons MSG_BOX_CANCEL
+				icon MSG_BOX_STOP
+			exit
+		endon
+	endon
+	//
+	// We are now certain there is a record even if it blank
+	//
+	get system-user-only-table
+		on index suot-tbl-type suot-tbl-code
+		key is "LDAP" "PASSWORD"
+		lock
+	if suot-description = spaces
+		do get-password entry once parameters "Enter Master Password"
+			returning lf-password
+		set suot-description = encrypt(lf-password,PRIVATEKEY,PUBLICKEY)
+		update system-user-only-table
+		set ws-master-password = lf-password
+	else
+		set ws-master-password = decrypt(suot-description,PRIVATEKEY,PUBLICKEY)
+	endif
+	unlock system-user-only-table
+end-procedure
+
+procedure create-consolidated-users
+	close consolidated-users and remove
+	open consolidated-users	 temporary
+	select * from system-user-control
+	detail
+		do get-current-consolidate-user
+			parameters are user-id
+		set cu-name = user-employee-name
+		set cu-pronto-uid = user-unix-id-no
+		set cu-in-pronto = true
+		update consolidated-users
+		on error
+			message "Failed consoldiated-users update (pronto)"
+			exit
+		endon
+	end-select
+	select * from ldap-accounts
+	detail
+		do get-current-consolidate-user
+			parameters are la-user-id
+		set cu-in-ldap = TRUE
+		set cu-ldap-uid = la-uid
+		update consolidated-users
+		on error
+			message "Failed consoldiated-users update (ldap)"
+			exit
+		endon
+	end-select
+	select * from etc-passwd
+	detail
+		do get-current-consolidate-user
+			parameters are ep-user-id
+		set cu-in-passwd = TRUE
+		set cu-passwd-uid = ep-uid
+		update consolidated-users
+		on error
+			message "Failed consoldiated-users update (/etc/passwd)"
+			exit
+		endon
+	end-select
+end-procedure
+
+procedure get-current-consolidate-user
+//  
+//  This is a generalised routine that gets current on the
+//  record but adds one if it is not there
+//
+parameters
+	lp-user-id						like user-id
+//
+	get consolidated-users
+		on index cu-user-id
+		key is lp-user-id
+		lock
+	on error
+		initialise consolidated-users
+		set cu-user-id = lp-user-id
+		insert consolidated-users
+		on error
+		endon
+		get consolidated-users
+			on index cu-user-id
+			key is lp-user-id
+			lock
+	endon
+end-procedure
+
+screen display-consolidated-users
+local
+	lf-fg								type number
+	lf-bg								type number
+	lf-user-position					like user-id
+	window
+	datagrid occurs 20
+	select * from consolidated-users
+	allowed search md-ldap-verify md-ldap-passwd md-ldap-add md-master-password md-ldap-delete
+before
+	get consolidated-users 
+		on index cu-user-id
+		key is lf-user-position
+	on error
+		get consolidated-users first
+	endon
+detail
+	set lf-fg = 0
+	set lf-bg  = 0
+	// red on yellow means you can delete, or verify or manage password
+	if cu-in-ldap and cu-in-pronto and cu-in-passwd
+		set lf-fg = Red
+		set lf-bg  = RGB(255,255,160)
+	endif
+	// blue on yellow means you can add it
+	if (not cu-in-ldap) and cu-in-pronto and cu-in-passwd
+		set lf-fg = blue
+		set lf-bg  = RGB(255,255,160)
+	endif
+	if screenmode = md-ldap-passwd
+		do ldap-password parameters cu-user-id
+	endif
+	if screenmode = md-ldap-verify
+		do ldap-verify  parameters cu-user-id 
+	endif
+	if screenmode = md-master-password
+		do reset-master-password
+	endif
+	if screenmode = md-ldap-delete
+		do ldap-delete parameters are cu-user-id
+		set lf-user-position = cu-user-id
+		do load-ldap-users
+		do create-consolidated-users
+		reselect
+		refresh
+	endif
+	if screenmode = md-ldap-add
+		do ldap-add-user parameters are cu-user-id
+		set lf-user-position = cu-user-id
+		do load-ldap-users
+		do create-consolidated-users
+		reselect
+		refresh
+	endif
+	accept cu-user-id	@1,1 pic x(10)
+		title "User id"
+		when screenmode = search
+		show-value
+// don't put colur here or you can't see where you are 
+//		colour is lf-fg on lf-bg
+	display cu-name @1,2 pic x(30)
+		title "Name"
+		colour is lf-fg on lf-bg
+	display if-then-else(cu-in-pronto,"Y","N") @1,3 pic x(8)
+		title "Pronto"
+		center
+		colour is lf-fg on lf-bg
+	display if-then-else(cu-in-ldap,"Y","N") @1,4 pic x(8)
+		title "LDAP"
+		center
+		colour is lf-fg on lf-bg
+	display if-then-else(cu-in-passwd,"Y","N") @1,5 pic x(8)
+		title "Passwd"
+		center
+		colour is lf-fg on lf-bg
+	display cu-passwd-uid @1,6 pic z(6)
+		title "UID"
+		colour is lf-fg on lf-bg
+end-screen
+
+#ifdef DEBUG
+screen display-pronto-users
+	window
+	datagrid occurs 20
+	select * from system-user-control
+	allowed search 
+detail
+	accept user-id @1,1
+		title "User ID"
+		when screenmode = search
+		show-value
+	display user-employee-name @1,2
+		title "Name"
+	display user-unix-id-no @1,3
+		title "Unix ID"
+end-screen
+
+screen display-ldap-records
+	window
+	datagrid occurs 20
+	select * from ldap-accounts
+	allowed search 
+detail
+	accept la-user-id @1,1
+		Title "User"
+		when screenmode = search
+		show-value
+	display la-name @1,2
+		title "Name"
+	display la-uid @1,3
+		title "Unix Id"
+end-screen
+
+screen display-etc-passwd
+	window
+	title ws-function-title
+	datagrid occurs 20
+	select * from etc-passwd
+	allowed search
+detail
+	accept ep-user-id @1,1
+		when screenmode = search
+		show-value
+		title "User Id"
+	display ep-name @1,2
+		title "Name"
+	display ep-uid @1,3
+		title "User id"
+	display ep-home @1,4
+		title "Home"
+	display ep-shell @1,5
+		title "Shell"
+end-screen
+#endif
+
+screen get-password
+parameters
+	lp-title							pic x(256) type string	
+returning 
+	lr-password							pic x(30) type string
+	window @1,1 to @4,40
+	title lp-title
+	no-ok-cancel
+detail
+	accept lr-password @2,5
+		blank
+end-screen
+
+procedure ldap-verify
+parameters
+	lp-user-id							like user-id
+returning
+	lr-ok								type boolean
+local
+	lf-command							pic x(256) 
+	lf-exit								type number
+	lf-password							pic x(30)
+	lf-tmp-file							pic x(256) type string
+	//
+	set lf-tmp-file = str-concat("/tmp/ldap",str(pid()))
+	set lr-ok = false
+	do get-password entry once parameters are concat("Enter password for " lp-user-id) returning lf-password
+	set lf-command = "ldapsearch -x -h localhost -w "
+	string lf-command appending concat(" " lf-password)
+	string lf-command appending " -D uid="
+	string lf-command appending lp-user-id
+	string lf-command appending ",ou=Users,"
+	string lf-command appending ws-dc-bits
+#ifdef REDHAT7
+	string lf-command appending ' -b '
+	string lf-command appending ws-dc-bits
+#endif
+	string lf-command appending " > /dev/null" 
+//	string lf-command appending concat( " " lf-tmp-file)
+//	string lf-command appending " 2>&1 " 
+	do execute-command	parameters are lf-command returning lf-exit
+	if lf-exit <> 0
+		message-box "Verify Failed."
+			title is ws-function-title
+			message-buttons MSG_BOX_CANCEL
+			icon MSG_BOX_STOP
+	else
+		message-box "Verify Passed"
+			title is ws-function-title
+			message-buttons MSG_BOX_OK
+			icon MSG_BOX_INFORMATION
+	endif
+end-procedure
+
+procedure ldap-password
+parameters
+	lp-user-id							like user-id
+returning
+	lr-ok								type boolean
+local
+	lf-command							pic x(256) 
+	lf-exit								type number
+	lf-old-password						pic x(30)
+	lf-new-password						pic x(30)
+	lf-tmp-file							pic x(256) type string
+	//
+	set lf-tmp-file = str-concat("/tmp/ldap",str(pid()))
+	set lr-ok = false
+	do get-password entry once parameters are concat("Enter current password for " lp-user-id) returning lf-old-password
+	do get-password entry once parameters are concat("Enter new password for " lp-user-id) returning lf-new-password
+	set lf-command = "ldappasswd -H ldap://"
+	string lf-command appending get-env("HOSTNAME")
+	string lf-command appending " -x -D cn=manager,"
+	string lf-command appending ws-dc-bits
+	string lf-command appending concat(" -a " lf-old-password)
+	string lf-command appending concat(" -s " lf-new-password)
+	string lf-command appending concat(" -w " ws-master-password)
+	string lf-command appending " uid="
+	string lf-command appending lp-user-id
+	string lf-command appending ",ou=Users,"
+	string lf-command appending ws-dc-bits
+	string lf-command appending " > /dev/null"
+	do execute-command parameters are lf-command returning lf-exit
+	if lf-exit <> 0
+		message-box "Password Change Failed."
+			title is ws-function-title
+			message-buttons MSG_BOX_CANCEL
+			icon MSG_BOX_STOP
+	else
+		message-box "Password Change Success"
+			title is ws-function-title
+			message-buttons MSG_BOX_OK
+			icon MSG_BOX_INFORMATION
+	endif
+end-procedure
+
+procedure ldap-add-user
+parameters
+	lp-user-id							like user-id
+local
+	lf-command							pic x(256) 
+	lf-exit								type number
+	lf-password							pic x(30)
+	open text-file create permanent
+		file is concat("/tmp/ldapadd",str(pid()),".ldif")
+	get etc-passwd
+		on index ep-user-id
+		key is lp-user-id
+	on error
+		initialise etc-passwd
+	endon
+	if ep-name = spaces
+		set ep-name = lp-user-id
+	endif
+	INSERTTEXT(concat("dn: uid=",str-concat(lp-user-id),",ou=Users,", ws-dc-bits))
+	INSERTTEXT(concat("uid: " lp-user-id))
+	INSERTTEXT(concat("cn: " ep-name))
+	INSERTTEXT("objectClass: account")
+	INSERTTEXT("objectClass: posixAccount")
+	INSERTTEXT("objectClass: top")
+	INSERTTEXT("objectClass: shadowAccount")
+	INSERTTEXT("shadowLastChange: 0")
+	INSERTTEXT("shadowMax: 0")
+	INSERTTEXT("shadowWarning: 0")
+	INSERTTEXT("userPassword: {crypt}x")
+	INSERTTEXT(concat("uidNumber: " str(ep-uid)))
+	INSERTTEXT(concat("gidNumber: " str(ep-group)))
+	INSERTTEXT(concat("homeDirectory: ", ep-home))
+	INSERTTEXT(concat("loginShell: ", ep-shell))
+	INSERTTEXT(concat("gecos: ", ep-name))
+	set lf-command = "ldapadd -x -h localhost "
+	string lf-command appending " -D cn=manager,"
+	string lf-command appending ws-dc-bits
+	string lf-command appending concat( " -w " ws-master-password)
+	string lf-command appending concat( " -f " filename(text-file))
+	do execute-command parameter lf-command returning lf-exit
+	close text-file and remove
+	if lf-exit = 68
+		message-box "User already exists in LDAP"
+			title is ws-function-title
+			message-buttons MSG_BOX_CANCEL
+			icon MSG_BOX_STOP
+		exit
+	endif
+	if lf-exit <> 0
+		message-box "ldap add failed"
+			title is ws-function-title
+			message-buttons MSG_BOX_CANCEL
+			icon MSG_BOX_STOP
+		exit
+	endif
+	do get-password entry once parameters are concat("Enter password for " lp-user-id) returning lf-password
+	set lf-command = "ldappasswd -H ldap://"
+	string lf-command appending get-env("HOSTNAME")
+	string lf-command appending " -x -D cn=manager,"
+	string lf-command appending ws-dc-bits
+	string lf-command appending concat(" -s " lf-password)
+	string lf-command appending concat(" -w " ws-master-password)
+	string lf-command appending " uid="
+	string lf-command appending lp-user-id
+	string lf-command appending ",ou=Users,"
+	string lf-command appending ws-dc-bits
+	string lf-command appending " > /dev/null"
+	do execute-command parameters are lf-command returning lf-exit
+	if lf-exit <> 0
+		message-box "Password Change Failed."
+			title is ws-function-title
+			message-buttons MSG_BOX_CANCEL
+			icon MSG_BOX_STOP
+	else
+		message-box "Password Change Success"
+			title is ws-function-title
+			message-buttons MSG_BOX_OK
+			icon MSG_BOX_INFORMATION
+	endif
+end-procedure
+
+procedure load-etc-passwd
+local
+	lf-fields							pic x(256) type string occurs 100
+	lf-populated-fields					type number
+	open text-file
+		file is "/etc/passwd"
+		read-only
+	on error
+		message "Cannot read /etc/passwd"
+		exit
+	endon
+	open etc-passwd temporary
+	select * from text-file
+	detail
+		do clibvfile-split 
+			parameters are tf-text,":"
+			returning lf-fields lf-populated-fields
+		initialise etc-passwd
+		set ep-user-id = lf-fields[1]
+		set ep-uid = num(lf-fields[3])
+		set ep-group = num(lf-fields[4])
+		set ep-name = lf-fields[5]
+		set ep-home = lf-fields[6]
+		set ep-shell = lf-fields[7]
+		insert etc-passwd
+	end-select
+end-procedure
+
+
+procedure execute-command
+parameters 
+	lp-command 					pic x(1024) type string
+returning
+	lr-exit						type number
+#ifdef DEBUG
+	print 80"-"
+	print "start of Execute Command"
+	DEBUG("lp-command")
+	print 80"-"
+#endif
+	command "sh" parameters are "-c" lp-command
+	set lr-exit = exit-status
+#ifdef DEBUG
+	DEBUG("lr-exit")
+	if lr-exit <> 0
+		print "command failed so listing output:"
+		// try to list the output
+		if pattern(lp-command ,  ">")
+			string lp-command deleting pattern(lp-command,">") - 1
+		endif
+		string lp-command appending " > /tmp/ldapdebug.txt 2>&1 "
+		command "sh" parameters are "-c" lp-command
+		open text-file
+			file is "/tmp/ldapdebug.txt"
+		select * from text-file
+		before 
+			print "Command results:"
+		detail
+			print tf-text
+		end-select
+		close text-file and remove
+	endif
+	print 80"-"
+	print "End of execute-command"
+	print 80"-"
+#endif
+end-procedure
+
+procedure ldap-delete
+parameters
+	lp-user-id							like user-id
+returning
+	lr-ok								type boolean
+local
+	lf-command							pic x(256) 
+	lf-exit								type number
+	//
+//	set lf-tmp-file = str-concat("/tmp/ldap",str(pid()))
+	set lr-ok = false
+//	do get-password entry once parameters are concat("Enter password for " lp-user-id) returning lf-password
+	set lf-command = "ldapdelete -x -h localhost "
+	string lf-command appending concat(" -w " ws-master-password)
+	string lf-command appending " -D cn=manager,"
+	string lf-command appending ws-dc-bits
+	string lf-command appending "  uid="
+	string lf-command appending str-concat(lp-user-id)
+	string lf-command appending ",ou=Users,"
+	string lf-command appending ws-dc-bits
+	string lf-command appending " > /dev/null" 
+//	string lf-command appending concat( " " lf-tmp-file)
+//	string lf-command appending " 2>&1 " 
+	do execute-command	parameters are lf-command returning lf-exit
+	if lf-exit <> 0
+		message-box "Delete Failed"
+			title is ws-function-title
+			message-buttons MSG_BOX_CANCEL
+			icon MSG_BOX_STOP
+	else
+		message-box "Delete Successful"
+			title is ws-function-title
+			message-buttons MSG_BOX_OK
+			icon MSG_BOX_INFORMATION
+	endif
+end-procedure
+
+#ifdef DEBUG
+procedure print-ldap-search
+// this procedure gets all the data fro a specific class
+//
+local
+	lf-command							pic x(256) 
+	lf-tmp-file							pic x(256) type string
+	lf-exit								type number
+	report "ldapsearch"
+		no-message
+		name is ldapsearch
+	set lf-tmp-file = str-concat("/tmp/ldap",str(pid()))
+	set lf-command = "ldapsearch -x -h localhost "
+	string lf-command appending concat(" -w " ws-master-password)
+	string lf-command appending " -D cn=manager,"
+	string lf-command appending ws-dc-bits
+	string lf-command appending ' -s sub "(objectClass=account)"'
+#ifdef REDHAT7
+	string lf-command appending ' -b '
+	string lf-command appending ws-dc-bits
+#endif
+	string lf-command appending concat( " > " lf-tmp-file " 2>&1 ")
+	do execute-command parameter are lf-command returning lf-exit
+	if lf-exit <> 0
+		message "Unable to access existing ldap records"
+		exit
+	endif
+	open text-file
+		file is lf-tmp-file
+	select * from text-file
+	detail
+		print tf-text on ldapsearch
+	end-select
+	close text-file and remove
+	report finished on ldapsearch
+	print 80"-"
+end-procedure
+
+#endif

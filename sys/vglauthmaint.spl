@@ -1,0 +1,19 @@
+// dummy 
+// real one is in /pro/pronto/cus/huss
+
+procedure main
+returning
+	lr-complete							pic xxx
+local
+	i			type number
+	set lr-complete = "C"
+  // Sending an email with an attachment
+	if mail-start("from vglauthmaint") endif
+	for i = 1 to param-cnt()
+		if mail-add-line(get-param(i)) endif
+	endfor
+ 	if not mail-send("rayb",FALSE,FALSE)
+		message "This email was not sent - Please ensure the attachment exists"
+	endif
+end-procedure
+	

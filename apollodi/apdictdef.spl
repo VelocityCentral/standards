@@ -1,0 +1,234 @@
+#ifndef DICTDEF
+#define DICTDEF
+
+#define DEFINED_IN_DICT
+
+/************************************************************************/
+/*									*/
+/*	(C)opyright 1986 - 1993						*/
+/*	Prometheus Software Developments P/L				*/
+/*									*/
+/*----------------------------------------------------------------------*/
+/*									*/
+/*	Defintions of the PRONTO dictionary files.			*/
+/*									*/
+/*	NOTE: The main definition of the dictionary is in dict.h for	*/
+/*	the compiler.  Any definitions in here MUST be compatible with	*/
+/*	the ones in dict.h.						*/
+/*									*/
+/*	Modification History						*/
+/*									*/
+/*	Date		Who	What					*/
+/*	20/1/93		P.M.	New format for release 4.0.		*/
+/*	13/10/88	P.M.	Added program relation objects		*/
+/*	28/4/88		P.M.	Validations included in doc. file.	*/
+/*	8/4/87		P.M.	Written (was defined in the dictionary)	*/
+/*									*/
+/************************************************************************/
+
+/************************************************************************/
+/*	Object file							*/
+/************************************************************************/
+
+#define	OBJ_NAME(x)	concat (x, "O")
+
+#ifndef DEFINED_IN_DICT
+
+object dict-object
+	type is isam
+	version is '4'
+	record is
+		obj-name	pic x(30) type is string use-name-in-db
+		obj-id		pic 9(4) use-name-in-db
+		obj-old-id	pic 9(4) use-name-in-db
+		obj-doc		pic x(40) type is string use-name-in-db
+		obj-recsize	pic 9(4) use-name-in-db
+		obj-sec		pic 9(4) use-name-in-db
+		obj-file	pic x(40) type is string use-name-in-db
+		obj-group	pic x(8) type is string use-name-in-db
+		obj-version	pic x use-name-in-db
+		obj-type	pic x use-name-in-db
+		obj-sep		pic x use-name-in-db
+		obj-filler1	pic x use-name-in-db
+		obj-date	type date use-name-in-db
+		obj-time	type time use-name-in-db
+		obj-user	pic x(8) use-name-in-db
+	end
+	key is obj-name unique
+	key is obj-id desc unique
+
+#endif
+
+/************************************************************************/
+/*	Field file							*/
+/************************************************************************/
+
+#define	FLD_NAME(x)	concat (x, "F")
+
+#ifndef DEFINED_IN_DICT
+object dict-field
+	type is isam
+	version is '4'
+	record is
+		fld-name	pic x(30) type is string use-name-in-db
+		fld-id		pic 9(4) use-name-in-db
+		fld-old-id	pic 9(4) use-name-in-db
+		fld-like-id	pic 9(4) use-name-in-db
+		fld-size	pic 9(4) use-name-in-db
+		fld-desc	pic 9(4) use-name-in-db
+		fld-type	pic x use-name-in-db
+		fld-filler1	pic x use-name-in-db
+		fld-sec		pic 9 use-name-in-db
+		fld-occurs	pic 9(4) use-name-in-db
+		fld-doc		pic x(40) type is string use-name-in-db
+		fld-col-name	pic x(16) type is string use-name-in-db
+		fld-flags	pic 9(4) use-name-in-db
+		fld-date	type date use-name-in-db
+		fld-time	type time use-name-in-db
+		fld-user	pic x(8) use-name-in-db
+	end
+	key is fld-name unique
+	key is fld-id desc unique
+	key is fld-like-id
+#endif
+
+/* fld-flags bit mask values */
+
+#define	VAL_UPPERCASE	1
+#define	VAL_LOWERCASE	2
+#define	VAL_RIGHT_JUST	4
+#define	VAL_MASK	7
+
+
+/************************************************************************/
+/*	Record file							*/
+/************************************************************************/
+
+#define	REC_NAME(x)	concat (x, "R")
+
+#ifndef DEFINED_IN_DICT
+object dict-record
+	type is isam
+	version is '4'
+	record is
+		obj-id
+		fld-id
+		rec-offset	pic 9(4) use-name-in-db
+	end
+	key is obj-id, rec-offset unique
+	key is fld-id, obj-id unique
+#endif
+
+/************************************************************************/
+/*	Key file							*/
+/************************************************************************/
+
+#define	KEY_NAME(x)	concat (x, "K")
+#define	MAX_KEY_FIELDS	8
+
+#ifndef DEFINED_IN_DICT
+object dict-keys
+	type is isam
+	version is '4'
+	record is
+		obj-id
+		index-no	pic 9(4) use-name-in-db
+		key-flags	pic 9(4) use-name-in-db
+		num-fields	pic 9(4) use-name-in-db
+		k-fld-id	pic 9(4) occurs MAX_KEY_FIELDS use-name-in-db
+		k-desc-flag	pic x occurs MAX_KEY_FIELDS use-name-in-db
+	end
+	key is obj-id, index-no unique
+	key is obj-id
+#endif
+
+#define	DK_DUPLICATES	1		/* duplicates allowed flag */
+#define	DK_DB_ONLY	2		/* index only on RDBMS */
+#define	DK_COMPRESS	4		/* use key compression */
+
+
+/************************************************************************/
+/*	Documentation file						*/
+/*	doc-type : 1 = object						*/
+/*		   2 = field						*/
+/*		   3 = field validations				*/
+/************************************************************************/
+
+#define	DOC_NAME(x)	concat (x, "D")
+
+#ifndef DEFINED_IN_DICT
+object dict-documentation
+	type is isam
+	version is '4'
+	record is
+		doc-type	pic 9 use-name-in-db
+						// 1 - object doc.
+						// 2 - field doc.
+						// 3 - field validations
+		doc-id		pic 9(4) use-name-in-db	// field/object id
+		doc-line-no	pic 9(4) use-name-in-db
+		doc-line	pic x(80) type is string use-name-in-db
+	end
+	key is doc-type, doc-id, doc-line-no unique
+#endif
+
+/************************************************************************/
+/*	Object Relations file						*/
+/************************************************************************/
+
+#define	OBJ_REL_NAME(x)	concat (x, "OR")
+
+#ifndef DEFINED_IN_DICT
+object dict-objrelations
+	type is isam
+	version is '4'
+	record is
+		obj-id
+		to-obj-id	like obj-id use-name-in-db
+		from-relation	pic x use-name-in-db
+		to-relation	pic x use-name-in-db
+		from-index-no	like index-no use-name-in-db
+		to-index-no	like index-no use-name-in-db
+	end
+	key is obj-id 
+#endif
+
+/************************************************************************/
+/*	Program file							*/
+/************************************************************************/
+
+#define	PROG_REL_NAME(x)	concat (x, "PR")
+
+#ifndef DEFINED_IN_DICT
+object dict-program
+	type is isam
+	version is '4'
+	record is
+		prog-name	pic x(10)	type string use-name-in-db
+		sys-name	pic x(14)	type string use-name-in-db
+		prog-id		pic 9(4) use-name-in-db
+	end
+	key is sys-name, prog-name	unique
+	key is prog-id			unique
+#endif
+
+/************************************************************************/
+/*	Program to object relation file					*/
+/************************************************************************/
+
+#define	PROG_OBJ_NAME(x)	concat (x, "PO")
+
+#ifndef DEFINED_IN_DICT
+object dict-prog-obj
+	type is isam
+	version is '4'
+	record is
+		prog-id
+		obj-id
+		prog-flags	pic 9(4) use-name-in-db
+	end
+	key is prog-id, obj-id		unique
+	key is obj-id
+#endif
+
+#endif

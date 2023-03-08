@@ -1,0 +1,539 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : 
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2022
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: clib/clibvsplfil.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 08Jun22  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/i8secabt.spl"
+#include "../include/i8proglogparam.spl"
+
+/*
+
+	This documentation is in RST format.  To view this as a nice pdf goto
+	https://overbits.herokuapp.com/rsteditor/ or rst.ninjs.org and paste this content.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|           |           |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+
+===========
+clibvsplfil
+===========
+
+This is a generic routine designed to provide access to the header data from spool files
+
+Error handling is done via exit status of each routine.  
+
+Note that the way the program works is that all the details of a given spool file are
+held internally in global variables.  When details of a given spool file are FIRST requested
+(irrespective of which call is made) then the system populates the variables at that point.
+Future calls for the same spool file do not cause a recaclculation of values.  The internal
+global values are merely returned.  Only when the spool id changes do the global variables 
+get re-calculated.  This is a performance function.
+
+clibvcvt-get-last-error 
+~~~~~~~~~~~~~~~~~~~~~~~
+
+Return the last error message
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   Out     |String 1k  |Last error message                                      |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvsplfil-get-all-header
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Pass the spoolid and return all variables of the spool file
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 30  |Spool Id                                                |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |String     |Name                                                    |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |String     |Form                                                    |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |String     |User                                                    |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |Integer    |Page Count                                              |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |DateTime   |Created Date                                            |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvsplfil-get-name
+~~~~~~~~~~~~~~~~~~~~
+
+Pass the spoolid and return the descriptive name
+
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 30  |Spool Id                                                |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |String     |Name                                                    |
+	+-----------+-----------+--------------------------------------------------------+
+
+
+clibvsplfil-get-form
+~~~~~~~~~~~~~~~~~~~~
+
+Pass the spoolid and return return the form code used on the file
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 30  |Spool Id                                                |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |String     |Form                                                    |
+	+-----------+-----------+--------------------------------------------------------+
+
+
+clibvsplfil-get-user
+~~~~~~~~~~~~~~~~~~~~
+
+Pass the spoolid and return return the user who owns the file
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 30  |Spool Id                                                |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |String     |User                                                    |
+	+-----------+-----------+--------------------------------------------------------+
+
+
+clibvsplfil-get-page-count
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Pass the spoolid and return the page count
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 30  |Spool Id                                                |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |Integer    |Page Count                                              |
+	+-----------+-----------+--------------------------------------------------------+
+
+
+clibvsplfil-get-created-date
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Pass the spoolid and return the date and time the file was created.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 30  |Spool Id                                                |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |datetime   |Date and time the file was created                      |
+	+-----------+-----------+--------------------------------------------------------+
+
+*/
+ 
+field
+	ws-last-error						pic x(1024) type string
+	ws-spool-id							pic x(30) type string
+	ws-name								type string pic x(60)
+	ws-form								type string pic x(60)
+	ws-user								type string pic x(60)
+	ws-page-count						type number
+	ws-created							type datetime	
+	ws-spoolfile-directory				type string pic x(1024)
+
+object tmp-spoolfile-header
+	type text
+	record
+		tmp-tsh-record				pic x(1023) type string
+	endrecord
+
+object filedetails
+	type is external
+	record
+		fd-name							pic x(512) type string
+		fd-user							pic x(40) type string
+		fd-date							type date
+		fd-time							type time
+	end-record
+
+procedure library-init 
+	get system-control first
+	do set-spoolfile-directory
+	do i8proglogparam-write-log parameters are "clibvcvt"
+end-procedure
+
+procedure clibvsplfil-get-last-error export
+returning
+	lr-err								like ws-last-error
+	set lr-err = ws-last-error
+end-procedure
+
+procedure main
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do set-spoolfile-directory
+	do test-menu
+end-procedure
+
+procedure clibvsplfil-get-all-header export
+parameters
+	lp-spool-id							pic x(30)
+returning
+	lr-name								type string pic x(60)
+	lr-form								type string pic x(60)
+	lr-user								type string pic x(60)
+	lr-page-count						type number
+	lr-created							type datetime	
+	//
+	// Determne the type
+	//
+	do set-all-fields parameters are lp-spool-id
+	if exit-status != 0
+		exit 1
+	endif
+	set lr-name = ws-name
+	set lr-form = ws-form
+	set lr-user = ws-user
+	set lr-page-count = ws-page-count
+	set lr-created = ws-created
+end-procedure
+
+procedure clibvsplfil-get-name export
+parameters
+	lp-spool-id							pic x(30)
+returning
+	lr-name								type string pic x(60)
+	do set-all-fields parameters are lp-spool-id
+	if exit-status != 0
+		exit 1
+	endif
+	set lr-name = ws-name
+end-procedure
+
+procedure clibvsplfil-get-form export
+parameters
+	lp-spool-id							pic x(30)
+returning
+	lr-form								type string pic x(60)
+	do set-all-fields parameters are lp-spool-id
+	if exit-status != 0
+		exit 1
+	endif
+	set lr-form = ws-form
+end-procedure
+
+procedure clibvsplfil-get-user export
+parameters
+	lp-spool-id							pic x(30)
+returning
+	lr-user								type string pic x(60)
+	do set-all-fields parameters are lp-spool-id
+	if exit-status != 0
+		exit 1
+	endif
+	set lr-user = ws-user
+end-procedure
+
+procedure clibvsplfil-get-page-count export
+parameters
+	lp-spool-id							pic x(30)
+returning
+	lr-page-count						pic 9(6)
+	do set-all-fields parameters are lp-spool-id
+	if exit-status != 0
+		exit 1
+	endif
+	set lr-page-count = ws-page-count
+end-procedure
+
+procedure clibvsplfil-get-created-date export
+parameters
+	lp-spool-id							pic x(30)
+returning
+	lr-created							type datetime	
+	do set-all-fields parameters are lp-spool-id
+	if exit-status != 0
+		exit 1
+	endif
+	set lr-created = ws-created
+end-procedure
+
+//-----------------------------------------------------------------
+// Internal procedures
+//-----------------------------------------------------------------
+
+procedure set-all-fields
+parameters
+	lp-spool-id							pic x(30)
+	if lp-spool-id = ws-spool-id
+		exit 0
+	endif
+	if sub-string(lp-spool-id,1,1) = "#"
+		do set-fields-from-hashp parameters are lp-spool-id
+		if exit-status != 0
+			exit 1
+		endif
+	else
+		do set-fields-from-xml parameters are lp-spool-id
+		if exit-status != 0
+			exit 1
+		endif
+	endif
+	do set-user-and-date parameters are lp-spool-id
+end-procedure
+
+procedure set-fields-from-hashp
+parameters
+	lp-spool-id							pic x(30)
+local
+	lf-count 							type number
+	//
+	if lp-spool-id = ws-spool-id
+		exit 0
+	endif
+	// 
+	// It's a new spool file so work it all out
+	//
+	set ws-name = spaces
+	set ws-form = spaces
+	set ws-user = spaces
+	set ws-page-count = 0
+	set ws-created = 0
+	//
+	open tmp-spoolfile-header read-only
+		file is strconcat(ws-spoolfile-directory,"/",lp-spool-id) 
+	on error ENOENT
+		set ws-last-error = "Spool file not found"
+		exit 1
+	endon
+	extract tmp-spoolfile-header all
+	detail
+		//Read info from the spool or XML file itself
+		//Spool files
+		if pattern(tmp-tsh-record,ascii-char(12))
+			//Break when we hit the form feed
+			break
+		endif
+		set lf-count += 1
+		switch on lf-count
+		case 1
+			set ws-name = substring(tmp-tsh-record,2,strlen(tmp-tsh-record))
+		case 3
+			set ws-page-count = num(strconcat(tmp-tsh-record))
+		case 4
+			set ws-form = uppercase(strconcat(tmp-tsh-record))
+			break
+		endswitch
+	endextract
+	close tmp-spoolfile-header
+end-procedure
+
+procedure set-fields-from-xml
+parameters
+	lp-spool-id							pic x(30)
+local
+	lf-data								type string pic x(50)
+	lf-count							type number
+	//
+	if lp-spool-id = ws-spool-id
+		exit 0
+	endif
+	// 
+	// It's a new spool file so work it all out
+	//
+	set ws-name = spaces
+	set ws-form = spaces
+	set ws-user = spaces
+	set ws-page-count = 0
+	set ws-created = 0
+	//
+	open tmp-spoolfile-header read-only
+		file is strconcat(ws-spoolfile-directory,"/",lp-spool-id) 
+	on error ENOENT
+		set ws-last-error = "Spool file not found"
+		exit 1
+	endon
+	extract tmp-spoolfile-header all
+	detail
+		set lf-count += 1
+		if lf-count > 20
+			//Never read more than 20 lines - as per proprint
+			break					
+		endif	
+		//In all the XML files checked, the order of the report
+		//information elements has been the same.	
+		if substring(tmp-tsh-record,1,12) = "<page_count>"
+			//Fixed length element
+			set lf-data = substring(tmp-tsh-record,13,20)
+			set ws-page-count = integer(num(lf-data))
+		elseif substring(tmp-tsh-record,1,7) = "<title>"
+			set ws-name = substring(tmp-tsh-record,8
+				,pattern(tmp-tsh-record,"</title>") - 1)
+		elseif substring(tmp-tsh-record,1,11) = "<form_type>"
+			set ws-form = substring(tmp-tsh-record,12
+				,pattern(tmp-tsh-record,"</form_type>") - 1)
+			break 
+		elseif substring(tmp-tsh-record,1,8) = "<length>"
+		or substring(tmp-tsh-record,1,14) = "</report_info>"
+			break	//Another place to break - end of header section
+		endif					
+	endextract
+	close tmp-spoolfile-header
+end-procedure
+
+procedure set-spoolfile-directory 
+local	
+	lf-count							pic 9
+	lf-key								pic x(7)
+	//
+	//If they are running REPORTDIR use that...
+	set ws-spoolfile-directory = getenv("REPORTDIR")
+	//Otherwise, try for REPORTS, then reports in data (current) directory.
+	while ws-spoolfile-directory = SPACES
+		set lf-count += 1
+		switch on lf-count
+		case 1 
+			set lf-key = "REPORTS"
+		case 2
+			set lf-key = "reports"
+		else 
+			set ws-spoolfile-directory = "."
+			break 
+		endswitch
+		if start-dir-search(".",lf-key)
+			set ws-spoolfile-directory = next-dir-entry()
+			if finish-dir-search()
+			endif 
+		endif
+	endwhile
+endprocedure //set-spoolfile-directory  ------------------------------
+
+
+procedure set-user-and-date
+parameters
+	lp-spool-file						type string
+local
+	lf-cmd 								pic x(512) type string
+	lf-filename							pic x(1024) type string
+	set lf-filename = concat("/tmp/fd" str(pid()) ".txt")
+	set lf-cmd = "find "
+	if substring(lp-spool-file,1,1) = "#"
+		string lf-cmd appending concat(" \",lp-spool-file)
+	else
+		string lf-cmd appending concat(" ",lp-spool-file)
+	endif
+	string lf-cmd appending concat(' -printf "%p|%u|%Td-%Tb-%TY|%TH:%TM:%.2TS\n" > ')
+	string lf-cmd appending lf-filename
+	command "sh" parameter are "-c" lf-cmd 
+	// sometimes the application is too fast to open the file so if 
+	// it fails sleep 1 second and try again
+	open filedetails
+		file is lf-filename
+	on error ENOENT
+		if sleep(1) endif
+		open filedetails
+			file is lf-filename
+		on error ENOENT
+			message lf-cmd
+			set ws-last-error = "Unable to determine user and date created"
+			exit 1
+		endon
+	endon
+	open filedetails
+		file is lf-filename
+	on error ENOENT
+		exit 1
+	endon
+	select * from filedetails
+	detail
+		set ws-user = fd-user
+		set ws-created = datetime(fd-date,fd-time,True)
+		break // just the first line
+	end-select
+	close filedetails and remove
+end-procedure
+
+// ------------------------------------------------------------------
+// Test Routines
+// ------------------------------------------------------------------
+//
+
+menu test-menu
+	window no-hide
+local
+	lf-spool-file						type string
+	option "Test XML" @1,1
+		report "Print Full name"
+			full-xml
+			form type "Full XML FRM"
+		select * from stock-master
+		detail 
+			print stock-code stk-description
+		end-select
+		set lf-spool-file = spool-file-name()
+		report finished
+		do show-details parameters are lf-spool-file
+	option "Test hash p" @2,1
+		report "Printhashp"
+			form type "HASH P FRM"
+			no-xml
+		set lf-spool-file = spool-file-name()
+		select * from stock-master
+		detail 
+			print stock-code stk-description
+		end-select
+		report finished
+		do show-details parameters are lf-spool-file
+	option "Test invalid spool file" @3,1
+		do show-details parameters are "#P123456"
+end-menu
+
+procedure show-details
+parameters
+	lp-spool-file						type string
+local
+	lf-name								type string pic x(60)
+	lf-form								type string pic x(60)
+	lf-user								type string pic x(60)
+	lf-page-count						type number
+	lf-created							type datetime	
+	lf-error							pic x(128) type string
+	do clibvsplfil-get-all-header parameters are lp-spool-file
+		returning 
+			lf-name
+			lf-form
+			lf-user
+			lf-page-count
+			lf-created
+	if exit-status != 0
+		do clibvsplfil-get-last-error returning lf-error
+		message lf-error
+		exit
+	endif
+	acknowledge "Spool id :" lp-spool-file
+	acknowledge "Name :"  lf-name
+	acknowledge "Form :"  lf-form
+	acknowledge "User :"  lf-user
+	acknowledge "Page Count :" lf-page-count
+	acknowledge "Created :" lf-created
+end-procedure
+

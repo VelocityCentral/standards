@@ -1,0 +1,187 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : Copy Application service to batch queue
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2019
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: utility/cpyas2bq.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 29Jul19  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+#include "../include/i8gparam.spl"
+ 
+field
+	ws-function-title						type string
+
+mode md-select
+	prompt "Select"
+
+procedure main
+local
+	lf-service								like asm-id
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8secabt-check-abort
+		parameters are sys-consolidation-division login-id() "ZUSR" "R004"
+		returning ws-function-title 
+	do i8proglog-write-log
+	I8GPARAM_NUM("-service", 0, lf-service)
+	if lf-service = 0
+		do select-service 
+	else
+		do add-to-batch entry once parameters are lf-service
+	endif
+end-procedure
+
+screen select-service
+	window
+	datagrid occurs 20
+	select *
+		from application-services-master
+		where asm-version-from < :sys-bms-version-no
+		and asm-version-to > :sys-bms-version-no
+	allowed md-select search
+detail
+	if screenmode = md-select
+		do add-to-batch entry once parameters are asm-id
+	endif
+	accept asm-id @1,1
+		title "ID"
+		when screenmode = search
+		show-value
+	display asm-description @1,2 pic x(30)
+		title "Desc"
+	display asm-program @1,3 pic x(30)
+		title "Pgm"
+end-screen
+
+screen add-to-batch
+parameters 
+	lp-service							like asm-id
+local
+	lf-last-queue						like report-seq-name
+	window @1,1 to @5,50
+		window-position 5
+		title "Sequence to use"
+detail
+	accept lf-last-queue @2,10
+		title "Sequence"
+		default lf-last-queue
+		uppercase
+	on help-key
+		do select-seq returning lf-last-queue
+		re-enter
+	endon
+	validations
+		get reporting-seq-file
+			on index report-seq-name
+			key is lf-last-queue
+		on error ENOREC
+			message "Invalid Queue Name"
+			re-enter
+		endon
+	end-validations
+	confirm auto
+	confirmed 
+		do add-service-to-batch-queue parameters are lp-service lf-last-queue
+	end-confirm
+end-screen
+
+procedure add-service-to-batch-queue
+parameters
+	lp-id								like asm-id
+	lp-queue							like report-seq-name
+local
+	lf-next-seq							like report-seq-number
+	i									type number
+	lf-commit							type boolean
+	//
+	select lf-next-seq = max(report-seq-number)
+		from reporting-seq-file
+		where report-seq-name = :lp-queue
+	end-select
+	set lf-next-seq += 1
+	set lf-commit = TRUE
+	transaction begin
+	initialise reporting-seq-file
+	set report-seq-name = lp-queue
+	set report-seq-number = lf-next-seq
+	set report-seq-program-type = "S"
+	set rs-program-name = asm-program
+	for i = 1 to occurence(asm-parameters)
+		if asm-parameters[i] = spaces
+			break
+		endif
+		initialise reporting-seq-detail-file
+		set report-seq-name = lp-queue
+		set report-seq-number = lf-next-seq
+		set rsdf-param-seq-number = i
+		set rsdf-parameter = asm-parameters[i]
+		insert reporting-seq-detail-file
+		on error
+			set lf-commit = false
+		endon
+	endfor
+	select rs-no-of-parameters = max(rsdf-param-seq-number)
+		from reporting-seq-detail-file
+		where report-seq-name = :lp-queue
+	end-select
+	set rs-param-source = "R"
+	insert reporting-seq-file
+	on error
+		set lf-commit = FALSE
+	endon
+	if not lf-commit
+		transaction rollback
+		message-box param-text("<<P1>><<BR>><<p2>>"
+			,"Unable to add"
+			,"Transaction Rolled Back")
+			title is ws-function-title
+			message-buttons MSG_BOX_CANCEL
+			icon MSG_BOX_STOP
+	else
+		transaction commit
+		message-box param-text("<<P1>><<BR>><<p2>>"
+			,concat("Task " str(lp-id) " added to queue " lp-queue)
+			,concat("with sequence " str(lf-next-seq)))
+			title is ws-function-title
+			message-buttons MSG_BOX_OK
+			icon MSG_BOX_INFORMATION
+			optional
+	endif
+end-procedure
+
+screen select-seq
+returning
+	lr-seq-name							like report-seq-name
+	window  @1,1 to @8,30
+		window-position 5
+	datagrid occurs 6
+	title "Select seq"
+	select  report-seq-name  // note select distinct does not work in this context
+		from reporting-seq-file
+		where report-seq-name < "~"
+		group by report-seq-name
+	database-sql
+	allowed md-select search
+detail
+	if screenmode = md-select
+		set lr-seq-name = report-seq-name
+		exit
+	endif
+	accept report-seq-name @1,1
+		title "Sequence Name "
+		when screenmode = search
+		show-value
+end-screen

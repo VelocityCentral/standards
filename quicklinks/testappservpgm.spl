@@ -1,0 +1,81 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : use this program to test an appserv pgm
+// IT runs the pgm and displays the results and lists any log messages
+// Note that the pgm needs to return : 1024 byte result and the pid as para 2
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2018
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: quicklinks/testappservpgm.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 17Mar18  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+
+//--------------------------------------------------------------------------------
+//  Change the next to lines to the path and prgam
+//--------------------------------------------------------------------------------
+
+#define PATH_TO_PGM "quicklinks"
+#define PGM_TO_RUN "vqladdauto"
+ 
+field
+	ws-function-title						type string
+
+procedure main
+	get system-control  first
+	on error
+		abort "No Control Record"
+	endon
+//	do i8secabt-check-abort
+//		parameters are sys-consolidation-division login-id() "ZUSR" "R004"
+//		returning ws-function-title 
+	do i8proglog-write-log
+	do run-pgm
+end-procedure
+
+procedure run-pgm
+local
+	lf-results							pic x(1024) type string
+	lf-pid								pic x(20) type string
+	spl concat(PATH_TO_PGM, "/" PGM_TO_RUN) parameters are 
+//--------------------------------------------------------------------------------
+//  Change the next to lines to the parameters for the program
+//--------------------------------------------------------------------------------
+		"-folder" "/pro/data/winfiles/quicklinks"
+		"-minsago" "120"
+		returning lf-results lf-pid
+	do show-results parameters are lf-results lf-pid
+end-procedure
+
+screen show-results
+parameters
+	lf-results							pic x(1024) type string
+	lf-pid								pic x(10) type string
+//
+	window
+	datagrid occurs 18
+	select * from system-event-log
+		where sel-type = 'APPS'
+		and sel-date-time > today() - 1
+		and sel-code like str-concat(PGM_TO_RUN,"%")
+		and sel-code like str-concat("%|" lf-pid)
+	allowed search
+before
+	display lf-results @1,1 pic x(128)
+detail
+	accept sel-date-time @3,1
+		title "stamp"
+	accept sel-seq @3,2
+		title "seq"
+	display sel-text @3,3
+		title "Text"
+end-screen

@@ -1,0 +1,18 @@
+#PRONTO Screen Customiser File (Override statements only).
+#PCS_TIMESTAMP : Fri Jun 26 06:40:07 2020 rayb
+#PCS_TIMESTAMP : Wed Oct 02 10:04:42 2013 rayb
+screen enter-deliveries
+	{
+	mode
+		{
+		name = "Scan"
+		add = true
+		}
+	trigger
+		{
+		trigger_point = confirmed
+		name = "Scan"
+		run = "so/socheck" "-order" so-order-no so-bo-suffix
+		type = pronto
+		}
+	}

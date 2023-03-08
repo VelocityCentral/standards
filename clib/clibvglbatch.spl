@@ -1,0 +1,669 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : clibvglbatch
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2014
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: clib/clibvglbatch.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 24May14  rjb         written 
+// 						The purpose of this clib is to provide a generalised
+// 						way of creating and post a batch of gl transactions.
+// 						The idea is that it can remain with an transaction
+// 						that is provided by the calling routine
+//
+//
+//
+////////////////////////////////////////////////////////////////////////////////
+/*
+
+	This documentation is in RST format.  To view this as a nice pdf goto
+	https://overbits.herokuapp.com/rsteditor/ or rst.ninjs.org and paste this content.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|           |           |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+
+	Alternatively
+
+	 =========== =========== ======================================================== 
+	  Direction   Data Type   Description                                             
+	 =========== =========== ======================================================== 
+	 =========== =========== ======================================================== 
+
+============
+clibvglbatch
+============
+
+The routine will build a batch of transactions in a temporary file.  When
+complete it will check that the batch balances to zero and then post it.
+Note that qty accounts are allowed and if used these are excluded from the
+check that it adds to zero.
+
+Auto transaction is used throughout so that transaction control is
+consistent with the calling program.
+Each routine returns a 256 byte string and an exit status.  A Non-zero
+exit status indicates an error.
+
+Usage
+~~~~~
+
+Always start with a call to clibvglbatch-start.  Pass it some name that
+will used in the batch name and the report.  Also pass is a pattern that
+will be any banned accounts.  eg. "^Z" to disallow Z accounts.  Spaces is
+valid and will allow all accounts.
+
+Use clibvglbatch-add-trans to add a transaction to the batch.  This has
+one parameter which is a gl-trans record with the appropriate fields
+completed.  Note that you leave the batch reference blank and clib will
+look after it for you (in the posting routine).
+Use only the fields listing in temp-gl that are in gl-trans
+
+When complete use clibvglbatch-post to post the batch when complete.
+Pass it two parameters : "P" or "U" in the first parameter - "P" will
+force the clib to prompt for a gl-batch reference and date in the normal
+gl-batch prompt.  "P" will only work if the program is not batched.  If
+the program is batched and a "P" is used then a batch will automatically
+be created with no prompt and the batch date will be the second parameter.
+"U" will ignore the prompt and create a batch using the date passed in parameter 2
+Parameter 2 must be either 0 or a valid date.  0 will create a batch using
+todays date.
+
+Optional Routines
+~~~~~~~~~~~~~~~~~
+clibvglbatch-establish-batch  :  Use this if you need access to the
+batch ref and / or posting date in the calling program PRIOR to creating
+transactions.  Parameters are as those for clibvglbatch-post.
+
+clibvglbatch-list :  Prints a report of the batch.  No Parameters
+
+Error Handling
+~~~~~~~~~~~~~~
+Check the exit status and use -get-last-error to access the last error message.
+
+clibvglbatch-start 
+~~~~~~~~~~~~~~~~~~
+
+This procedure is mandatory.  You must call this procedure once at the
+start of your posting process.
+
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 30  |The name of the batch - used on the report and the      |
+	|           |           |report name                                             |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |String 100 |accounts matching this pattern are banned.              |
+	|           |           |                                                        |
+	|           |           |set to "^Z" to disallow z accounts                      |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvglbatch-establish-batch 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+This procedure is optional.  Use this if you need to have access to the
+batch number and batch date in the calling routine PRIOR to posting the
+batch
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 1   |Flag:                                                   |
+	|           |           |                                                        |
+	|           |           |  P - PROMPT for date and batch                         |
+	|           |           |  U - USE passed date                                   |
+	|           |           |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |Date       |Posting date when parameter 1 is not "P"                |
+	+-----------+-----------+--------------------------------------------------------+
+
+
+clibvglbatch-add-trans 
+~~~~~~~~~~~~~~~~~~~~~~
+
+Strictly speaking this is optional, but the whole thing is a waste of time
+if you don't add any transactions
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |Row        |Like gl-trans.*                                         |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvglbatch-post 
+~~~~~~~~~~~~~~~~~
+
+This is mandatory.  You need to post the batch at some stage.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 1   |Flag:                                                   |
+	|           |           |                                                        |
+	|           |           |  P - PROMPT for date and batch                         |
+	|           |           |  U - USE passed date                                   |
+	|           |           |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |Date       |Posting date when parameter 1 is not "P"                |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |String 256 |Any messages                                            |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |String 6   |Generated GL Batch Reference                            |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvglbatch-list 
+~~~~~~~~~~~~~~~~~
+
+	Optional routine to print the batch 
+
+	No Parameters
+
+clibvglbatch-review 
+~~~~~~~~~~~~~~~~~~~
+
+	Optional review screen that displays the batch prior to posting.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |Boolean    |True - a posting will be available                      |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |Boolean    |True - batch posted, False - Batch not posted           |
+	+-----------+-----------+--------------------------------------------------------+
+
+*/
+
+
+#define ERROR(A) \
+	set ws-last-error = A \
+	exit 1
+
+#define DOLLARPIC  "---,---,--z.99"
+#define DOLLARHEAD "xxxxxxxxxxxxxx"
+
+#define I8POSTGL_ALLOW_ROLLBACK
+#include "../include/i8datenew.spl"
+#include "../include/i8postgl.spl"
+#include "../include/i8proglogparam.spl"
+
+field
+	ws-md-post-allowed					type boolean
+	ws-batch-name						pic x(30) type string
+	ws-batch-ref						like gl-batch-ref
+	ws-posting-date						type date
+	ws-banned-acct-pattern				pic x(100) type string // accounts matching this pattern are banned.
+	ws-last-error						pic x(1024) type string
+
+mode md-list
+	prompt "List"
+mode md-post
+	prompt "Post"
+	when ws-md-post-allowed
+
+	
+object temp-gl 
+	type is memory
+	record is
+		tg-seq								type number
+		/*  The remaining fields must use exactly the field names specified on gl-trans
+			and NO Others 
+			The add-trans routine uses a global object so that no assigns need doing.  
+
+			These are the fields that can be passed from the calling program
+
+			If you change this list you must also change the posting routine below
+			*/
+		gl-accountcode
+		gl-subledger-code
+		gl-other-side
+		gl-trans-date
+		gl-trans-type
+		gl-reference
+		gl-details
+		gl-amount
+		gltr-special-account-name
+		gl-tr-user-only-date1
+		gl-tr-user-only-alpha4-1
+		gl-tr-user-only-alpha4-2
+		gl-tr-user-only-num1
+		gl-tr-user-only-num2
+		gl-tr-analysis-code1
+		gl-tr-document-type
+		gl-tr-document-no
+		gl-tr-document-suffix
+		gl-tr-document-seq
+		gl-tr-analysis-code2
+	end-record
+	key is tg-seq
+
+procedure library-init
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8proglogparam-write-log parameters are "clibvglbatch"
+end-procedure
+
+procedure clibvglbatch-start export
+	auto-transaction
+// 
+// This procedure is mandatory.  You must call this procedure once at the
+// start of your posting process.
+//
+parameter
+	// 1. The name of the batch - used on the report and the report name
+	lp-batch-name					like ws-batch-name 
+	// accounts matching this pattern are banned.  set to "^Z" to disallow z accounts
+	lp-banned-acct-pattern			pic x(100) type string 
+//
+	open temp-gl
+		temporary
+	on error
+		ERROR(error-description(file-status))
+	endon
+	set ws-batch-name = lp-batch-name
+	set ws-batch-ref = spaces
+	set ws-banned-acct-pattern = lp-banned-acct-pattern
+	set ws-batch-ref = spaces
+	set ws-posting-date = 0
+end-procedure
+
+procedure clibvglbatch-get-last-error export
+returning
+	lr-message							like ws-last-error
+	set lr-message = ws-last-error
+end-procedure
+
+procedure clibvglbatch-establish-batch export
+	autotransaction
+//
+// this procedure is optional.  Use this if you need to have access to the
+// batch number and batch date in the calling routine PRIOR to posting the
+// batch
+//
+parameters
+	lp-batch-control					pic x
+	//  P - PROMPT for date and batch
+	//  U - USE passed date
+	lp-date								type date
+	// only used if not "P"
+returning 
+	lr-batch-ref						like ws-batch-ref
+	lr-posting-date						like ws-posting-date
+	do establish-batch
+		parameters are lp-batch-control lp-date
+	if exit-status
+		exit 1
+	endif
+	set lr-batch-ref = ws-batch-ref
+	set lr-posting-date = ws-posting-date
+end-procedure
+
+procedure establish-batch
+//
+// this routine is called from either the establish batch routine
+// or from the post routine
+//
+parameters
+	lp-batch-control					pic x
+	//  P - PROMPT for date and batch
+	//  U - USE passed date
+	lp-date								type date
+local
+	lf-ok								type boolean
+	if ws-batch-ref = spaces
+		if lp-batch-control = "P" and NOT batched()
+			// posting date is returned:
+			I8DATENEW_DO_GET_DATE_AND_BATCH ("G",ws-posting-date,ws-batch-ref,
+				i8postgl-period,i8postgl-period,I8BGRPTYPE_GL_JE			
+					,"W",spaces,lf-ok)
+		else
+			if lp-date = 0
+				I8DATENEW_DO_GET_DATE_AND_BATCH ("G",ws-posting-date,ws-batch-ref,
+					i8postgl-period,i8postgl-period,I8BGRPTYPE_GL_JE			
+						,"X",spaces,lf-ok)
+			else
+				set ws-posting-date = lp-date
+				I8DATENEW_DO_GET_DATE_AND_BATCH ("G",ws-posting-date,ws-batch-ref,
+					i8postgl-period,i8postgl-period,I8BGRPTYPE_GL_JE			
+						,"X","B",lf-ok)
+			endif
+		endif
+		if not lf-ok
+			ERROR("Invalid Date and GL Batch")
+		endif
+	endif
+end-procedure
+
+procedure clibvglbatch-add-trans export
+	auto-transaction
+//
+// strictly speaking this is optional, but the whole thing is a waste of time
+// if you don't add any transactions
+//
+parameters
+	gl-trans.*					global
+local
+	lf-seq						type number
+	select lf-seq = max(tg-seq) from temp-gl 
+	end-select
+	set tg-seq = lf-seq + 1
+	get gl-master 
+		on index gl-accountcode 
+		key is gl-accountcode
+	on error
+		ERROR(str-concat("Invalid Accountcode:" gl-accountcode))
+	endon
+	if pattern(gl-accountcode ,  ws-banned-acct-pattern)
+		ERROR(str-concat("Invalid Accountcode:" gl-accountcode))
+	endif
+	insert temp-gl
+	on error
+		ERROR(error-description(file-status))
+	endon
+end-procedure
+
+procedure batch-list-heading
+	print
+		company-name in col 1
+		ws-batch-name col 50
+		today() col 70
+		tod() col 85
+		"Page" col 100
+		page-no pic z(5)9
+	skip
+	print
+		"Seq" col 1 pic x(6) right
+		"Account" col 10
+		"Amount" col 20 pic DOLLARHEAD right
+		"Reference" col 40
+		"Details" col 50
+		"Subledger" col 80
+		"Document" col 90
+		"Type" col 110
+		"Other side" col 120
+	if ws-batch-ref <> spaces
+		skip
+		print "Batch Ref:" col 1
+			ws-batch-ref col 20
+			"Posting Date:" col 30
+			ws-posting-date col 50
+	endif
+end-procedure
+
+procedure clibvglbatch-list export
+//
+// this is optional
+//
+local	
+	lf-total								like gl-amount
+	lf-doc-string							pic x(15) type string
+	report ws-batch-name
+		no-message
+		full-xml
+		heading batch-list-heading
+		width 150
+	select * from temp-gl
+	before
+		page
+	detail
+		set lf-doc-string =	str-concat( gl-tr-document-type "/"
+				gl-tr-document-no "/"
+				gl-tr-document-suffix "/"
+				str(gl-tr-document-seq)) 
+		if gl-tr-document-no = spaces
+		or gl-tr-document-type = spaces
+			set lf-doc-string = spaces
+		endif
+		print tg-seq pic z(6)
+			gl-accountcode pic x(10) col 10 tag "account"
+			gl-amount pic DOLLARPIC right col 20 tag "amount"
+			gl-reference col 40 tag "reference"
+			gl-trans-date col 50 tag "gl_date"
+			gl-details col 60 tag "details"
+			gl-subledger-code col 90 tag "subledger"
+			lf-doc-string col 100 tag "Document"
+			gl-trans-type col 120 tag "type"
+			gl-other-side col 130 tag "other"
+			section "detail"
+		set lf-total += gl-amount
+	end-select
+	report section "total"
+	need 2
+	skip
+	print lf-total in col 20 pic DOLLARPIC right tag "total"
+	report section finished
+	report section "summary_head"
+	need 3
+	skip 2
+	print "Account Summary" in col 10
+	report section finished
+	select gl-accountcode, lf-total = sum(gl-amount)
+		from temp-gl
+		group by gl-accountcode
+	detail
+		get gl-master
+			on index gl-accountcode
+			key is gl-accountcode
+		on error
+		endon
+		print gl-accountcode in col 20 tag "summary_account"
+			lf-total pic DOLLARPIC col 40 tag "sub_total"
+			gl-desc in col 55 tag "gl_desc"
+			section "summary_detail"
+	end-select
+	report finished
+end-procedure
+
+procedure clibvglbatch-post export
+//
+// this is mandatory.  You need to post the batch at some stage.
+//
+parameters
+	lp-batch-control					pic x
+	//  P - PROMPT for date and batch
+	//  U - USE passed date
+	lp-date								type date
+	// only used if lp-batch-control not "P"
+returning
+	lr-gl-batch							like gl-batch-ref
+local
+	lf-total							like gl-amount
+	lf-gl-trans-date					type date
+	//
+	// Validate parameters
+	//
+	if lp-batch-control not in ("P" "U")
+		ERROR(concat("Passed control is not P or U:",lp-batch-control))
+	endif
+	//
+	select lf-total = sum(gl-amount)
+		from temp-gl, gl-master
+		where temp-gl.gl-accountcode = gl-master.gl-accountcode
+		and gl-master.gl-total-level != 'Q'
+	end-select
+	if lf-total <> 0
+		ERROR(concat("Batch balances to " ltrim(format-picture(lf-total,DOLLARPIC))))
+	endif
+	//
+	// Get the batch number and date
+	//
+	if ws-batch-ref = spaces
+		do establish-batch
+			parameters lp-batch-control lp-date
+		if exit-status
+			exit 1
+		endif
+	endif
+	set lr-gl-batch = ws-batch-ref
+	//
+	//  Post
+	//
+	select * from temp-gl
+	detail
+		initialise gl-trans leaving 
+			// this must be the same list as shown in the temp file.
+			gl-accountcode
+			gl-subledger-code
+			gl-other-side
+			gl-trans-date
+			gl-trans-type
+			gl-reference
+			gl-details
+			gl-amount
+			gltr-special-account-name
+			gl-tr-user-only-date1
+			gl-tr-user-only-alpha4-1
+			gl-tr-user-only-alpha4-2
+			gl-tr-user-only-num1
+			gl-tr-user-only-num2
+			gl-tr-analysis-code1
+			gl-tr-document-type
+			gl-tr-document-no
+			gl-tr-document-suffix
+			gl-tr-document-seq
+			gl-tr-analysis-code2
+		if pattern(gl-accountcode ,  ws-banned-acct-pattern)
+			ERROR(str-concat("Invalid Accountcode:" gl-accountcode))
+		endif
+		//
+		set gl-trans-type = 'JE'						
+		set gl-batch-ref = ws-batch-ref
+		if gl-trans-date = 0
+			set gl-trans-date = ws-posting-date
+		endif
+		do i8postgl-gl-account
+		if i8postgl-error-mess <> spaces
+			ERROR(i8postgl-error-mess)
+		endif
+		do i8postgl-gl-intercompany
+		if i8postgl-error-mess <> spaces
+			ERROR(i8postgl-error-mess)
+		endif
+	end-select
+	close temp-gl and remove
+end-procedure
+
+screen clibvglbatch-review export
+// 
+// This is optinonal
+//
+parameters
+	lp-post-allowed						type boolean
+returning 
+	lr-posted							type boolean
+local
+	lf-message							pic x(100) type string
+	window @1,1 to @24,80
+	title "Gl Batch Transaction Review"
+	select * from temp-gl
+	allowed search correct remove md-list md-post
+	datagrid occurs 22
+before
+	set ws-md-post-allowed = lp-post-allowed
+	set lr-posted = FALSE
+detail
+	if screenmode = md-list
+		do clibvglbatch-list
+	endif
+	if screenmode = md-post
+		do clibvglbatch-post
+			parameters "P" 0 
+		if exit-status != 0
+			message-box param-text("<<P1>><<BR>><<p2>>"
+				,"Batch Failed to Post"
+				,ws-last-error)
+				title is "Batch Posting Error"
+				message-buttons MSG_BOX_CANCEL
+				icon MSG_BOX_STOP
+				optional
+				bell 
+		else
+			set lr-posted = true
+			exit
+		endif
+	endif
+	accept tg-seq	 @1,1 pic zzzz9
+		title "seq"
+		uppercase
+		when screenmode = search
+		show-value
+	accept gl-accountcode @1,2
+		title "Accountcode"
+		uppercase
+		readonly
+	accept gl-amount @1,3
+		title "Amount"
+		readonly
+	accept gl-reference @1,4
+		title "Reference"
+		uppercase
+		readonly
+	accept gl-trans-date @1,5
+		title "Date"
+		readonly
+	accept gl-details @1,6
+		title "Details"
+		uppercase
+		readonly
+	accept gl-subledger-code @1,7
+		title "Subledger ~ode"
+		uppercase
+		readonly
+	accept gl-other-side @1,8
+		title "Other Side"
+		uppercase
+		readonly
+	accept gl-trans-type @1,9
+		title "Trans Type"
+		uppercase
+		readonly
+	accept gltr-special-account-name @1,10
+		title "Special Account Name"
+		uppercase
+		readonly
+	accept gl-tr-user-only-date1 @1,11
+		title "User Date1"
+	accept gl-tr-user-only-alpha4-1 @1,12
+		title "User Alpha4 1"
+		uppercase
+	accept gl-tr-user-only-alpha4-2 @1,13
+		title "User Alpha4 2"
+		uppercase
+	accept gl-tr-user-only-num1 @1,14
+		title "User Num1"
+	accept gl-tr-user-only-num2 @1,15
+		title "User Num2"
+	accept gl-tr-analysis-code1 @1,16
+		title "Analysis Code1"
+		uppercase
+		readonly
+	accept gl-tr-document-type @1,17
+		title "Document Type"
+		uppercase
+		readonly
+	accept gl-tr-document-no @1,18
+		title "Document No"
+		uppercase
+		readonly
+	accept gl-tr-document-suffix @1,19
+		title "Document Suffix"
+		uppercase
+		readonly
+	accept gl-tr-document-seq @1,20
+		title "Document ~eq"
+		readonly
+	accept gl-tr-analysis-code2 @1,21
+		title "Analysis Code2"
+		uppercase
+		readonly
+end-screen

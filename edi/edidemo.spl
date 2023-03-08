@@ -1,0 +1,718 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : EDI Receiver Program
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2012
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: edi/ediplcreceiver.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 20Sep17	rjb	log 115	Written
+//=========================================================================//
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include '../include/i8secabt.spl'
+#include '../include/i8proglog.spl'
+#include '../include/i8cmdcopy.spl'
+#include '../include/i8cmdrm.spl'
+#include "../include/iwrtevntlog.spl"
+
+link 'clib/clibwrtevntlog'
+
+#define LOG(A) \
+	do clibwrtevntlog-write-log parameters are IWRTEVNTLOG_LEVEL_DEBUG 'APPS'   \
+		str-concat(substring(get-param(0),pattern(get-param(0),"[~/]*$"),str-len(get-param(0))) \
+		,"|",str(pid())) \
+	A
+
+#define SHORT_PGM \
+	substring(get-param(0),pattern(get-param(0),"[~/]*$"),str-len(get-param(0)))
+
+#define EMAILADDR 'ray.burns@velocityglobal.co.nz'
+#define EMAILADDR 'ray@rayburns.nz'
+#define EMAILADDR 'rayb'
+#define INPUTPATTERN '^edi?*.xml'
+#define PRINT_XML_TREE
+
+
+
+// #define XML-HANDLE		number
+//#define NODE_TEXT(A,B) xml-node-text(xml-get-child-by-name(A,B,spaces))
+#define NODE_TEXT(A,B) xml-node-text(xml-get-child-by-name(A,B,xml-node-ns-prefix(A)))
+// #define NODE_TEXT_NS(A,B,C) xml-node-text(xml-get-child-by-name(A,B,C))
+#define NODE_DATE(A,B) \
+	julian( num(substring(xml-node-text(xml-get-child-by-name(A,B,spaces)),7,8)), \
+		 	num(substring(xml-node-text(xml-get-child-by-name(A,B,spaces)),5,6)), \
+			num(substring(xml-node-text(xml-get-child-by-name(A,B,spaces)),1,4)))
+
+link 'clib/clibserial'
+link "clib/clibvpdf"
+link 'clib/clibvedi.spl'
+ 
+#define FTPFOLDER '/tmp'
+
+field
+	ws-function-title					type string
+	ws-data-area						like ql-data-area
+	ws-data-directory					pic x(512) type string
+	ws-datadir-in						type string pic x(100)
+	ws-datadir-in-save					type string pic x(100)
+	ws-ql-description					like ql-description
+	ws-ql-path							like ql-path
+	ws-ql-path-parameter				like ql-path
+//	ws-mail-send						type boolean
+
+
+procedure main
+returning	
+	lr-results							pic x(1024) type string
+local
+	x									type number
+	lf-send-mail						type boolean
+	lf-file-count						type number
+	lf-ok								type boolean
+	get system-control first
+	on error
+		abort 'No Control Record'
+	endon
+	do clibvedi-check-create-folders parameters are "demo"
+		returning lf-ok lr-results
+	if not lf-ok
+		message lr-results
+		exit 1
+	endif
+	set lr-results = "No Orders to Process at this time"
+//	do i8secabt-check-abort
+//		parameters are sys-consolidation-division login-id() 'ZEDI' 'T050'
+//		returning ws-function-title 
+	do i8proglog-write-log
+	// Set Working Directories
+	set ws-datadir-in = str-concat(get-env('PROEDI'),'/in/demo')
+	set ws-datadir-in-save = str-concat(get-env('PROEDI'),'/in_save/demo')
+	// Determine Data Area
+	set ws-data-directory = dir()
+	for x = str-len(ws-data-directory) down to 1
+		if sub-string(ws-data-directory,x,x) in ( '/' '\' )
+			break
+		endif
+	end-for
+	set ws-data-area = sub-string(ws-data-directory,x + 1,str-len(ws-data-directory))
+	// Set Quick Links Path
+	set ws-ql-path = str-concat('\\mydemo\edi\in_save\demo\')
+	// Pre-process XML files
+	// the xml file will be processed against the xslt file ( cheers shaun )
+	// and the resulting text files placed in the edi-in-saved folder for processing
+	// as text files
+	IF MAIL-START('Demo EDI Orders received and requiring attention') endif
+	if mail-add-line('EDI Orders have been recieved.') endif
+	if mail-add-line('Please use the EDI Order Processing screen to assess and update the following receipt numbers:') endif
+ 	do process-ftp-folder
+	// Pickup Any Orders Received
+	do process-edi-orders returning lf-send-mail lf-file-count lr-results
+	if lf-send-mail 
+		IF MAIL-SEND(EMAILADDR,FALSE,FALSE) endif
+		LOG(concat('Success: ' lr-results))
+	else
+		if mail-cancel() endif
+		if v-edi-receipt-number != 0
+			if mail-start("Demo - Demo email did not send") endif
+			if mail-add-line('Mail did not send.') endif
+			if mail-add-line(str-concat('possibly:' str(v-edi-receipt-number))) endif
+			if mail-add-line(str-concat('Files Processed:' str(lf-file-count))) endif
+			IF MAIL-SEND(EMAILADDR,TRUE,FALSE) endif
+			LOG(concat('Something Wrong:' str(v-edi-receipt-number) ':Mail did not send'))
+		endif
+//		if mail-cancel() endif
+	end-if
+end-procedure
+
+
+procedure process-ftp-folder
+local
+	lf-this-file							pic x(1024) type string
+	lf-ftp-folder							pic x(1024) type string
+	//
+	report "Demo EDI Folder Search"
+		width 300
+		name files
+		full-xml
+	//
+	set lf-ftp-folder = FTPFOLDER
+	//
+	// look for xml files
+	//
+	if start-dir-search(lf-ftp-folder,INPUTPATTERN)
+		repeat
+			set lf-this-file = next-dir-entry()
+		until lf-this-file = spaces
+			print concat(lf-ftp-folder "/" lf-this-file) 
+				"copied to " 
+				str-concat(ws-datadir-in "/" lf-this-file)
+				on files
+			// Copy File
+			do i8cmdcopy-os-call-copy
+				parameters are 
+					str-concat(lf-ftp-folder "/" lf-this-file) 
+					str-concat(ws-datadir-in "/" lf-this-file)
+			if exit-status() != 0
+				print "Non Zero Exit Status:" exit-status()
+					on files
+				exit
+			endif
+			// 
+			// remove from ftp folder
+			//
+			do i8cmdrm-os-call-rm parameters are
+				concat(lf-ftp-folder "/" lf-this-file) 
+			if exit-status() != 0
+				print "EDI file was not removed from sftp folder:" exit-status() on files
+				print "Duplicate orders could be processed!" on files
+				if mail-add-line("EDI file was not removed from sftp folder:" ) endif
+				if mail-add-line("Duplicate orders could be processed!") endif
+			endif
+		end-repeat
+		if finish-dir-search() endif
+	endif
+	report finished on files
+end-procedure
+
+procedure report-heading
+	print company-name 
+		"Demo EDI PO Import" col 50
+		today() in col 80
+		tod() 
+		"Page" in col 105
+		page-no()
+	skip
+end-procedure
+
+procedure process-edi-orders
+local 
+	lf-loaded							type boolean
+	lf-receipt-number					like v-edi-receipt-number
+	lf-spool							pic x(20) type string
+	lf-import-pdf-path					pic x(1024) type string
+	lf-import-pdf-file					pic x(1024) type string
+	lf-this-file						pic x(1024) type string
+	lf-ok								type boolean
+	lf-error-message					pic x(1024) type string
+returning
+	lr-send-mail						type boolean
+	lr-file-count						type number
+	lr-results							pic x(1024) type string
+	// 
+	// Iterate across directory for xml files  This is the $PROEDI/in folder
+	//
+	set lr-send-mail = FALSE
+	set lr-file-count = 0
+	set lr-results = 'No Files to Process'
+	if start-dir-search(ws-datadir-in,INPUTPATTERN)
+		repeat
+			set lf-this-file = next-dir-entry()
+		until lf-this-file = spaces
+			//
+			// there is functionality below that will only send the mail if there
+			// are warnings or errors.  At present mail is sent every time.
+			// To change this, change the following line to FALSE
+			//
+			set lr-send-mail = TRUE
+			set lr-file-count += 1
+			// Assign Next Receipt Number
+			select lf-receipt-number = max(v-edi-receipt-number)
+				from edi-order-headers
+			end-select
+			set lf-receipt-number += 1
+			/*
+			do clibserial-next-serial-number
+				parameters are
+					'ZEDI'
+				returning
+					lf-receipt-number
+			*/
+			// 
+			// Establish report
+			//
+			report concat("Demo EDI Import:" str(lf-receipt-number))
+				header is report-heading
+				full-xml
+			page
+			// 
+			// capture spool file for mailing purposes
+			//
+			set lf-spool = spool-file-name()
+			print "Receipt Number:" lf-receipt-number
+			print "File Name:" lf-this-file
+			// 
+			// Start the transaction and process the order
+			//
+			transaction begin
+			do load-edi-order
+				parameters are concat(ws-datadir-in "/" lf-this-file)
+					lf-receipt-number
+				returning lf-loaded
+			//
+			// Commit or rollback as necessary
+			//
+			if lf-loaded
+				transaction commit
+				//
+				// Quicklinks
+				//
+				set ws-ql-description = concat('Customer Order File ',lf-this-file)
+				set ws-ql-path-parameter = str-concat(ws-ql-path,lf-this-file)
+				do clibvedi-add-quick-link
+					parameters are lf-receipt-number ws-data-area ws-ql-path-parameter ws-ql-description
+				//
+				// Validate the receipt
+				//
+				do clibvedi-validate-receipt
+					parameters are lf-receipt-number
+				// If Error Free Continue And Load Into Pronto
+				get edi-order-headers
+					on index v-edi-receipt-number
+					key is lf-receipt-number
+				on error
+				else
+					print "Order loaded into EDI Orders"
+					if v-edi-h-warning-count != ZERO or v-edi-h-error-count != ZERO
+						print "Warnings: " v-edi-h-warning-count
+						print "Errors: " v-edi-h-error-count
+					endif
+					if v-edi-h-warning-count = ZERO and v-edi-h-error-count = ZERO
+						print "Loading Order via m50loadso ..."
+						do clibvedi-load-order
+							parameters are v-edi-receipt-number
+						print "Order Loaded ..."
+						print "the attachment is "  concat( DIR() "/edi/in_save/demo/" lf-import-pdf-file)
+						set lr-send-mail = TRUE
+					else
+						set lr-send-mail = TRUE
+//						set ws-mail-send = TRUE
+					endif
+					if mail-add-line(str-concat('Customer:' v-edi-h-accountcode)) endif
+					if mail-add-line(str-concat('Errors:' str(v-edi-h-error-count)
+												' Warnings:' str(v-edi-h-warning-count))) endif
+				end-on
+				//
+				// save the edi file to in save
+				//
+				do i8cmdcopy-os-call-copy
+					parameters are 
+						concat(ws-datadir-in "/" lf-this-file) 
+						ws-datadir-in-save
+				if exit-status() != 0
+					print "EDI file was not removed from sftp folder:" exit-status()
+				else
+					do i8cmdrm-os-call-rm parameters are
+						concat(ws-datadir-in "/" lf-this-file) 
+					if exit-status() != 0
+						print "EDI file was not removed from $PROEDI/in folder:" exit-status()
+						print "Duplicate orders could be processed!"
+					endif
+				endif
+				//  complete the report and add to email
+				report finished
+				//
+				// Establish the name and folder for a pdf of the report
+				//
+				set lf-import-pdf-file =  concat( "REC" str(lf-receipt-number) ".pdf")
+				set lf-import-pdf-path =  concat( DIR() "/edi/in_save/demo/" lf-import-pdf-file)
+				do clibvpdf-create parameters are lf-spool lf-import-pdf-path
+				if exit-status != 0
+					do clibvpdf-get-last-error returning lf-error-message
+					if mail-add-line("Failed to create PDF:") endif
+					if mail-add-line(lf-error-message) endif
+				else
+					if mail-attach(lf-import-pdf-path,concat("REC" str(lf-receipt-number) ".pdf"),0,0,0) endif
+				endif
+				//
+				// add the pdf to the mail
+				//
+//				if mail-attach(lf-import-pdf-path,lf-import-pdf-file,0,0,0) endif
+				if mail-add-line(concat("Receipt:" str(lf-receipt-number))) endif
+				//
+				// Add the quicklink
+				//
+				set ws-ql-description = concat('Customer Order Report ' lf-import-pdf-file	)
+				set ws-ql-path-parameter = str-concat(ws-ql-path,lf-import-pdf-file)
+				do clibvedi-add-quick-link
+					parameters are lf-receipt-number ws-data-area ws-ql-path-parameter ws-ql-description
+				set lr-results = 'Trans committed and all well'
+			else
+				transaction rollback
+				print "Receipt Failed to load."
+				print "Transaction Rolled back."
+				report finished
+				set lf-import-pdf-path =  concat( DIR() "/edi/in_save/demo/REC" str(lf-receipt-number) ".pdf")
+				do clibvpdf-create parameters are lf-spool lf-import-pdf-path
+				if exit-status != 0
+					do clibvpdf-get-last-error returning lf-error-message
+					if mail-add-line("Failed to create PDF:") endif
+					if mail-add-line(lf-error-message) endif
+				else
+					if mail-attach(lf-import-pdf-path,concat("REC" str(lf-receipt-number) ".pdf"),0,0,0) endif
+				endif
+				if mail-add-line(concat("Receipt:" str(lf-receipt-number) "**** Failed to Load **** ORDER LOST!!! ****")) endif
+				set lr-results = 'Trans rolled Back'
+			endif
+		end-repeat
+		if finish-dir-search() endif
+	endif
+	if lr-file-count > 0
+		string lr-results appending concat(" ", str(lr-file-count) " Files processed")
+	endif
+end-procedure
+
+procedure load-edi-order
+parameters
+	lp-filename							pic x(256) type string
+	lp-receipt-number					like v-edi-receipt-number
+returning
+	lr-loaded-ok						type boolean
+local
+	lf-doc								type XML-HANDLE
+	lf-root								type XML-HANDLE
+	lf-recipient-id						type string
+	lf-document-count					type number
+	lf-processed-docs					type number
+	//
+	set lr-loaded-ok = FALSE
+	set lf-doc = xml-parse-file(lp-filename)
+	if lf-doc
+		set lf-root = xml-get-root-node(lf-doc)
+		if lf-root = 0
+			print "ERROR:  XML import failed to locate root node of xml document"
+			exit
+		endif
+		do process-docs parameters are lf-root // xml-get-child-by-name(lf-root,"orders","/blank")
+			lp-receipt-number
+			returning lf-processed-docs
+	else
+		print "ERROR: XML import failed to parse the xml file"
+		exit
+	endif
+	set lr-loaded-ok = TRUE
+end-procedure
+
+procedure process-docs
+parameters
+	lp-documents						type XML-HANDLE
+	lp-receipt-number					like v-edi-receipt-number
+returning
+	lr-doc-count						type number
+local
+	lf-child							type XML-HANDLE
+	lf-ok								type boolean
+//
+	if lp-documents = 0
+		print "ERROR: There was a problem finding the documents node of the tree"
+		exit 
+	endif
+	set lf-child = xml-get-first-child-node(lp-documents)
+	while lf-child
+		if xml-node-name(lf-child) = "Order"
+			do process-this-po parameters are lf-child lp-receipt-number
+				returning lf-ok
+			if lf-ok
+				set lr-doc-count += 1
+			endif
+		else
+			print "WARNING: There was a child node of the Documents tree that was not a 'order' :" 
+				xml-node-name(lf-child)
+		endif
+		set lf-child = xml-get-next-node(lf-child)
+	end-while
+end-procedure
+
+procedure process-this-po
+parameters
+	lp-po-node							type XML-HANDLE
+	lp-receipt-number					like v-edi-receipt-number
+returning
+	lr-ok								type boolean
+local
+	lf-ok								type boolean
+	lf-po								type string
+	lf-store							like na-address-id
+	lf-accountcode						like accountcode
+	lf-delivery							type XML-HANDLE
+	lf-misc-node						type XML-HANDLE
+	lf-doc-date							type date
+	lf-customer							like accountcode
+	//
+	set lr-ok = TRUE
+	//
+	set lf-po = NODE_TEXT(lp-po-node,"PO")
+	set lf-doc-date = today()
+	set lf-delivery = xml-get-child-by-name(lp-po-node,"delivery_date",spaces)
+	set lf-customer = xml-node-text(xml-get-child-by-name(lp-po-node,"customer",spaces))
+	select 
+		name-and-address-master.accountcode, deb-master.dr-marketing-flag
+		from name-and-address-master
+		inner join deb-master on name-and-address-master.accountcode = deb-master.accountcode
+		where name-and-address-master.accountcode = :lf-customer
+		and name-and-address-master.na-type = 'C'
+//		and deb-master.dr-marketing-flag = '1'
+	detail
+		set lf-accountcode = accountcode
+		break
+	endselect
+	get deb-master 
+		on index accountcode
+		key is lf-accountcode 
+	on error
+		print "ERROR: Unable to determine Customer for this store"
+		set lr-ok = FALSE
+		exit
+	endon
+	print "Customer:" accountcode shortname
+	print 132"-"
+	// add the header record
+	initialise edi-order-headers
+	set v-edi-receipt-number = lp-receipt-number
+	set v-edi-h-order-date = today()
+	set v-edi-h-delivery-date = date2julian(xml-node-text(lf-delivery))
+	set v-edi-h-cust-reference = lf-po
+	set v-edi-h-accountcode = accountcode
+	set v-edi-h-warehouse = warehouse
+//	set v-edi-h-address-id = str-concat("X",accountcode)
+	set v-edi-h-date-received = gmt()
+	set v-edi-h-addr-supplied = "N"
+// Test user supplied address
+//	set v-edi-h-addr-supplied = "Y"
+//	set v-edi-h-std-addr1 = "Taylor"
+//	set v-edi-h-std-addr2 = "MI"
+//	set v-edi-h-std-addr3 = "US"
+//	set v-edi-h-postcode = "48180-4074"
+	//
+	// capture this program so that we know where the order came from
+	set v-edi-h-filler = SHORT_PGM
+	insert edi-order-headers
+	on error
+		print "Failed to add header:" error-description(file-status())
+		set lr-ok = FALSE
+	endon
+	// 
+	// Search for certain header nodes and print them if they exist
+	// These don't go anywhere at this stage.  Just printed in case they are
+	// important.
+	//
+	set lf-misc-node = xml-get-first-child-node(lp-po-node)
+	while lf-misc-node != 0
+		if xml-node-name(lf-misc-node) in { "PO", "HeaderRefType", "FileGenerateDateTime", "HeaderFreeText"}
+			print xml-node-name(lf-misc-node) ":" xml-node-text(lf-misc-node)
+		endif
+		set lf-misc-node = xml-get-next-node(lf-misc-node)
+	end-while
+	print 132"-"
+	//
+	// process the lines
+	//
+	do process-lines parameters are lp-po-node lp-receipt-number returning lr-ok
+	//
+	// Note lines get added at the end so that we can preserve the line number
+	// provided via the input in case it needs to be matched to the invoice.
+	//
+	set lf-misc-node = xml-get-first-child-node(lp-po-node)
+	while lf-misc-node != 0
+		if xml-node-name(lf-misc-node) = "HeaderFreeText"
+			do process-add-one-note-line 
+				parameters are xml-node-text(lf-misc-node) lp-receipt-number
+				returning lf-ok
+		endif
+		set lf-misc-node = xml-get-next-node(lf-misc-node)
+	end-while
+	//
+	//  Print the whole tree
+	//
+#ifdef PRINT_XML_TREE
+	print 132"-"
+	print "XML Tree for this order (for Velocity)"
+	skip
+	do traverse-xml-tree parameters are lp-po-node 1
+	print 132"-"
+#endif
+	//
+end-procedure
+
+procedure process-lines 
+parameters
+	lp-po-node							type XML-HANDLE
+	lp-receipt-number					like v-edi-receipt-number
+returning
+	lr-ok								type boolean
+local
+	lf-line								type XML-HANDLE
+	lf-ok								type boolean
+	lf-line-seq							type number
+	//
+	set lr-ok = TRUE
+	//
+	set lf-line = xml-get-first-child-node(lp-po-node)
+	set lf-line-seq = 0
+	while lf-line
+		if xml-node-name(lf-line) = "line"
+			set lf-line-seq += 1
+			do process-one-line parameters are lf-line lp-receipt-number lf-line-seq
+				returning lf-ok
+			if not lf-ok
+				set lr-ok = FALSE
+			endif
+		endif
+		set lf-line = xml-get-next-node(lf-line)
+	end-while
+end-procedure
+
+procedure process-one-line
+parameters
+	lp-line								type XML-HANDLE
+	lp-receipt-number					like v-edi-receipt-number
+	lp-line-seq							type number
+returning
+	lr-ok								type boolean
+local
+	lf-stock-code						like stock-code
+	lf-ordered-qty						type number
+	lf-unit-price						type number
+	lf-line-no							type number
+	lf-uom								like v-edi-l-uom
+	lf-desc								like v-edi-l-description
+	lf-gtin								like v-edi-l-gtin
+	lf-sku								like v-edi-l-cust-item
+	//
+	set lr-ok = TRUE
+	//
+	set lf-stock-code = NODE_TEXT(lp-line,"stock_code")
+	set lf-ordered-qty = num(NODE_TEXT(lp-line,"qty"))
+//	set lf-unit-price = num(NODE_TEXT(lp-line,"NetPrice"))
+//	set lf-line-no = num(NODE_TEXT(lp-line,"LineNo"))
+	set lf-line-no = lp-line-seq
+	set lf-uom = "EACH" // NODE_TEXT(lp-line,"OrderedQtyUOM")
+//	set lf-desc = NODE_TEXT(lp-line,"ProductDescription") 
+	set lf-gtin = NODE_TEXT(lp-line,"stock_code") 
+//	set lf-sku = NODE_TEXT(lp-line,"BuyerProductCode") 
+	//
+	get stock-master
+		on index stock-code
+		key is lf-stock-code
+	on error
+		initialise stock-master leaving stock-code
+		print lf-line-no "ERROR: Invalid Item Code" lf-stock-code
+	endon
+	print lf-line-no pic "zz9.9" col 1
+		lf-stock-code col 10
+		stk-description col 30
+		lf-ordered-qty col 65 pic z(6).99
+		lf-uom col 75
+		lf-unit-price col 80
+	print lf-desc in col 10
+		str-concat(lf-gtin "/" lf-sku)
+	// Add
+	initialise edi-order-lines
+	set v-edi-receipt-number = lp-receipt-number
+	set v-edi-receipt-line = lf-line-no
+	set v-edi-l-stock-code = lf-stock-code
+	set v-edi-l-qty-ordered = lf-ordered-qty
+	set v-edi-l-uom = lf-uom
+	set v-edi-l-price = lf-unit-price
+	set v-edi-l-accept-price = "N"
+	set v-edi-l-description = lf-desc
+	set v-edi-l-gtin = lf-gtin
+	set v-edi-l-cust-item = lf-sku
+	insert edi-order-lines
+	on error
+		print "Failed to insert order line" error-description(file-status())
+		set lr-ok = false
+	endon
+end-procedure
+
+procedure process-add-one-note-line
+parameters
+	lp-note								pic x(1024) type string
+	lp-receipt-number					like v-edi-receipt-number
+returning
+	lr-ok								type boolean
+local
+	lf-note								like v-edi-l-description
+	i									type number
+	//
+	set lr-ok = TRUE
+	//
+	print lp-note col 10
+	// Add - break up into 60 char limits
+	repeat
+		if str-len(lp-note) <= size-of(v-edi-l-description)
+			set lf-note = lp-note
+			set lp-note = spaces
+		else
+			set lf-note  = lp-note
+			// look for word boundary
+			for i = str-len(lf-note) down to 1 
+				if substring(lf-note,i,i) = space
+					break
+				endif
+			endfor
+			// check for no spaces
+			if i > 1
+				string lf-note deleting i to strlen(lf-note) // off the end
+			else
+				set lf-note = lp-note
+			endif
+		endif
+		string lp-note deleting 1 to strlen(lf-note) // off the front
+		set lp-note = ltrim(lp-note)
+		//
+		initialise edi-order-lines
+		set v-edi-receipt-number = lp-receipt-number
+		select v-edi-receipt-line  // = max(v-edi-receipt-line)
+			from edi-order-lines
+			where v-edi-receipt-number = :lp-receipt-number
+		detail
+			set v-edi-l-line-type = "N"
+		end-select
+		set v-edi-receipt-line += 1
+		set v-edi-l-line-type = "N"
+		set v-edi-l-accept-price = "N"
+		set v-edi-l-description = lf-note
+		insert edi-order-lines
+		on error
+			print "Failed to insert order line" error-description(file-status())
+			set lr-ok = false
+		endon
+	until lp-note = spaces
+	end-repeat
+end-procedure
+
+procedure traverse-xml-tree
+parameters
+	lp-node						type XML-HANDLE
+	lp-level					pic 999
+local
+	lf-this-node				type XML-HANDLE
+	lf-child-node				type XML-HANDLE
+	lf-print-line				pic x(100) type string
+	i						type number
+	set lf-this-node = lp-node
+	while lf-this-node <> 0
+		set lf-print-line = spaces
+		for i = 1 to lp-level
+			set lf-print-line = concat(lf-print-line,chr(9))
+		end-for
+		set lf-print-line = concat(lf-print-line
+			,xml-node-name(lf-this-node),":"
+			,str-concat(xml-node-text(lf-this-node)))
+		print lf-print-line
+		set lf-child-node = xml-get-first-child-node(lf-this-node)
+		if lf-child-node <> 0 and xml-node-name(lf-child-node) != "text"
+			do traverse-xml-tree parameters are lf-child-node, lp-level + 1
+		endif
+		set lf-this-node = xml-get-next-node(lf-this-node)
+	end-while
+	if xml-free-node-handle(lf-this-node) endif
+end-procedure 
+

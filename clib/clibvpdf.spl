@@ -1,0 +1,296 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : This is generalised routine that creates a PDF from an xml spool
+// file
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2017
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: clib/clibvpdf.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 16Sep17  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+/*
+
+	This documentation is in RST format.  To view this as a nice pdf goto
+	https://overbits.herokuapp.com/rsteditor/ or rst.ninjs.org and paste this content.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|           |           |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+
+	Alternatively
+
+	 =========== =========== ======================================================== 
+	  Direction   Data Type   Description                                             
+	 =========== =========== ======================================================== 
+	 =========== =========== ======================================================== 
+
+========
+clibvpdf
+========
+
+Generalised routine to convert a pronto spool file to pdf.
+
+Use exit-status and -get-last-error for error handling.
+
+clibvpdf-create 
+~~~~~~~~~~~~~~~
+
+Create PDF from spool file.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 30  |Name of xml spool file from spool-file-name()           |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |String 1k  |Full path to pdf to be created.                         |
+	+-----------+-----------+--------------------------------------------------------+
+
+
+*/
+
+ 
+#include "../include/i8proglogparam.spl"
+#include "../include/i8cmdrm.spl"
+ 
+#define PROPRINT_PROGRAM	"proprint"
+
+field
+	ws-last-error						pic x(1024) type string
+
+object tmp-textfile
+	type text 
+	record 
+		tf-text							pic x(1024)
+	end-record 
+
+procedure library-init
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8proglogparam-write-log parameters are "clibvpdf"
+end-procedure
+
+procedure clibvpdf-get-last-error export
+returning
+	lr-message							like ws-last-error
+	set lr-message = ws-last-error
+end-procedure
+
+procedure clibvpdf-create export
+parameters
+	lp-spool-file						pic x(30) // name of xml spool file
+	lp-filename							pic x(1024) type string // full path to created pdf
+local
+	lf-spoolfile-dir					pic x(1024) type string
+	lf-pdf-filename						type varchar pic x(BMSDEF_PATHSIZE)
+	//
+	set lf-spoolfile-dir = get-env("REPORTDIR")
+	if lf-spoolfile-dir = spaces
+		set lf-spoolfile-dir = get-env("DATADIR")
+	endif
+	if not file-exists(concat(lf-spoolfile-dir, "/",lp-spool-file),FALSE)
+		string lf-spoolfile-dir appending "/reports"
+	endif
+	if not file-exists(concat(lf-spoolfile-dir, "/",lp-spool-file),FALSE)
+		set ws-last-error = concat("Unable to find spool file:" lf-spoolfile-dir "/" lp-spool-file)
+		exit 1
+	endif
+	do create-pdf-from-xml
+		parameters are lp-spool-file 
+			lf-spoolfile-dir
+			lp-filename
+			TRUE
+		returning 
+			lf-pdf-filename
+	if exit-status > 0
+		if ws-last-error = spaces
+			set ws-last-error = "Unknown Error Occurred in PDF create"
+		endif
+		exit 1
+	endif
+end-procedure
+
+procedure create-pdf-from-xml
+parameter
+		lp-spoolfile					type string pic x(100)
+		lp-spoolfile-directory			type varchar pic x(BMSDEF_PATHSIZE)
+		lp-pdf-filename					type varchar pic x(BMSDEF_PATHSIZE)
+		lp-expanded						type boolean  // xml expanded
+returning
+		lr-pdf-filename					type varchar pic x(BMSDEF_PATHSIZE)
+local fields
+		lf-tmp-html-filename			type string pic x(BMSDEF_PATHSIZE)
+		lf-pdf-filename					type string pic x(BMSDEF_PATHSIZE)
+		lf-xsl-filename					type string pic x(BMSDEF_PATHSIZE)
+		lf-tmp-xsl-filename				type string pic x(BMSDEF_PATHSIZE)
+		lf-cmd							type string pic x(1023)
+		lf-this-exit					type number
+	//
+	set lf-pdf-filename = lp-pdf-filename
+	do change-extension
+		parameters
+			concat(lp-spoolfile-directory,"/",lp-spoolfile)
+			".tmp.htm"
+		returning lf-tmp-html-filename
+	if pattern(lp-spoolfile,".xml$")			// XML Report
+		do change-extension
+			parameters
+				concat(lp-spoolfile-directory,"/",lp-spoolfile)
+				".xsl"
+			returning lf-xsl-filename
+		do change-extension parameters lf-xsl-filename ".tmp.xsl"
+			returning lf-tmp-xsl-filename
+		open tmp-textfile temporary truncate
+		set tf-text = "/^@media screen/ a\"
+		insert tmp-textfile
+		set tf-text = "   CENTER {page-break-before: always}"
+		insert tmp-textfile
+		if lp-expanded
+			set tf-text = 's/<div style="DISPLAY: none">/<div style="DISPLAY: block">/'
+			insert tmp-textfile
+		endif
+		set lf-cmd = concat("sed -f '",filename(tmp-textfile),"' "
+			,lf-xsl-filename," >",lf-tmp-xsl-filename)
+		string lf-cmd appending " 2>/dev/null"
+		command "sh" parameters "-c" lf-cmd
+		close tmp-textfile and remove
+		set lf-this-exit = exit-status()
+		if lf-this-exit != 0
+			set ws-last-error = param-text("sed returned <<P1>> while processing <<P2>>"
+				,exit-status()
+				,concat(lf-xsl-filename," (",lp-spoolfile,")"))
+//			message lr-error-message		
+			exit lf-this-exit
+		endif
+		if not file-exists(lf-tmp-xsl-filename,STDDEF_FE_ON_SERVER)
+			set ws-last-error = param-text("sed failed to create <<P1>>"
+				,lf-tmp-xsl-filename)
+			exit 1
+		endif
+		command "sh" parameters "-c"
+			concat("xmlToHtml -IN '",lp-spoolfile-directory,"/"
+				,lp-spoolfile
+				,"' -XSL '",lf-tmp-xsl-filename
+				,"' -OUT '",lf-tmp-html-filename,"'"," 2>/dev/null")
+		set lf-this-exit = exit-status()
+		if lf-this-exit != 0
+			set ws-last-error = param-text(
+				"xmlToHtml returned <<P1>> while processing <<P2>>"
+				,exit-status(),lp-spoolfile)
+			do i8cmdrm-os-call-rm parameters lf-tmp-xsl-filename
+			do i8cmdrm-os-call-rm parameters lf-tmp-html-filename
+			exit lf-this-exit
+		endif
+		if not file-exists(lf-tmp-html-filename,STDDEF_FE_ON_SERVER)
+			set ws-last-error = param-text(
+				"No HTML file created by xmlToHtml for <<P1>>"
+				,lp-spoolfile)
+			do i8cmdrm-os-call-rm parameters lf-tmp-xsl-filename
+			exit 1
+		endif
+	else									// #P files
+		command PROPRINT_PROGRAM
+			parameters "-t" "-h" "-q" lp-spoolfile lf-tmp-html-filename
+		set lf-this-exit = exit-status()
+		if lf-this-exit != 0
+			set ws-last-error = param-text(
+				"proprint -t returned <<P1>> while processing <<P2>>"
+				,exit-status(),lp-spoolfile)
+			do i8cmdrm-os-call-rm parameters lf-tmp-html-filename
+			exit lf-this-exit
+		endif
+		if not file-exists(lf-tmp-html-filename,STDDEF_FE_ON_SERVER)
+			set ws-last-error = param-text(
+				"No HTML file created by proprint -t for <<P1>>"
+				,lp-spoolfile)
+			exit 1
+		endif
+	endif
+	// Convert html to pdf
+	//
+	do change-extension
+		parameters
+			lf-pdf-filename
+			".pdf"
+		returning lf-pdf-filename
+	//
+	// be aware that if this is to be called from appservices, then
+	// the path to this command must be in sh_environs or XXX.env
+	// having it in /etc/init.d/pronto won't cut it.
+	//
+	// I had a good long play with the parameters.  There is no real benefit
+	// in zoom or landscape as there appears to be very little control of the
+	// page breaks
+	// A4 is the default if you don't specify anything so no point in changing
+	// it.
+	// -q is quiet and the only way to stop the output.  Redirecting to nul
+	// does not work.
+	command "wkhtmltopdf"
+		parameters "-q" lf-tmp-html-filename lf-pdf-filename
+//		parameters "-q" "-s" "A4" "-O" "Landscape"  "--zoom" "1.5" lf-tmp-html-filename lf-pdf-filename
+	/*
+	command "sh" parameters are "-c"
+		concat("date  >> /tmp/wkhtmltopdf.log 2>&1 ")
+	command "sh" parameters are "-c"
+		concat("wkhtmltopdf " lf-tmp-html-filename " " lf-pdf-filename " >> /tmp/wkhtmltopdf.log 2>&1 ")
+	command "sh" parameters are "-c"
+		concat("env | sort |  >> /tmp/wkhtmltopdf.log 2>&1 ")
+	*/
+	if exit-status() != 0
+		set ws-last-error = param-text(
+			"wkhtmltopdf returned <<P1>> while processing <<P2>>>"
+			,exit-status(),lp-spoolfile)
+		do i8cmdrm-os-call-rm parameters lf-tmp-html-filename
+		do i8cmdrm-os-call-rm parameters lf-pdf-filename
+		exit 1
+	endif
+	if not file-exists(lf-pdf-filename,STDDEF_FE_ON_SERVER)
+		set ws-last-error = param-text(
+			"No PDF file created by wkhtmltopdf processing <<P1>>"
+			,lp-spoolfile)
+		do i8cmdrm-os-call-rm parameters lf-tmp-html-filename
+		exit 2
+	endif
+	do i8cmdrm-os-call-rm parameters lf-tmp-html-filename
+	do i8cmdrm-os-call-rm parameters lf-tmp-xsl-filename
+	set lr-pdf-filename = lf-pdf-filename
+endprocedure// create-pdf-from-xml -------------------------------------------
+
+procedure change-extension
+parameters
+	lp-filename					type string pic x(BMSDEF_PATHSIZE)
+	lp-extension				type string pic x(10)
+returning
+	lp-filename
+local fields
+	lf-pos						pic 9(4)
+	lf-c						pic x
+	//
+	if pattern(lp-filename,".")
+		set lf-pos = strlen(lp-filename)
+		while lf-pos > 0
+			set lf-c = substring(lp-filename,lf-pos,lf-pos)
+			if lf-c = "."
+				string lp-filename deleting lf-pos to strlen(lp-filename)
+				string lp-filename appending lp-extension
+				exit 0
+			endif
+			if lf-c in {"/","\"}
+				string lp-filename appending lp-extension
+				exit 0
+			endif
+			set lf-pos -= 1
+		endwhile
+	endif
+	string lp-filename appending lp-extension
+endprocedure //change-extension ----------------------------------------------

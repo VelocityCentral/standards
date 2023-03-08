@@ -1,0 +1,467 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : 
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2021
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: gl/vglbatchmnt.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 07Dec21  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+#include "../include/i8gparam.spl"
+#include "../gl/i3chtenq.spl"
+//#include "../include/i8batchgle.spl"	// batch trans enq
+
+#define BATCH_STATUS_DESC() \
+	if-then-else(batch-update-status = 'I', \
+			'In Progress', \
+		if-then-else(batch-update-status = 'S' \
+			'AP Suspended', \
+		if-then-else(batch-update-status = 'G' \
+			'GL Suspended', \
+		if-then-else(batch-update-status = 'X' \
+			'Out of Balance' \
+		if-then-else(batch-update-status = 'U' \
+			'To be Updated', \
+		if-then-else(batch-update-status = ' ' \
+			'Updated', \
+			'Others'))))))
+
+field
+	ws-function-title						type string
+
+link 'clib/clibgl'
+link 'clib/clibglsec'
+
+mode md-upd-status
+	prompt "Reprocess"
+	help "Change status to Ready to Update"
+
+mode md-suspend
+	prompt "Suspend"
+	help "Suspend the batch"
+	process Correct
+
+mode md-review
+	prompt "Transactions"
+	help "Review / Change Transactions"
+
+mode md-bulk-account
+	prompt "Bulk Account"
+	help "Change Account codes in bulk"
+
+procedure main
+local
+	lf-batch								like gl-batch-ref
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8secabt-check-abort
+		parameters are sys-consolidation-division login-id() "ZVG" "M017"
+		returning ws-function-title 
+	do i8proglog-write-log
+	I8GPARAM_ALPHA("-batch",spaces,lf-batch)
+	if lf-batch = spaces
+		do select-batch
+	else
+		do review-trans parameters are lf-batch
+	endif
+end-procedure
+
+screen select-batch
+local
+	lf-status-desc						pic x(15) type string
+	lf-batch-total						like gl-amount
+	lf-batch-gl-debit-trans				like gl-amount
+	lf-batch-gl-trans-count				pic 9(9)
+	window
+	datagrid occurs 20
+	title ws-function-title
+	select * 
+		lf-status-desc = BATCH_STATUS_DESC()
+		from batch-entry-control-file
+		where batch-update-status != spaces
+	allowed search md-review md-upd-status md-suspend
+detail
+	if screenmode = md-suspend
+		set batch-update-status = "G"
+		reselect
+		refresh review
+	endif
+	if screenmode = md-upd-status
+		do reset-batch parameters are batch-code
+		reselect
+		refresh review
+	endif
+	if screenmode = md-review
+		do review-trans parameters are batch-code
+	endif					
+	do clibgl-count-gl-debit-transactions
+		parameters
+			batch-code
+		returning
+			lf-batch-gl-debit-trans
+			lf-batch-gl-trans-count
+	accept batch-code @1,1
+		title "Batch Code"
+		when screenmode = search
+		show-value
+	display batch-trans-date @1,2
+		title "Date"
+	display batch-trans-description @1,3
+		title "Description"
+	display batch-update-status @1,4
+		title "Status"
+	display lf-status-desc @1,5
+		title "Status Desc"				 
+	display lf-batch-gl-trans-count @1,10 pic z(9)9
+		title 'GL Trans Count'
+	display batch-user-id @1,12
+end-screen
+
+screen review-trans
+parameters
+	lp-batch							like batch-code
+local
+	lf-status-desc						pic x(15) type string
+	lf-saved-gl-accountcode				like gl-accountcode
+	lf-this-gl-accountcode				like gl-accountcode
+	i 									type number	
+	lf-user-has-gl-access				type boolean
+	lf-ok								type boolean
+	lf-message							pic x(1024) type string
+	datagrid occurs 20
+	title ws-function-title
+	window
+	select * from gl-trans
+		where gl-batch-ref = :lp-batch
+		order by gl-batch-ref gl-trans-no
+	allowed search correct md-bulk-account md-upd-status
+before
+	get batch-entry-control-file
+		on index batch-code
+		key is lp-batch
+	on error
+		message-box param-text("<<P1>><<BR>><<p2>><<BR>><<P3>>"
+			,"Something has gone wrong."
+			,"The batch header record is missing",
+			lp-batch)
+			title is ws-function-title
+			message-buttons  MSG_BOX_CANCEL
+			icon MSG_BOX_STOP
+		exit 1
+	endon
+	set lf-status-desc = BATCH_STATUS_DESC()
+	display concat("Batch Status:" lf-status-desc) @1,1
+		Colour Red
+detail
+	if screenmode = md-bulk-account
+		do bulk-change entry once parameters lp-batch gl-accountcode
+	endif
+	if screenmode = md-upd-status
+		do reset-batch parameters are lp-batch
+		// reposition
+		get gl-trans
+			on index gl-batch-ref gl-trans-no
+			key is lp-batch 1
+		on error
+		endon
+		refresh prompts
+		refresh data
+	endif
+	accept gl-trans-no @3,1
+		title "Trans"
+		when screenmode = search
+		show-value
+	accept gl-accountcode @3,2
+		title "Account"
+	on help-key												
+		set lf-saved-gl-accountcode = gl-accountcode
+		set lf-this-gl-accountcode = spaces
+		for i = 1 to 9
+			position gl-chart-of-accounts
+				on index gl-chart-function-sequence gl-accountcode
+				key is zstr(i,1,0) SPACES							
+			get gl-chart-of-accounts 								
+				on index gl-chart-function-sequence gl-accountcode	
+				next same gl-chart-function-sequence				
+			on error												
+				//No more parts										
+				break												
+			else													
+				set gl-chart-function-sequence = zstr(i,1,0) 		
+				do i3chtenq-enquire-on-gl-chart-of-accounts					
+				if gl-accountcode = SPACES							
+					break											
+				else												
+					string lf-this-gl-accountcode appending gl-accountcode
+				endif												
+			endon													
+		endfor														
+		set gl-accountcode = lf-this-gl-accountcode						
+		if gl-accountcode = SPACES
+			set gl-accountcode = lf-saved-gl-accountcode
+		endif 
+		reenter optional											
+	endon													
+	validations
+		get gl-master
+			on index gl-accountcode
+			key is gl-accountcode
+		on error ENOREC
+			message "Invalid Account"
+			re-enter
+		endon
+		// is it a posting account
+		do clibgl-validate-gl-accountcode parameters
+			gl-master.*
+			FALSE // qty allowed
+			TRUE // FA allowed
+			TRUE // project WIP Allowed
+			FALSE // project passed is false
+			spaces // Job Control
+		returning
+			gl-accountcode
+			lf-ok
+			lf-message
+		if not lf-ok
+			message lf-message
+			re-enter
+		endif
+		// Security
+		do clibglsec-determine-gl-restrictions
+			parameter
+				gl-accountcode	
+				login-id()
+			returning
+				lf-user-has-gl-access
+		if not lf-user-has-gl-access
+			message 'You do not have access to enter this accountcode due to GL security'
+			reenter 
+		endif
+		//
+	end-validations
+	display gl-amount @3,3
+		title "Amount"
+	display gl-other-side @3,4
+		title "Other"
+	display gl-reference @3,5
+		title "Reference"
+	display gl-details @3,6
+		title "Details"
+	display gltr-special-account-name @3,7
+		title "Integration"
+	display gl-master-updated-flag @3,9
+		title "Upd Flag"
+end-screen
+
+screen bulk-change
+parameters
+	lp-batch							like batch-code
+	lp-default-acct						like gl-accountcode
+local
+	lf-search-account					like gl-accountcode
+	lf-replace-account					like gl-accountcode
+	lf-saved-gl-accountcode				like gl-accountcode
+	lf-this-gl-accountcode				like gl-accountcode
+	i 									type number	
+	lf-user-has-gl-access				type boolean
+	lf-ok								type boolean
+	lf-message							pic x(1024) type string
+	window @1,1 to @8,40
+		window-position 5
+	title ws-function-title
+before 
+	set lf-search-account = lp-default-acct
+detail
+	accept lf-search-account @1,10
+		title "Find"
+		default lf-search-account
+	accept lf-replace-account @2,10
+		title "Replace"
+	on help-key												
+		set lf-saved-gl-accountcode = lf-replace-account
+		set lf-this-gl-accountcode = spaces
+		for i = 1 to 9
+			position gl-chart-of-accounts
+				on index gl-chart-function-sequence gl-accountcode
+				key is zstr(i,1,0) SPACES							
+			get gl-chart-of-accounts 								
+				on index gl-chart-function-sequence gl-accountcode	
+				next same gl-chart-function-sequence				
+			on error												
+				//No more parts										
+				break												
+			else													
+				set gl-chart-function-sequence = zstr(i,1,0) 		
+				do i3chtenq-enquire-on-gl-chart-of-accounts					
+				if gl-accountcode = SPACES							
+					break											
+				else												
+					string lf-this-gl-accountcode appending gl-accountcode
+				endif												
+			endon													
+		endfor														
+		set lf-replace-account = lf-this-gl-accountcode						
+		if lf-replace-account = SPACES
+			set lf-replace-account = lf-saved-gl-accountcode
+		endif 
+		reenter optional											
+	endon													
+	validations
+		get gl-master
+			on index gl-accountcode
+			key is lf-replace-account
+		on error ENOREC
+			message "Invalid account"
+			re-enter
+		endon
+		// is it a posting account
+		do clibgl-validate-gl-accountcode parameters
+			gl-master.*
+			FALSE // qty allowed
+			TRUE // FA allowed
+			TRUE // project WIP Allowed
+			FALSE // project passed is false
+			spaces // Job Control
+		returning
+			gl-accountcode
+			lf-ok
+			lf-message
+		if not lf-ok
+			message lf-message
+			re-enter
+		endif
+		// Security
+		do clibglsec-determine-gl-restrictions
+			parameter
+				gl-accountcode	
+				login-id()
+			returning
+				lf-user-has-gl-access
+		if not lf-user-has-gl-access
+			message 'You do not have access to enter this accountcode due to GL security'
+			reenter 
+		endif
+	end-validations
+	confirm 
+		prompt "Are you Sure?"
+		default is no
+	confirmed
+		do bulk-replace parameters lp-batch lf-search-account lf-replace-account
+	end-confirm 
+end-screen
+
+procedure bulk-replace
+parameters
+	lp-batch						like batch-code
+	lp-search-account				like gl-accountcode
+	lp-replace-account				like gl-accountcode
+local
+	lf-count 						type number
+	lf-commit						type boolean
+	//
+	set lf-commit = TRUE
+	transaction begin
+	select *
+		from gl-trans
+		where gl-batch-ref = :lp-batch
+		and gl-accountcode = :lp-search-account 
+		for update
+	detail
+		set lf-count += 1
+		set gl-accountcode = lp-replace-account
+		update gl-trans
+		on error 
+			set lf-commit = FALSE
+		endon
+	end-select
+	if lf-commit
+		transaction commit
+		message-box param-text("<<P1>><<BR>><<p2>>"
+			,"Rows Changed:"
+			,lf-count)
+			title is ws-function-title
+			message-buttons  MSG_BOX_OK
+			icon MSG_BOX_INFORMATION
+	else
+		transaction rollback
+		message "Some screwup transaction rolled back"
+	endif
+end-procedure
+
+procedure reset-batch
+// reset a batch to ready to update and change transaction flag
+// so that it is re-validated
+parameters
+	lp-batch						like gl-batch-ref
+local
+	lf-commit						type boolean
+	lf-message						pic x(1024)
+	//
+	set lf-commit = TRUE
+	transaction begin
+	get batch-entry-control-file
+		on index batch-code
+		key is lp-batch
+		lock
+	on error 
+		set lf-commit = FALSE
+		set lf-message = "Unable to lock control file"
+	else
+		set batch-update-status = "U"
+		update batch-entry-control-file
+		on error
+			set lf-commit = FALSE
+			set lf-message = "Unable to update batch file"
+		endon
+	endon
+	//
+	// Now reset the transaction flag
+	// The transaction flag is initialy "E".
+	// After the batch has been checked it is set to "P"
+	//
+	select *
+		from gl-trans
+		where gl-batch-ref = :lp-batch
+		for update
+	detail
+		set gl-master-updated-flag = "E"
+		update gl-trans
+		on error
+			set lf-commit = FALSE
+			set lf-message = "Unable to update gl-trans"
+		endon
+	end-select
+	//
+	if lf-commit
+		transaction commit
+	else
+		transaction rollback
+		message-box param-text("<<P1>><<BR>><<p2>>"
+			,lf-message
+			,"Transaction Rolled Back")
+			title is ws-function-title
+			message-buttons  MSG_BOX_CANCEL
+			icon MSG_BOX_STOP
+		exit 1
+	endif
+end-procedure
+	
+
+
+
+
+
+
+

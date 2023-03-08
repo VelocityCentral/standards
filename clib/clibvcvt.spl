@@ -1,0 +1,509 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : data conversion routines
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2009
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: /usr/pronto/cus/monaco/clib/clibvcbt
+//
+// Modification History
+// Date		Who	SDR		What
+// 06Mar09  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+//
+
+#include "../include/i8proglogparam.spl"
+
+/*
+
+	This documentation is in RST format.  To view this as a nice pdf goto
+	https://overbits.herokuapp.com/rsteditor/ or rst.ninjs.org and paste this content.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|           |           |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+
+========
+clibvcvt
+========
+
+This is a generic routine designed to provide a bunch of routine that can be used when 
+reading text files for importing.
+
+Error handling is done via exit status of each routine.  
+
+clibvcvt-get-last-error 
+~~~~~~~~~~~~~~~~~~~~~~~
+
+Return the last error message
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   Out     |String 1k  |Last error message                                      |
+	+-----------+-----------+--------------------------------------------------------+
+
+
+clibvcvt-break-string
+~~~~~~~~~~~~~~~~~~~~~
+
+	Takes a large string and returns the first n characters but broken 
+	at the next delimiter.  Ususally the delimter will be a space character
+	
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|    In     |string 1k  |The string to broken up                                 |
+	+-----------+-----------+--------------------------------------------------------+
+	|    In     |  int      |The maximum number of characters to return              |
+	+-----------+-----------+--------------------------------------------------------+
+	|    In     |string 1   |The delimiter string                                    |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |String 40  |The returned substring                                  |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |String 1k  |The input string with the first part removed            |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvcvt-extract-via-delimiter 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	Use this routine to extract fields from a string that is delimited by some character
+	An example is a CSV file.  Possibly the file contains multiple record types with
+	a variety of field formats.  Or another example is where pronto stores multiple
+	key fields in a database field.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|    In     |string 1k  |The input string                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|    In     |string 40  |The delimiter character                                 |
+	+-----------+-----------+--------------------------------------------------------+
+	|    Out    |string 1k  |The first field remove from the front of the input      |
+	+-----------+-----------+--------------------------------------------------------+
+	|    Out    |string 1k  |The remaining part of the input string                  |
+	+-----------+-----------+--------------------------------------------------------+
+
+
+clibvcvt-number 
+~~~~~~~~~~~~~~~~
+
+	Convert a string to a number
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|    In     | string 1k |The input string                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|    out    | number    |The converted number                                    |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvcvt-so 
+~~~~~~~~~~~
+	Take a string that contains a sales order number and possilby a suffix and return
+	the order and suffix as two separate fields.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 1k  |The string containing the combination                   |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |Int        |sales order number                                      |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |String 2   |backorder suffix                                        |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvcvt-date 
+~~~~~~~~~~~~~
+
+	Pronto's date2julian function does not deal with dates where all day month or year
+	are all 2 digit numbers but not in the sequence pronto is expecting them.
+	This routine allows the user to specify the correct sequence and then convert dates
+	accordingly.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 1k  |Input string                                            |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |string 1   |Format code                                             |
+	|           |           |                                                        |
+	|           |           |- 1) dd/mm/yyyy                                         |
+	|           |           |- 2) mm/dd/yyyy                                         |
+	|           |           |- 3) yyyy/mm/dd                                         |
+	|           |           |- 4) use date2julian function for flexible input        |
+	|           |           |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |date       |The converted date                                      |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvcvt-time 
+~~~~~~~~~~~~~
+	Take a string that contains a time in HH:MM:SS format and return a pronto time variable
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|  In       |String 1k  |The input string                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|  Out      |Time       |The returned converted time                             |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvcvt-trim-number 
+~~~~~~~~~~~~~~~~~~~~
+
+	This routine will pic characters off the start of a string until 
+	it reaches a non-numeric
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 1k  |The input string                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |number     |The converted number                                    |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |String 1k  |The remaining part of the input after the number        |
+	+-----------+-----------+--------------------------------------------------------+
+
+*/
+
+field
+	ws-last-error						pic x(1024) type string
+
+procedure library-init 
+	get system-control first
+	do i8proglogparam-write-log parameters are "clibvcvt"
+end-procedure
+
+procedure clibvcvt-get-last-error export
+returning
+	lr-err								like ws-last-error
+	set lr-err = ws-last-error
+end-procedure
+
+procedure clibvcvt-break-string export
+parameters
+	lp-in								type string pic x(1024)
+	lp-max-char							type number
+	lp-delimiter						pic x // usually space
+returning
+	lr-out								type string
+	lr-remaining						type string pic x(1024)
+local
+	i									type number
+	lf-delimiter-position				type number
+//
+// validate the input
+	if lp-max-char > size-of(lp-in) or lp-max-char <= 1
+		set lr-out = lp-in
+		set lr-remaining = spaces
+		set ws-last-error = "invalid input"
+		exit 1
+	endif
+	if lp-in = spaces
+		set ws-last-error = "Input is blank"
+		exit 0
+	endif
+// trim any leading delimiters
+	while str-len(lp-in) > 1 and substring(lp-in,1,1) = lp-delimiter
+		set lp-in = substring(lp-in,2,str-len(lp-in))
+	end-while
+// if we are at the end, then just return the string
+	if str-len(lp-in) <= lp-max-char
+		set lr-out = lp-in
+		set lr-remaining = spaces
+		set ws-last-error = concat("Status:Len of input (" str(str-len(lp-in)) ") is less than max char")
+		exit 0
+	endif
+// check that if the string size is EXACTLY right i.e. the delimiter is the NEXT
+// character.
+	if substring(lp-in,lp-max-char + 1,lp-max-char + 1) = lp-delimiter
+		set lr-out = substring(lp-in,1,lp-max-char)
+		set lr-remaining = substring(lp-in,lp-max-char + 2,str-len(lp-in))
+		set ws-last-error = "String break is the next character"
+		exit
+	endif
+// otherwise we need to trim a bit off the string
+	for i = lp-max-char down to 1 
+		if substring(lp-in,i,i) = lp-delimiter
+			set lf-delimiter-position = i
+			break
+		endif
+	end-for
+// check that we do find the delimiter...
+	if lf-delimiter-position <= 1
+		// there are no delimiters in the string, so just return the string
+		// truncated at the right length - there is nothing else that can be
+		// done.
+		set lr-out = substring(lp-in,1,lp-max-char)
+		set lr-remaining = substring(lp-in,lp-max-char + 1,str-len(lp-in))
+		set ws-last-error = "Status:The delimiter was not found in the input"
+	else
+		set lr-out = substring(lp-in,1,lf-delimiter-position - 1)
+		set ws-last-error = concat("The delimiter was found at " str(lf-delimiter-position))
+		set lr-remaining = substring(lp-in,lf-delimiter-position + 1,str-len(lp-in))
+	endif
+end-procedure
+
+
+procedure clibvcvt-extract-via-delimiter export
+parameters
+	lp-in								type string pic x(1024)
+	lp-delimiter						type string 
+returning
+	lp-str								type string pic x(1024)
+	lp-remaining						type string pic x(1024)
+local
+	i									type number
+//
+	set i = 1
+	while not pattern(substring(lp-in,i,i),lp-delimiter)
+		and i <= str-len(lp-in)
+		string lp-str appending substring(lp-in,i,i)
+		set i += 1
+	end-while
+	if i = strlen(lp-in)
+		set lp-remaining = spaces
+	else
+		set lp-remaining = substring(lp-in,i + 1,str-len(lp-in))
+	endif
+end-procedure
+
+procedure clibvcvt-number export
+parameters
+	lp-in								type string pic x(1024)
+returning
+	lr-number							type number
+//
+	if not valid-number(lp-in)
+		set ws-last-error = "Not a valid number"
+		exit 1
+		set lr-number = 0
+	else
+		set lr-number = num(lp-in)
+	endif
+end-procedure
+
+procedure clibvcvt-so export
+parameters
+	lp-in								type string pic x(1024)
+returning
+	lr-so-order-no						like so-order-no
+	lr-so-bo-suffix						type string
+	do  clibvcvt-trim-number
+		parameters are lp-in returning lr-so-order-no lr-so-bo-suffix 
+	if lr-so-order-no < 1 or lr-so-order-no > 99999999
+		set ws-last-error = "Order number out of bounds"
+		exit 1
+	endif
+	if str-len(lr-so-bo-suffix) > 2
+		set ws-last-error = "BO suffix bigger than two characters"
+		exit 1
+	endif
+	set lr-so-bo-suffix = uppercase(lr-so-bo-suffix)
+//
+end-procedure
+
+procedure clibvcvt-date export
+parameters
+	lp-in								type string pic x(1024)
+	lp-format-code						pic x
+	/* 1 = dd/mm/yyyy
+	   2 = mm/dd/yyyy
+	   3 = yyyy/mm/dd
+	   4 = use date2julian function which is flexible
+	 */
+returning
+	lr-date								type date
+local
+	lf-dd								type number
+	lf-mm								type number
+	lf-yyyy								type number
+//
+	switch num(lp-format-code)
+	case  1
+		do clibvcvt-trim-number
+			parameters are lp-in returning lf-dd lp-in
+		string lp-in deleting 1 to 1
+		do clibvcvt-trim-number
+			parameters are lp-in returning lf-mm lp-in
+		string lp-in deleting 1 to 1
+		do clibvcvt-trim-number
+			parameters are lp-in returning lf-yyyy lp-in
+	case  2
+		do clibvcvt-trim-number
+			parameters are lp-in returning lf-mm lp-in
+		string lp-in deleting 1 to 1
+		do clibvcvt-trim-number
+			parameters are lp-in returning lf-dd lp-in
+		string lp-in deleting 1 to 1
+		do clibvcvt-trim-number
+			parameters are lp-in returning lf-yyyy lp-in
+	case  3
+		do clibvcvt-trim-number
+			parameters are lp-in returning lf-yyyy lp-in
+		string lp-in deleting 1 to 1
+		do clibvcvt-trim-number
+			parameters are lp-in returning lf-mm lp-in
+		string lp-in deleting 1 to 1
+		do clibvcvt-trim-number
+			parameters are lp-in returning lf-dd lp-in
+	case 4
+		set lr-date = date2julian(lp-in)
+		if lr-date = 0
+			set ws-last-error = "Invalid date string"
+			exit 1
+		endif
+		exit
+	end-switch
+	if lf-mm < 1 or lf-mm > 12
+		set ws-last-error = "Month out of bounds"
+		exit 1
+	endif
+	if lf-dd < 1 or lf-dd > days-in-month(lf-mm,lf-yyyy)
+		set ws-last-error = "Invalid number of days"
+		exit 1
+	endif
+	set lr-date = julian(lf-dd,lf-mm,lf-yyyy)
+	if lr-date = 0
+		set ws-last-error = "Could not convert date"
+		exit 1
+	endif
+end-procedure
+
+procedure clibvcvt-time export
+parameters
+	lp-in								type string pic x(1024)
+	// must be in HH:MM:SS format
+returning
+	lr-time								type time
+local
+	lf-hh								type float
+	lf-mm								type float
+	lf-ss								type float
+	lf-ok								type boolean
+	lf-string							type string pic x(1024)
+//
+	do clibvcvt-extract-via-delimiter parameters
+		lp-in,":"  returning
+		lf-string, lp-in
+	if exit-status() = 0
+		// then must have hours
+		if valid-number(lf-string)
+			set lf-hh = num(lf-string)
+			if lf-hh < 0 or lf-hh > 24
+				set ws-last-error = "Invalid number of hours"
+				exit 1
+			endif
+			if lf-hh <> integer(lf-hh)
+				set ws-last-error = "Invalid number of hours"
+				exit 1
+			endif
+		else
+			set ws-last-error = "Hours not a valid number"
+			exit 1
+		endif
+	else
+		set  ws-last-error = "Could not find delimited"
+		exit 1
+	endif
+// now check if there are any minutes
+	if lp-in <> spaces
+		do clibvcvt-extract-via-delimiter parameters
+			lp-in,":"  returning
+			lf-string, lp-in
+		if exit-status() = 0
+			// then must have hours
+			if valid-number(lf-string)
+				set lf-mm = num(lf-string)
+				if lf-mm < 0 or lf-mm > 60
+					set ws-last-error = "Invalid number of minutes"
+					exit 1
+				endif
+				if lf-mm <> integer(lf-mm)
+					set ws-last-error = "Invalid number of minutes"
+					exit 1
+				endif
+			else
+				set ws-last-error = "Invalid number of minutes"
+				exit 1
+			endif
+		else
+			set  ws-last-error = "Could not find delimited"
+			exit 1
+		endif
+	endif
+//
+	if lp-in <> spaces
+		do clibvcvt-extract-via-delimiter parameters
+			lp-in,":"  returning
+			lf-string, lp-in
+		if exit-status() = 0
+			// then must have hours
+			if valid-number(lf-string)
+				set lf-ss = num(lf-string)
+				if lf-ss < 0 or lf-ss > 60
+					set ws-last-error = "Invalid number of seconds"
+					exit 1
+				endif
+				if lf-ss <> integer(lf-ss)
+					// this we do allow but pronto does not support
+					// decimal seconds so we round to the nearest
+					set lf-ss = integer(lf-ss) + if-then-else(fraction(lf-ss) >= 0.5,1,0)
+				endif
+			else
+				set ws-last-error = "Invalid number of seconds"
+				exit 1
+			endif
+		else
+			set ws-last-error = "Could not find delimiter"
+			exit 1
+		endif
+	endif
+//
+// now we have broken everything apart so make a time out of it:
+//
+	set lr-time = lf-ss +
+		(lf-mm * 60 ) +
+		(lf-hh * 60 * 60)
+end-procedure
+			
+
+procedure clibvcvt-trim-number export
+//
+// This routine will pic characters off the start of a string until 
+// it reaches a non-numeric
+//
+parameters
+	lp-in								type string pic x(1024)
+returning
+	lr-number							type number
+	lr-remaining						type string pic x(1024)
+local
+	i									type number
+	lf-str								type string
+//
+	set i = 1
+	set lp-in = left-justify(lp-in)
+	while (valid-number(substring(lp-in,i,i)) 
+			or substring(lp-in,i,i) in { "." "-" })
+			and i <= str-len(lp-in)
+		string lf-str appending substring(lp-in,i,i)
+		set i += 1
+	end-while
+	if str-len(lf-str) < 1
+		set ws-last-error = "Invalid number"
+		exit 1
+	endif
+	set lr-number = num(lf-str)
+	set lr-remaining = substring(lp-in,i,str-len(lp-in))
+end-procedure
+
+
+
+//

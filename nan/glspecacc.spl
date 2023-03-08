@@ -1,0 +1,131 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : 
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2023
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: nan/glspecacc.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 03Feb23  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+
+#define CRLF ascii-char(10)
+ 
+field
+	ws-function-title						type string
+
+procedure main
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8secabt-check-abort
+		parameters are sys-consolidation-division login-id() "EMS" "X000"
+		returning ws-function-title 
+	do i8proglog-write-log
+	do set-special-accounts
+end-procedure
+
+screen set-special-accounts
+local
+	lf-instructions							type varchar pic x(16000)
+local mode
+	lm-set-default
+		prompt "Set &Defaults"
+	window
+		title "Reset Special account that are currently pointing to suspense"
+	responsive
+	datagrid 
+	select *
+		from special-accounts
+		where gl-accountcode = '1999999'
+	allowed search correct
+before
+	set lf-instructions = "Certain special accounts are set to suspense in SAB."
+	string lf-instructions appending CRLF
+	string lf-instructions appending "These are primarily used for takeon of items such as inventory and debtors. "
+	string lf-instructions appending "  Once all the takeon data is complete and before the demo it is a good idea"
+	string lf-instructions appending " to reset these special accounts to sensible values"
+	string lf-instructions appending CRLF
+	string lf-instructions appending "The Set defaults option will set them to pre-defined values.  This might"
+	string lf-instructions appending " result in the datagrid being cleared (if there are no more set to suspense)"
+	string lf-instructions appending ".  This is entirely normal"
+	screen-group // ---- Instructions ----------------------------
+		title "Instructions"  // The title is optional
+		display lf-instructions 
+			columns 80
+			rows 5
+	end-screen-group // ---- Instructions --------------------------------------
+detail
+	if screenmode = lm-set-default
+		do update-sa parameters are "SA" "1013300"
+		reselect
+		refresh data
+	endif
+	screen-group // ---- Special Accounts set to suspense ----------------------------
+		title "Special Accounts set to suspense"  // The title is optional
+		next row
+		accept s-acc-name col 1
+			title "Special Account"
+			when screenmode in (search entry)
+			show-value
+		accept gl-accountcode col 2
+			title "Accountcode"
+			drop-down
+				width 38
+				concat-title
+				select gl-accountcode, gl-desc
+					from gl-master 
+			end-drop-down
+		on change
+			get gl-master
+				on index gl-accountcode
+				key is gl-accountcode
+			on error 
+			else
+				set sys-account-name = gl-desc
+				refresh sys-account-name
+			endon
+		endon
+		accept sys-account-name col 3
+			title "Description"
+	end-screen-group // ---- Special Accounts set to suspense --------------------------------------
+end-screen
+
+procedure update-sa
+parameters
+	lp-name								like s-acc-name
+	lp-account							like gl-accountcode
+	//
+	get gl-master
+		on index gl-accountcode
+		key is lp-account
+	on error ENOREC
+		exit 1
+	endon
+	//
+	get special-accounts
+		on index s-acc-name
+		key is lp-name
+		lock
+	on error
+		message "unable to lock special account" lp-name
+		exit 1
+	else
+		set gl-accountcode = lp-account
+		set sys-account-name = gl-desc
+		update special-accounts
+		on error
+			message "Unable to update special account " lp-name error-description(file-status())
+		endon
+	endon
+end-procedure

@@ -1,0 +1,1510 @@
+///////////////////////////////////////////////////////////////////////////////
+// Program : clibvnzpost - clib to query addresses from NZ Post
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2014
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: clib/clibvnzpost.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 13Nov14  rjb         written 
+//
+//    * * * Note * * *
+//    This is version two of the nzpost api.  This was written on 30 Sep 2019.
+//    IT supercedes the previous versions but the the main non-api calls are
+//    the same.
+////////////////////////////////////////////////////////////////////////////////
+/*
+
+	This documentation is in RST format.  To view this as a nice pdf goto
+	https://overbits.herokuapp.com/rsteditor/or rst.ninjs.org  and paste this content.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|           |           |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+
+	Alternatively
+
+	 =========== =========== ======================================================== 
+	  Direction   Data Type   Description                                             
+	 =========== =========== ======================================================== 
+	 =========== =========== ======================================================== 
+
+===========
+clibvnzpost
+===========
+
+	Use this library to interact with the NZPOST api's.
+	It is very difficult to get any sensible information from NZ Post about when and how 
+	these apis can be used.  The concept is that it can be used to get postcode for 
+	NZ addresses.  However all the documentation suggests that you need to be a nzpost 
+	customer (someone who uses the nzpost courier service).  It is very hard to determine
+	what can be used when.
+
+	As per the google API you will need to register
+
+
+
+clibvnzpost-maintain-keys 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	Start with this function.  It is a screen to allow maintenance of the parameters
+	that make the api work.  You will need a program that goes on the menu that calls this clib.
+
+	The following parameters are maintained
+
+	+-----------+-----------------------------------------------------------------------+
+	| Data Type | Description                                                           |
+	+===========+=======================================================================+
+	|String 50  |NZ Post Client Id                                                      |
+	+-----------+-----------------------------------------------------------------------+
+	|String 50  |NZ Post Client Secret                                                  |
+	+-----------+-----------------------------------------------------------------------+
+	|String 50  |Name of registered app                                                 |
+	+-----------+-----------------------------------------------------------------------+
+	|Boolean    |True if addresses are returned in uppercase                            |
+	+-----------+-----------------------------------------------------------------------+
+	|Boolean    |True if Post code is added to address text                             |
+	|           |                                                                       |
+	|           |Always returned in a separate field                                    |
+	+-----------+-----------------------------------------------------------------------+
+	|Boolean    |True if the country name is returned in a formatted address            |
+	+-----------+-----------------------------------------------------------------------+
+
+clibvnzpost-override-case 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	Changes the state of the uppercase parameter
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |Boolean    |True if addresses are returned in uppercase             |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvnzpost-override-post-code-add 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	changes the state of the add post code to address parameters
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |Boolean    |True if post code is added to address text              |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvnzpost-override-country-add 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	changes the state of the country add parameters
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |Boolean    |True if country is added to address text                |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvnzpost-get-nz-address 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	Call the nzpost api.  Do partial address matching and prompt the user to select
+	address if more than one match.  Return Correctly fromatted NZ post address
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 100 |Array of address lines                                  |
+	|           |occurs 7   |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |String 100 |Array of address lines                                  |
+	|           |occurs 7   |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |Int        |NZPOST DPID                                             |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |Int        |Number of matches                                       |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |Boolean    |True if all well.  False if an error                    |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |String 1k  |Any error message                                       |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvnzpost-prompt-address-string 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	Prompt the user for an address in one long string field.  Determine post code
+	and return all components from nz Post
+
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   Out     |String 100 |Array of address lines                                  |
+	|           |occurs 7   |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |int        |Post code                                               |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |String     |NZPOST DPID                                             |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvnzpost-address-enquiry 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	Prompt the user the user for an address and return an NZPOST address string
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   Out     |String 100 |Array of address lines                                  |
+	|           |occurs 7   |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |int        |Post code                                               |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvnzpost-manage-all-addresses 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	Displays a datagrid of all the addresses for a given customer code.
+
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|    In     |String 10  |Customer accountcode                                    |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvnzpost-get-string-from-array 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	Supporting procedure that converts an array into a long string with comma separatiors
+
+	Note that the returned string is formatted for use in a URL
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 100 |Array of address lines                                  |
+	|           |occurs 7   |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |string 1k  |The address returned as a single string with            |
+	|           |           |commas separating their component parts                 |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvnzpost-get-array-from-string
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	The inverse of array-to-string
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |string 1k  |The address returned as a single string with            |
+	|           |           |commas separating their component parts                 |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |String 100 |Array of address lines                                  |
+	|           |occurs 7   |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+
+Sample Code
+~~~~~~~~~~~
+
+m10mast.pcs
+-----------
+
+::
+
+	screen debtor-maint
+		{
+		mode
+			{
+			name = "Addresses"
+			add = true
+			}
+		trigger
+			{
+			trigger_point = confirmed
+			name = "Addresses"
+			run = "screens/pcsm10mast|address-manager" accountcode
+			type = clib
+			}
+		}
+
+
+
+pcsm10mast.spl
+--------------
+
+::
+
+	procedure address-manager user-trigger
+	parameters are
+		lp-acctcode 						like accountcode
+		//
+		do clibvnzpost-manage-all-addresses parameters are lp-acctcode
+	end-procedure
+
+
+sample calls and responses
+--------------------------
+
+A search for box 8844  will return something similar to the following
+
+::
+
+	curl -X GET \
+	  'https://api.nzpost.co.nz/addresschecker/1.0/suggest?q=po%20box%208844&max=10' \
+	  -H 'Accept: application/json' \
+	  -H 'Authorization: Bearer eyJhb<token goes here>BX0pNUIm5ZZP6ZhCY4fjmDE' \
+	  -H 'cache-control: no-cache' \
+	  -H 'client_id: 8acc3f805a68480db7d5009c3186eccc'
+
+	  {
+		"success": true,
+		"addresses": [
+			{
+				"DPID": 6062247,
+				"SourceDesc": "Box\\Bag - Let",
+				"FullAddress": "PO Box 8844, Havelock North 4157"
+			},
+			{
+				"DPID": 6171632,
+				"SourceDesc": "Box\\Bag - Let",
+				"FullAddress": "PO Box 8844, Riccarton, Christchurch 8440"
+			},
+			{
+				"DPID": 6236204,
+				"SourceDesc": "Box\\Bag - Let",
+				"FullAddress": "PO Box 8844, Symonds Street, Auckland 1150"
+			}
+		],
+		"status": "success"
+	}
+
+A partial search for "8 Wiseley" will return 
+
+::
+
+
+	curl -X GET \
+	  'https://api.nzpost.co.nz/addresschecker/1.0/suggest?q=8%20wiseley&max=10' \
+	  -H 'Accept: application/json' \
+	  -H 'Authorization: Bearer eyJhb<token goes here>BX0pNUIm5ZZP6ZhCY4fjmDE' \
+	  -H 'cache-control: no-cache' \
+	  -H 'client_id: 8acc3f805a68480db7d5009c3186eccc'
+
+
+
+	{
+		"success": true,
+		"addresses": [
+			{
+				"DPID": 1271433,
+				"SourceDesc": "Postal\\Physical",
+				"FullAddress": "8 Wiseley Place, Morrinsville 3300"
+			},
+			{
+				"DPID": 727871,
+				"SourceDesc": "Postal\\Physical",
+				"FullAddress": "8 Wiseley Road, Hobsonville, Auckland 0618"
+			}
+		],
+		"status": "success"
+	}
+
+
+
+An invalid token results in :
+
+::
+
+	{
+		"error_description": "token not found, expired or invalid",
+		"error": "invalid_grant"
+	}
+
+*/
+
+#include "../include/i8proglogparam.spl"
+#define  ADDRESSLINES 6
+#define SUOT_NZPOSTAPI "NZPOSTAPI"
+#define SUOT_CLIENT_ID "CLIENTID"
+#define SUOT_GENERAL_PARAS "PARAS"
+#define SUOT_CLIENT_SECRET "CLIENTSEC"
+#define SUOT_REGISTERED_APP "APPNAME"
+#define SUOT_TOKEN_PREFIX "CTOKEN"
+#define SUOT_TOKEN_EXPIRY "TOKENEXP"
+#define KEY_MAX_SIZE 100
+#define MAX_ADDRESSES 100
+#define CRLF concat(ascii-char(13),ascii-char(10))
+
+#define THISCOUNTRY "New Zealand"
+
+//#define USE_PARCEL_ADDRESS
+
+#define DEBUG(A)  str-concat(A ";" get-field-value(A))
+
+mode md-select
+	prompt "Select"
+	help "Return this address"
+
+field
+	ws-function-title					pic x(60) type string
+	ws-current-token					pic x(1024) type string // if spaces then not authenticated
+	ws-token-expiry						type datetime
+	ws-client-id						pic x(512) type string
+	ws-client-secret					pic x(512) type string
+	ws-uppercase						type boolean
+	ws-add-post-code					type boolean
+	ws-add-country						type boolean
+	ws-last-error						pic x(1024) type string
+
+object text-file
+	type is text
+	record is
+		text-line						type string pic x(256)
+	end-record
+
+object addresses
+	type is memory
+	record is
+		a-seq							pic 9(6)
+		a-dpid							type number
+		a-address						pic x(256) type string
+	end-record
+	key is a-seq
+
+procedure library-init
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8proglogparam-write-log parameters are "clibvnzpost"
+	set ws-function-title = "NZPOST API Licence"
+	do get-paras returning ws-uppercase ws-add-post-code ws-add-country
+//	do get-licence-keys returning ws-licence-key ws-registered-domain
+#ifdef DEBUG
+	report "nzpost testing"
+		no-message
+		width 2000
+		no-xml
+#endif
+end-procedure
+
+procedure main
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do get-paras returning ws-uppercase ws-add-post-code ws-add-country
+#ifdef DEBUG
+	report "nzpost testing"
+		no-message
+		width 2000
+		no-xml
+#endif
+	do main-menu
+end-procedure
+
+menu main-menu
+	window @1,1 to @5,30
+		window-position 5
+detail
+	option "Register Licence Details" @1,1
+		do clibvnzpost-maintain-keys
+	option "Test" @2,1
+		do test-get-parameters entry once 
+		do clibvnzpost-address-enquiry 
+end-menu
+
+procedure set-token
+returning 
+	lr-message							pic x(1024) type string
+local
+	lf-url								pic x(1024) type varchar
+	lf-hrtn								type blob
+	lf-brtn								type blob
+	lf-handle							type xml-handle
+	lf-root								type xml-handle
+	//
+	// If the ws variable has been set and the expiry date is longer than 5
+	// minutes away use the current token
+	if ws-current-token != spaces and (ws-token-expiry - gmt()) > 300
+		exit
+	endif
+	//
+	// Get a new token and update suot
+	//
+	do get-suot-key parameters SUOT_CLIENT_ID returning ws-client-id
+	if ws-client-id = spaces
+		set lr-message = "Client ID not set"
+		exit 1
+	endif
+	do get-suot-key parameters SUOT_CLIENT_SECRET returning ws-client-secret
+	if ws-client-secret = spaces
+		set lr-message = "Client secret not set"
+		exit 1
+	endif
+	set lf-url = "https://oauth.nzpost.co.nz/as/token.oauth2?"
+	string lf-url appending "grant_type=client_credentials"
+	string lf-url appending "&client_id="
+	string lf-url appending ws-client-id
+	string lf-url appending "&client_secret="
+	string lf-url appending ws-client-secret
+	//
+	call-url lf-url
+		http-method is "POST"
+		returning http-body in lf-brtn
+			http-headers in lf-hrtn
+	on error
+		set lr-message = "Call URL for token failed"
+		exit 1
+	endon
+	/*
+	What should be returned is this :  (status 200)
+	{
+    "access_token": "Long string of gobbley gook",
+    "token_type": "Bearer",
+    "expires_in": 86399
+	}
+
+	an error looks like this:  (401 - Unauthorised)
+
+	{
+    "error_description": "Invalid client or client credentials",
+    "error": "invalid_client"
+	}
+	
+	*/
+	set lf-handle = xml-parse-text(lf-brtn)
+	set lf-root = xml-get-root-node(lf-handle)
+	set ws-current-token = xml-child-node-text(lf-root,"access_token",spaces) 
+	if ws-current-token != spaces
+		// all is well.
+		set ws-token-expiry = gmt + num(xml-child-node-text(lf-root,"expires_in",spaces))
+	else
+		// an error occurred
+		set lr-message = xml-child-node-text(lf-root,"error_description",spaces)
+		exit 1
+	endif
+#ifdef DEBUG
+	print "In set token"
+	print "Client id" ws-client-id
+	print "Client Secret" ws-client-secret
+	print "Token Expires" ws-token-expiry
+	do print-varchar parameters are "token" ws-current-token
+	print 132"-"
+#endif
+end-procedure
+
+procedure clibvnzpost-override-case export
+parameters
+	lp-uppercase						type boolean
+	set ws-uppercase = lp-uppercase
+end-procedure
+
+procedure clibvnzpost-override-post-code-add export
+parameters
+	lp-post-code						type boolean
+	set ws-add-post-code = lp-post-code
+end-procedure
+
+procedure clibvnzpost-override-country-add export
+parameters
+	lp-country							type boolean
+	set ws-add-country = lp-country
+end-procedure
+
+procedure clibvnzpost-get-nz-address export
+parameters
+	lp-address								pic x(100) type string occurs ADDRESSLINES
+returning
+	lr-address-array						pic x(100) type string occurs ADDRESSLINES
+	lr-dpid									type number
+	lr-result-count							type number
+local
+	lf-message								type string pic x(1024)
+	lf-url									pic x(1024) type varchar
+	lf-hrtn									type blob
+	lf-brtn									type blob
+	lf-header								type varchar pic x(4096)
+	lf-formatted-address					pic x(1024) type varchar
+	lf-ok									type boolean
+//
+#ifdef DEBUG
+	print 132"-"
+	print "in get-nz-address"
+#endif
+	do set-token returning lf-message
+	if lf-message != spaces
+		set ws-last-error = lf-message
+		exit 1
+	endif
+	if ws-current-token = spaces
+		set ws-last-error = "Access Token Empty"
+		exit 1
+	endif
+	if ws-client-id = spaces
+		set ws-last-error = "Client ID Empty"
+		exit 1
+	endif
+	set lf-header = concat("Accept: application/json", CRLF)
+	string lf-header appending concat("Authorization: Bearer ", ws-current-token, CRLF)
+	string lf-header appending concat("Cache Control: no-cache", CRLF)
+	string lf-header appending concat("client_id: ", ws-client-id, CRLF)
+#ifdef DEBUG
+	do print-crlf-delimited parameters are "search header" lf-header
+#endif
+	do clibvnzpost-get-string-from-array
+		parameters lp-address 
+		returning lf-formatted-address
+#ifdef USE_PARCEL_ADDRESS
+	set lf-url =  "https://api.nzpost.co.nz/parceladdress/2.0/domestic/addresses?"
+	string lf-url appending str-concat("&q=" lf-formatted-address)
+	string lf-url appending "&count=10" 
+#else
+	set lf-url =  "https://api.nzpost.co.nz/addresschecker/1.0/suggest?"
+	string lf-url appending str-concat("&q=" lf-formatted-address)
+	string lf-url appending str-concat("&max=" str(MAX_ADDRESSES))
+#endif
+	call-url lf-url 
+		http-headers are lf-header
+		http-method is "GET"
+		returning http-body in lf-brtn
+			http-headers in lf-hrtn
+		timeout 60
+	on error
+		set ws-last-error =  concat("call to url failed" )
+		exit 1
+	endon
+#ifdef DEBUG
+	if write-blob-to-file(lf-brtn, '/tmp/httpbrtn.txt') endif
+	if write-blob-to-file(lf-hrtn, '/tmp/httphrtn.txt') endif
+#endif
+
+	/*
+{
+    "success": true,
+    "addresses": [
+        {
+            "DPID": 1271980,
+            "SourceDesc": "Postal\\Physical",
+            "FullAddress": "11 Wiseley Place, Morrinsville 3300"
+        },
+        {
+            "DPID": 727874,
+            "SourceDesc": "Postal\\Physical",
+            "FullAddress": "11 Wiseley Road, Hobsonville, Auckland 0618"
+        }
+    ],
+    "status": "success"
+}
+*/
+
+	do increment-counter
+    do check-for-error parameters are lf-brtn
+		returning lf-ok lf-message
+	if not lf-ok
+		if lf-message = spaces
+			set lf-message = "Some untrapped error occurred during check-for-error"
+		endif
+		set ws-last-error = lf-message
+		exit 1
+	endif
+	do get-data-set  parameters are lf-brtn
+		returning lf-ok 
+		lr-result-count
+	if lr-result-count = 0
+		set ws-last-error = "No Addresses Found"
+		exit 1
+	endif
+	if lr-result-count = 1
+		get addresses first
+		set lf-formatted-address = a-address
+		do clibvnzpost-get-array-from-string
+			parameters are lf-formatted-address
+			returning lr-address-array
+		set lr-dpid = a-dpid
+		exit 0
+	endif
+	do select-address 
+		returning lf-formatted-address lr-dpid
+		lf-ok lf-message
+	if lf-ok
+		do clibvnzpost-get-array-from-string
+			parameters are lf-formatted-address
+			returning lr-address-array
+		exit 0
+	endif
+end-procedure
+
+
+procedure get-data-set
+//
+// populates a memory table to allow for selection
+//
+parameters
+	lp-xml									type blob
+returning
+	lr-ok									type boolean
+	lr-result-count							type number
+local
+	lf-handle								type xml-handle 
+	lf-root									type xml-handle
+	lf-addresses							type xml-handle
+	lf-count								type number
+	//
+#ifdef DEBUG
+	do print-blob parameters are lp-xml
+#endif
+	open addresses temporary truncate
+	//
+	set lr-ok = TRUE
+	//
+	set lf-handle = xml-parse-text(lp-xml)
+	set lf-root = xml-get-root-node(lf-handle)
+	set lf-addresses = xml-get-child-by-name(lf-root,"addresses",spaces)
+	while xml-node-name(lf-addresses) = "addresses"
+		set lf-count += 1
+		initialise addresses
+		set a-seq = lf-count
+#ifdef USE_PARCEL_ADDRESS
+		set a-address = xml-node-text(xml-get-child-by-name(lf-addresses,"full_address",spaces))
+		set a-dpid = num(xml-node-text(xml-get-child-by-name(lf-addresses,"dpid",spaces)))
+#else
+		set a-address = xml-node-text(xml-get-child-by-name(lf-addresses,"FullAddress",spaces))
+		set a-dpid = num(xml-node-text(xml-get-child-by-name(lf-addresses,"DPID",spaces)))
+#endif
+		//
+		// write the record
+		//
+		insert addresses
+		on error
+		endon
+		//
+		// now the loop
+		//
+		set lf-addresses = xml-get-next-node(lf-addresses)
+	end-while
+	set lr-result-count = lf-count
+end-procedure
+
+screen select-address
+returning
+	lr-formatted-address					pic x(1024) type string
+	lr-dpid									type number
+	lr-ok									type boolean
+	lr-message								type string pic x(1024)
+	//
+	window @1,1 to @10,80
+		window-position 5
+	title "Choose address"
+	datagrid occurs 8
+	select * from addresses
+	allowed md-select search
+before 
+	set lr-ok = true
+detail
+	if screenmode = md-select
+		set lr-formatted-address = a-address
+		set lr-dpid = a-dpid
+		exit
+	endif
+	accept  a-seq @1,1
+		title "Seq"
+		when screen-mode = search
+		show-value
+	display a-address @1,2 pic x(80)
+		title "Address"
+	display a-dpid @1,3 pic z(9)9
+		title "DPID"
+after
+	set lr-ok = FALSE
+	set lr-message = "No Address Selected"
+end-screen
+
+
+procedure check-for-error
+parameters
+	lp-xml									type blob
+returning
+	lr-ok									type boolean
+	lr-message								type string pic x(1024)
+local
+	lf-handle								type xml-handle 
+	lf-root									type xml-handle
+	lf-success								type string
+	lf-error								type xml-handle
+	set lr-ok = TRUE
+	set lf-handle = xml-parse-text(lp-xml)
+	set lf-root = xml-get-root-node(lf-handle)
+	set lf-success = xml-node-text(xml-get-child-by-name(lf-root,"success",spaces))
+	if uppercase(lf-success) = "TRUE"
+		exit
+	endif
+	set lr-ok = FALSE
+	set lf-error = xml-get-child-by-name(lf-root,"error",spaces)
+	set lr-message = xml-node-text(xml-get-child-by-name(lf-root,"description",spaces))
+	if lr-message = spaces
+		// check for an array of errors
+		set lf-error = xml-get-child-by-name(lf-root,"errors",spaces)
+		// There is the potential for a list of errors but this pgm only looks
+		// at the first one.
+		set lr-message = xml-child-node-text(lf-error,"details",spaces)
+		if lr-message = spaces
+			set lr-message = xml-child-node-text(lf-error,"message",spaces)
+		endif
+	endif
+#ifdef DEBUG
+	print "check-for-error"
+	print DEBUG("lf-handle")
+	print DEBUG("lf-root")
+	print DEBUG("lr-message")
+#endif
+end-procedure
+
+procedure clibvnzpost-prompt-address-string export
+returning
+	lr-address								pic x(100) type string occurs ADDRESSLINES
+	lr-dpid									type number
+	lr-post-code							type string
+	do simple-string-prompt entry once
+		parameters are spaces 
+		returning lr-address lr-dpid lr-post-code
+end-procedure
+
+screen simple-string-prompt
+parameters
+	lp-address								type varchar
+returning
+	lr-address								pic x(100) type string occurs ADDRESSLINES
+	lr-dpid									type number
+	lr-post-code							type string
+	lr-count								type number
+local
+	lf-input								pic x(200) type string
+	lf-ok									type boolean
+	lf-message								pic x(256) type string
+	i										type number
+	window @1,1 to @5,70
+		window-position 5
+	no-ok-cancel
+before
+	set lf-input = lp-address
+detail
+	accept  lf-input pic x(60) @2,10
+		title "Address"
+		default lf-input
+	validations
+		do clibvnzpost-get-array-from-string
+			parameters are lf-input
+			returning lr-address
+		do clibvnzpost-get-nz-address
+			parameters are lr-address
+			returning lr-address lr-dpid lr-count 
+		if exit-status != 0
+			message-box  ws-last-error
+				title is ws-function-title
+				message-buttons MSG_BOX_CANCEL
+				icon MSG_BOX_STOP
+		else
+			if lr-count > 0
+				do get-post-code-from-address
+					parameters are lr-address
+					returning lr-post-code
+				if ws-uppercase
+					for i = 1 to occurence(lr-address)
+						set lr-address[i] = uppercase(lr-address[i])
+					end-for
+				endif
+				if not ws-add-post-code
+					// look for and remove post-code
+					for i = 4 down to 1
+						// is it at the end
+						if pattern(lr-address[i],lr-post-code) = (str-len(lr-address[i]) - str-len(lr-post-code) + 1)
+							// then remove it
+							string lr-address[i] deleting pattern(lr-address[i],lr-post-code) to str-len(lr-address[i])
+							break
+						endif
+					endfor
+				endif
+				if ws-add-country
+					for i = occurence(lr-address) down to 1
+						if lr-address[i] != THISCOUNTRY and lr-address[i] != spaces and i < occurence(lr-address)
+							set lr-address[i + 1] = THISCOUNTRY
+							if ws-uppercase
+								set lr-address[i + 1] = uppercase(THISCOUNTRY)
+							endif
+							break
+						endif
+					end-for
+				endif
+			endif
+		endif
+	end-validations
+end-screen
+
+procedure get-post-code-from-address 
+parameters
+	lp-address								pic x(100) type string occurs ADDRESSLINES
+returning
+	lr-post-code							type string
+local
+	i 										type number
+	j 										type number
+	//
+	for i = occurrence(lp-address) down to 1
+		if lp-address[i] <> spaces
+			for j = str-len(lp-address[i]) down to 1
+				if substring(lp-address[i],j,j) = spaces
+					set lr-post-code = substring(lp-address[i],j + 1,str-len(lp-address[i]))
+					exit
+				endif
+			endfor
+		endif
+	endfor
+end-procedure
+
+procedure clibvnzpost-address-enquiry export
+// We really want to protect the user from knowing the screen should be called
+// with entry once so we have a separate call.
+returning
+	lr-address								pic x(100) type string occurs ADDRESSLINES
+	lr-post-code							type string
+	do address-enquiry-screen entry once 
+		returning lr-address lr-post-code
+end-procedure
+
+screen address-enquiry-screen
+returning
+	lr-address								pic x(100) type string occurs ADDRESSLINES
+	lr-post-code							type string
+	window @1,1 to @9,60
+		window-position 6
+		title "Address Enquiry"
+	no-ok-cancel
+local
+	lf-dpid									type number
+detail
+	do simple-string-prompt entry once
+		parameters are spaces 
+		returning lr-address lf-dpid lr-post-code 
+	display lr-address[1] @1,10
+		title "Address"
+	display lr-address[2] @2,10
+	display lr-address[3] @3,10
+	display lr-address[4] @4,10
+	display lr-address[5] @5,10
+	display lr-post-code @6,10
+		title "Post Code"
+	display str(lf-dpid) @7,10
+		title "DPID"
+	pause
+end-screen
+
+screen clibvnzpost-manage-all-addresses export
+parameters
+	lp-accountcode							like accountcode // could be debtor or supplier
+local
+	lf-address								pic x(100) type string occurs ADDRESSLINES
+	lf-dpid									type number
+	lf-result-count							type number
+	lf-post-code							type string
+	lf-address-string						type varchar
+	lf-name									like shortname
+	i										type number
+	window @1,1 to @12,60
+		window-position 5
+	title "Address Mainteance"
+	select *
+		from name-and-address-master
+		where accountcode = :lp-accountcode
+		and (na-type in ("C","DA")
+		or na-type between "01" and "99")
+	datagrid occurs 10
+	allowed entry correct search remove
+	no-prompt-for-search
+detail
+	if screenmode = correct
+		set lf-name = na-name
+		set lf-address[*] = spaces
+		set lf-address[1] = na-company
+		set lf-address[2] = na-street
+		set lf-address[3] = na-suburb
+		set lf-address[4] = na-country
+		do clibvnzpost-get-nz-address parameters are lf-address
+			returning lf-address lf-dpid lf-result-count
+		if lf-result-count = 1
+			message-box param-text("<<P1>><<BR>><<p2>>"
+				,"Only one valid address was found"
+				,"This address has been updated automatically")
+				title is "NZ Post Address Finder"
+				message-buttons MSG_BOX_OK
+				icon MSG_BOX_INFORMATION
+				optional
+		elseif lf-result-count = 0
+			set lf-address[*] = spaces
+			set lf-address[1] = na-company
+			set lf-address[2] = na-street
+			set lf-address[3] = na-suburb
+			set lf-address[4] = na-country
+			set lf-address-string = spaces
+			for i = 1 to occurence(lf-address)
+				if lf-address[i] <> spaces
+					if lf-address-string <> spaces
+						string lf-address-string appending ","
+					endif
+					string lf-address-string appending  lf-address[i]
+				endif
+			end-for
+			do simple-string-prompt entry once
+				parameters lf-address-string 
+				returning lf-address lf-dpid lf-post-code	lf-result-count
+			if lf-result-count = 0
+				message "No Addresses found"
+			else
+				set na-name = lf-name
+				set na-company = lf-address[1]	
+				set na-street = lf-address[2]
+				set na-suburb = lf-address[3]
+				set na-country = lf-address[4]
+				set postcode = lf-post-code
+				set na-address-id = str(lf-dpid)
+			endif
+		endif
+		set na-address-id = str(lf-dpid)
+		do get-post-code-from-address
+			parameters are lf-address
+			returning postcode
+	endif
+	accept na-type @1,1
+		title "Type"
+		when screenmode in ( entry search)
+		show-value
+	validations
+		if screenmode = entry
+			if na-type not in ( "C" "DA")
+			and not valid-number(na-type)
+				message "Invalid Type"
+				re-enter
+			endif
+			if valid-number(na-type)
+				set na-type = format-picture(num(na-type),"99")
+			endif
+		endif
+	end-validations
+	display na-company @1,2
+		title "Address 1"
+	display na-street @1,3
+		title "Address 2"
+	confirm auto
+	before
+		if screenmode = entry
+			// get correct name depending on debtor or creditor
+			get deb-master
+				on index accountcode
+				key is lp-accountcode
+			on error
+				get cre-master
+					on index cre-accountcode
+					key is lp-accountcode
+				on error
+				else
+					set lf-name = cr-shortname
+				endon
+			else
+				set lf-name = shortname
+			endon
+			do simple-string-prompt entry once
+				parameters spaces 
+				returning lf-address lf-dpid lf-post-code	lf-result-count
+			if lf-result-count = 0
+				message "No Addresses found"
+				re-enter na-type
+			endif
+			set na-name = lf-name
+			set na-company = lf-address[1]	
+			set na-street = lf-address[2]
+			set na-suburb = lf-address[3]
+			set na-country = lf-address[4]
+			set postcode = lf-post-code
+			set na-address-id = str(lf-dpid)
+		endif
+	confirmed
+		if screenmode = entry
+			reselect
+			refresh review
+		endif
+	end-confirm
+end-screen
+
+
+procedure clibvnzpost-get-string-from-array export
+parameters
+	lp-address								pic x(100) type string occurs ADDRESSLINES
+returning
+	lr-address								type varchar
+local
+	i										type number
+//
+	for i = 1 to ADDRESSLINES
+		if lp-address[i] <> spaces
+			string lr-address appending concat(",",lp-address[i])
+		endif
+	endfor
+	do format-address-string 
+		parameters lr-address
+		returning lr-address
+end-procedure
+
+procedure format-address-string
+parameters
+	lp-address								type varchar
+returning
+	lr-address								type varchar
+local
+	i										type number
+	j										type number
+	set lr-address = lp-address
+	// 
+	// remove initial ","
+	//
+	if substring(lr-address,1,1) = ","
+		string lr-address deleting 1 to 1
+	endif
+	//
+	// Replace multiple spaces with single +
+	// 
+	set i = 1
+	while i < str-len(lr-address)
+		set j = pattern(lr-address , ' ')
+		if j > 0
+			if substring(lr-address,j,j) = ' '
+				string lr-address replacing "+" at j
+				if j > 1
+					if substring(lr-address,j - 1,j - 1) = "+"
+						string  lr-address deleting j to j
+					endif
+				endif
+			endif
+		endif
+		set i += 1
+	endwhile
+	//
+	// remove trailing "+"
+	//
+	while substring(lr-address,1,1) = "+"
+		string lr-address deleting 1 to 1
+	endwhile
+end-procedure
+
+procedure clibvnzpost-get-array-from-string export
+parameters are 
+	lp-address							type varchar
+returning
+	lr-address							pic x(100) type string occurs ADDRESSLINES
+local
+	lf-count							type number
+	lf-offset							type number
+	//
+	set lf-offset = 1
+	while lp-address <> spaces
+		set lf-count += 1
+		if lf-count > 200 // just to make sure we don't loop infinitely
+			break
+		endif
+		if not pattern(lp-address,",")
+			set lr-address[lf-offset] = ltrim(lp-address)
+		else
+			set lr-address[lf-offset] = ltrim(substring(lp-address,1,pattern(lp-address,",") - 1))
+			set lf-offset += 1
+			string lp-address deleting 1 to pattern(lp-address,",")
+		endif
+	endwhile
+end-procedure
+
+screen clibvnzpost-maintain-keys export
+	window @1,1 to @10,70
+		window-position 5
+		title ws-function-title
+	allowed correct
+	form-entry
+local
+	lf-client-id						pic x(KEY_MAX_SIZE) type string
+	lf-client-secret					pic x(KEY_MAX_SIZE) type string
+	lf-registered-app					pic x(KEY_MAX_SIZE) type string
+	lf-uppercase						type boolean
+	lf-add-post-code					type boolean
+	lf-add-country						type boolean
+before
+	do check-insert-suott
+	do get-suot-key parameters SUOT_CLIENT_ID returning lf-client-id
+	do get-suot-key parameters SUOT_CLIENT_SECRET returning lf-client-secret
+	do get-suot-key parameters SUOT_REGISTERED_APP returning lf-registered-app
+	do get-paras returning lf-uppercase lf-add-post-code lf-add-country
+detail
+	accept  lf-client-id @3,15 pic x(50)
+		title "Client ID"
+		default lf-client-id
+	accept lf-client-secret @4,15 pic x(50)
+		title "Client Secret"
+		default lf-client-secret
+	accept lf-registered-app @5,15 pic x(50)
+		title "Registered App"
+		default lf-registered-app
+	check-box lf-uppercase		@6,15
+		values TRUE FALSE
+		title "Force Addresses to Uppercase"
+		default is lf-uppercase
+	end-check-box 
+	check-box lf-add-post-code		@7,15
+		values TRUE FALSE
+		title "Add Post Code to last Line"
+		default is lf-uppercase
+	end-check-box 
+	check-box lf-add-country		@8,15
+		values TRUE FALSE
+		title "Add 'New Zealand' on last line"
+		default is lf-uppercase
+	end-check-box 
+	confirm auto
+		do add-update-suot-key parameters are SUOT_CLIENT_ID lf-client-id
+		do add-update-suot-key parameters are SUOT_CLIENT_SECRET lf-client-secret
+		do add-update-suot-key parameters are SUOT_REGISTERED_APP lf-registered-app
+		do set-paras parameters are lf-uppercase lf-add-post-code lf-add-country
+	end-confirm
+end-screen
+
+procedure get-paras
+returning
+	lr-uppercase						type boolean
+	lr-add-post-code					type boolean
+	lr-add-country						type boolean
+//
+	get system-user-only-table
+		on index suot-tbl-type suot-tbl-code 
+		key is SUOT_NZPOSTAPI SUOT_GENERAL_PARAS
+	on error ENOREC
+	else
+		if suot-alpha-4-1 = "YES"
+			set lr-uppercase = TRUE
+		endif
+		if suot-alpha-4-2 = "YES"
+			set lr-add-post-code = TRUE
+		endif
+		if suot-alpha-4-3 = "YES"
+			set lr-add-country = TRUE
+		endif
+	endon
+end-procedure
+
+procedure set-paras
+parameters
+	lp-uppercase						type boolean
+	lp-add-post-code					type boolean
+	lp-add-country						type boolean
+	get system-user-only-table lock
+		on index suot-tbl-type suot-tbl-code 
+		key is SUOT_NZPOSTAPI SUOT_GENERAL_PARAS
+	on error ENOREC
+		initialise system-user-only-table
+			leaving suot-tbl-type suot-tbl-code
+		set suot-description = "General Paraemters - see clibvnzpost"
+		set suot-alpha-4-1 = if-then-else(lp-uppercase,"YES","NO")
+		set suot-alpha-4-2 = if-then-else(lp-add-post-code,"YES","NO")
+		set suot-alpha-4-3 = if-then-else(lp-add-country,"YES","NO")
+		insert system-user-only-table
+		on error 
+		endon
+	else
+		set suot-description = "General Paraemters - see clibvnzpost"
+		set suot-alpha-4-1 = if-then-else(lp-uppercase,"YES","NO")
+		set suot-alpha-4-2 = if-then-else(lp-add-post-code,"YES","NO")
+		set suot-alpha-4-3 = if-then-else(lp-add-country,"YES","NO")
+		update system-user-only-table
+		on error 
+		endon
+	endon
+end-procedure
+	
+procedure check-insert-suott
+	get system-user-only-table-types
+		on index suot-tbl-type
+		key is "NZPOSTAPI"
+	on error ENOREC
+		initialise system-user-only-table-types
+		set suot-tbl-type = SUOT_NZPOSTAPI
+		set suott-description = "NZ Post API Key Details - maintain via clibvnzpost"
+		set suott-maint-option = 1
+		set suott-min-code-size = 1
+		set suott-max-code-size = 10
+		set suott-code-format = "A"
+		insert system-user-only-table-types
+		on error
+			message-box param-text("<<P1>><<BR>><<p2>>"
+				,"There was a problem accessing the key setup"
+				,error-description(file-status()))
+				title is ws-function-title
+				message-buttons MSG_BOX_CANCEL
+				icon MSG_BOX_STOP
+			exit
+		endon
+	endon
+end-procedure
+
+procedure add-update-suot-key
+parameters 
+	lp-key								like suot-tbl-code
+	lp-value							pic x(KEY_MAX_SIZE) type string
+//
+	if pattern(lp-value, " ") != 0
+		message-box param-text("<<P1>><<BR>><<p2>>"
+			,concat("There are spaces in the value (" str(pattern(lp-value," ")) ").")
+			,"Spaces are not allowed")
+			title is ws-function-title
+			message-buttons MSG_BOX_CANCEL
+			icon MSG_BOX_STOP
+		exit 1
+	endif
+	get system-user-only-table 
+		on index suot-tbl-type suot-tbl-code
+		key is SUOT_NZPOSTAPI lp-key
+		lock
+	on error ENOREC
+		initialise  system-user-only-table
+		set suot-tbl-type  = SUOT_NZPOSTAPI
+		set suot-tbl-code = lp-key
+		do split-value parameters are lp-value returning suot-alpha-20-1
+			suot-alpha-20-2 suot-alpha-20-3 suot-alpha-20-4 suot-alpha-20-5
+		insert system-user-only-table
+		on error
+			message-box param-text("<<P1>><<BR>><<p2>>"
+				,"Unable to update licence details"
+				,error-description(file-status()))
+				title is ws-function-title
+				message-buttons MSG_BOX_CANCEL
+				icon MSG_BOX_STOP
+			exit 1
+		endon
+	else
+		do split-value parameters are lp-value returning suot-alpha-20-1
+			suot-alpha-20-2 suot-alpha-20-3 suot-alpha-20-4 suot-alpha-20-5
+		update system-user-only-table
+		on error
+			message-box param-text("<<P1>><<BR>><<p2>>"
+				,"Unable to update licence details"
+				,error-description(file-status()))
+				title is ws-function-title
+				message-buttons MSG_BOX_CANCEL
+				icon MSG_BOX_STOP
+			exit 1
+		endon
+	endon
+end-procedure
+
+procedure split-value
+parameters
+	lp-value							pic x(KEY_MAX_SIZE) type string
+returning
+	lr-part1							like suot-alpha-20-1 
+	lr-part2							like suot-alpha-20-1 
+	lr-part3							like suot-alpha-20-1 
+	lr-part4							like suot-alpha-20-1 
+	lr-part5							like suot-alpha-20-1 
+local
+	i									type number
+	lf-part								like suot-alpha-20-1 occurs 5
+	set i = 1
+	while lp-value != spaces
+		set lf-part[i] = substring(lp-value,1,size-of(lf-part))
+		string lp-value deleting 1 to str-len(lf-part[i])
+		set i += 1
+	end-while
+	set lr-part1 = lf-part[1]
+	set lr-part2 = lf-part[2]
+	set lr-part3 = lf-part[3]
+	set lr-part4 = lf-part[4]
+	set lr-part5 = lf-part[5]
+end-procedure
+
+procedure get-suot-key
+parameters 
+	lp-key								like suot-tbl-code
+returning
+	lr-value							pic x(KEY_MAX_SIZE) type string
+	//
+	get system-user-only-table 
+		on index suot-tbl-type suot-tbl-code
+		key is SUOT_NZPOSTAPI lp-key
+	on error ENOREC
+		set lr-value = spaces
+		exit
+	endon
+	set lr-value = suot-alpha-20-1
+	string lr-value appending suot-alpha-20-2
+	string lr-value appending suot-alpha-20-3
+	string lr-value appending suot-alpha-20-4
+	string lr-value appending suot-alpha-20-5
+end-procedure
+
+procedure increment-counter
+local
+	lf-key								like suot-tbl-code
+	//
+	set lf-key = concat("EXECNT" str(year(today())), format-picture(month(today()),"99"))
+	get system-user-only-table 
+		on index suot-tbl-type suot-tbl-code
+		key is SUOT_NZPOSTAPI lf-key
+		lock
+	on error ENOREC
+		initialise system-user-only-table
+			leaving suot-tbl-type suot-tbl-code
+		set suot-description = concat("Execute Count for " month-name(today) " " str(year(today())))
+		set suot-numeric1 = 1
+		insert system-user-only-table
+		on error
+		endon
+	else
+		set suot-numeric1 += 1
+		update system-user-only-table
+		on error
+		endon
+	endon
+end-procedure
+
+screen test-get-parameters
+	window @1,1 to @5,40
+		window-position 5
+		title "Set Parameters"
+	form-entry
+detail
+	check-box ws-uppercase		@2,5
+		values TRUE FALSE
+		title "Force Uppercase"
+		default ws-uppercase
+	end-check-box 
+	check-box ws-add-post-code		@3,5
+		values TRUE FALSE
+		title "Include Post Code in Address"
+		default ws-add-post-code
+	end-check-box 
+	check-box ws-add-country		@4,5
+		default ws-add-country
+		values TRUE FALSE
+		title "Add The country at the end"
+	end-check-box 
+end-screen
+
+procedure clibvnzpost-get-last-error export
+returning
+	lr-message							like ws-last-error
+	set lr-message = ws-last-error
+end-procedure
+
+
+#ifdef DEBUG
+
+procedure print-blob
+parameters 
+	lp-blob									type blob
+local
+	lf-filename								type string
+	lf-handle								type xml-handle
+	lf-root									type xml-handle
+	lf-bigtext								type varchar pic x(4096)
+	set lf-filename = "/tmp/thisblob.xml"
+	set lf-handle = xml-parse-text(lp-blob)
+	if lf-handle = 0
+		print "no handle"
+		exit
+	endif
+	set lf-root = xml-get-root-node(lf-handle)
+	if xml-save-as-file(lf-handle,lf-filename,xml-get-doc-encoding(lf-handle),2) 
+		open text-file file is lf-filename
+		select * from text-file
+		detail
+			print text-line
+		end-select
+	else
+		print "Could not save file" error-description(file-status())
+	endif
+	if xml-save-as-text(lf-handle,lf-bigtext,"UTF-8")
+		do print-varchar parameters are "xml" lf-bigtext
+	endif
+	do traverse-xml-tree parameters are lf-root 1
+end-procedure
+
+procedure traverse-xml-tree
+parameters
+	lp-node						type xml-handle
+	lp-level					pic 999
+local
+	lf-this-node				type xml-handle
+	lf-child-node				type xml-handle
+	lf-print-line				pic x(100) type string
+	i						type number
+//	print "traverse:" lp-node lp-level
+	set lf-this-node = lp-node
+	while lf-this-node <> 0
+		set lf-print-line = spaces
+		for i = 1 to lp-level
+			set lf-print-line = concat(lf-print-line,chr(9))
+		end-for
+		set lf-print-line = concat(lf-print-line
+			,str(xml-node-type(lf-this-node)),"."
+			"<"
+			,xml-node-name(lf-this-node),":"
+			">"
+			,xml-node-text(lf-this-node),":"
+			,xml-node-string(lf-this-node))
+		print lf-print-line
+		set lf-child-node = xml-get-first-child-node(lf-this-node)
+		if lf-child-node <> 0
+			do traverse-xml-tree parameters are lf-child-node, lp-level + 1
+		endif
+		set lf-this-node = xml-get-next-node(lf-this-node)
+	end-while
+	if xml-free-node-handle(lf-this-node) endif
+end-procedure 
+
+procedure print-varchar
+parameters
+	lp-title						type string
+	lp-in							pic x(4096) type varchar
+//
+	print lp-title "len:" str-len(lp-in) "Poss" size-of(lp-in)
+	while str-len(lp-in) > 80
+		print substring(lp-in,1,80)
+		string lp-in deleting 1 to 80
+	end-while
+	print lp-in
+	print 80"-"
+end-procedure
+
+procedure print-crlf-delimited
+parameters
+	lp-title						type string
+	lp-in							pic x(4096) type varchar
+//
+	print lp-title "len:" str-len(lp-in) "Poss" size-of(lp-in)
+	while str-len(lp-in) > 80
+		if pattern(lp-in,CRLF) > 0
+			print substring(lp-in,1,pattern(lp-in,CRLF))
+			string lp-in deleting 1 to  pattern(lp-in,CRLF) + 2
+		else
+			print substring(lp-in,1,80)
+			string lp-in deleting 1 to 80
+		endif
+	end-while
+	print lp-in
+	print 80"-"
+end-procedure
+
+#endif
+
+

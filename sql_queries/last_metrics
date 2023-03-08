@@ -1,0 +1,21 @@
+
+/* last metrics */
+select
+t1.mvm_group,
+t0.cm_value_name,
+t1.mvm_desc,
+t1.mvm_type,
+t1.mvm_value_type,
+t0.cm_node_name,
+t0.cm_datetime,
+t0.cm_value,
+t0.cm_value_numeric
+from cusmetrics t0
+left outer 
+join metrics_value_master t1 
+	on t0.cm_group_name = t1.mvm_group and (t0.cm_value_name = t1.mvm_value or t1.mvm_value = '*')
+where t0.cm_datetime = 
+	(select max(s1.cm_datetime) from cusmetrics s1 where s1.cm_node_name = t0.cm_node_name)
+--	and (cm_group_name in ("FREE_DBSPACE", "STKMOV") 
+--	or cm_value_name like '%ALLOC%')
+	and cm_node_name like '%ima%'

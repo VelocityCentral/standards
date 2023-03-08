@@ -1,0 +1,579 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : Create Enterprise Search keywords
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2015
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: vgl/entrbldkwrd.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 06Jun17  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+
+#include "../include/ientsrch.spl"
+
+
+FORCE COMPILE ERROR - Do not use this.  USe the normal keyword search rebuild
+as it now has an exported routine to build search words
+
+/*
+The following should probably be changed to FALSE initially.
+What it will do is for text that is shorter than 20 bytes and contains leading
+alphas followed by numbers, it will remove the leading alphas.
+For example: A creditors invoice is U2345, it will add an index for 2345 and drop the U
+*/
+#define GUESS_LEADING_ALPHA TRUE
+// The following is a list of short words and punctuation we want to remove
+
+#define LEADING \
+	'.' 
+#define TRAILING \
+	'.'
+#define PUNCTUATION \
+	'#' '&' '*' '+' '-' '/'	'@' ':' ',' '!' '$' '"' "'" '(' ')' '=' '<' '>' '?' ';'
+// This comment has a single quote in it to close the single quote in the
+// punctuation to stop gvim syntax getting screwed up '
+
+#define SHORTWORDS \
+			'A' 'ALL' 'AT' 'AN' 'ASK' 'AND' 'ANY' 'ARE' 'AS' 'AT' 'AM' \
+			'ADD' 'AFTER' 'ALL' 'ALSO' \
+			'BE' 'BUT' 'BY' 'BEEN' \
+			'CAN' 'CALL'\
+			'DO' 'DOES' 'DONE' 'DOWN' \
+			'END' \
+			'FOR' 'FROM' 'FAX' \
+			'GET' \
+			'HAD' 'HAS' 'HAVE' 'HE' \
+			'I' 'IN' 'IS' 'IF' 'IT' \
+			'JOB' \
+			'ME' 'MAY' 'MY'  \
+			'NO' 'NEW' 'NOT' 'NOW' \
+			'OUT' 'OUT' 'OF' 'ON' 'OR' \
+			'SHE' 'SO' 'SAY' 'SEE' 'SET'  \
+			'TO' 'THE' 'TEXT' 'THAT' 'THEN' 'THEY' 'THIS' 'TOO' \
+			'UP'  \
+			'WAS' 'WE' 'WAY' 'WHO' 'WILL' 'WHEN' 'WITH' \
+			'YOU' 'YET' 'YES' \
+			'.'
+
+#include "../include/bmsdef.spl"
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+
+field 
+	ws-function-title								type string
+	ws-years-of-history								type number
+
+// Excluded keywords will be loaded into a memory table in order to improve
+// performance
+
+object kwe	
+	type is memory
+	record is
+		kwe-word									type string
+	end-record
+	key is kwe-word
+
+procedure main
+	get system-control first
+	on error
+		abort "No system control record found"
+	endon
+	set ws-years-of-history = 10
+//	do i8secabt-check-abort parameters
+//		sys-consolidation-division login-id() "ZUSR" "M005"
+//		returning ws-function-title
+	do i8proglog-write-log
+	//
+	// Load the keywords into a memory table
+	//
+	open kwe temporary
+	select * from search-central-keyword-excls
+		where shcke-type = spaces
+	detail
+		set kwe-word = shcke-excluded-keyword
+		insert kwe
+	end-select
+	//
+	// Under normal circumstance the program will run in batch
+	//
+	if batched()
+		set ws-years-of-history = num(get-param(1))
+		if ws-years-of-history < 1
+			set ws-years-of-history = 5
+		endif
+		message "Starting Keyword Rebuild" today() tod()
+		transaction begin
+		do rebuild-keyword-sales
+		do rebuild-keyword-purchases
+		do rebuild-keyword-crs
+		message "Finished Keyword Rebuild" today() tod()
+		if transaction-active()
+			transaction commit
+		endif
+		exit
+	endif
+	//
+	// For testing and debugging purposes allow for interactive
+	// execution
+	//
+	do run entry once
+end-procedure
+
+screen run
+	window 
+	title ws-function-title
+	form-entry
+	no-ok-cancel
+detail
+	accept ws-years-of-history @2,10 pic zz9
+		default ws-years-of-history
+		title "Years"
+		help "Number of years of history to cross reference"
+	validation
+		if ws-years-of-history < 1
+			message "You must have at least one years history"
+			re-enter
+		endif
+	end-validation
+	option "Interactive" @4,10
+		transaction begin
+		do rebuild-keyword-sales
+		do rebuild-keyword-purchases
+		do rebuild-keyword-crs
+		if transaction-active()
+			transaction commit
+		endif
+		exit
+	end-option
+	option "Submit to Batch" @4,25
+		command "probatch" parameters '-q' 'P' '-b' 1 'vgl/entrbldkwrd' str(ws-years-of-history)
+		exit
+	end-option
+	option "Exit" @4,50
+		exit
+	end-option
+end-screen	
+
+procedure rebuild-keyword-sales
+	window @1,1 to @5,50
+		relative to @10,10
+	no-hide
+	title "Rebuild Sales Keywords"
+local
+	lf-count							type number  
+	lf-earliest-date					type date	
+	lf-po-order-no						pic x(10)
+	lf-desc								like sck-description
+	if get-param(1) <> "-b"
+		display "Sales Records :" @2,28 right-coord
+			background
+	endif
+	//
+	// Remove all keywords first
+	//
+	sql-delete search-central-keywords
+		where sck-context = IENTSRCH_C_SO
+	//
+	// Pronto SQL does not handle date arithmetic so we need to 
+	// calculate a local variable for use in the sql
+	//
+	set lf-earliest-date = today - (ws-years-of-history * 365.25)
+	//
+	// Get all the sales lines for the last n years
+	//
+	select *
+		from sales-order
+		inner join deb-master on accountcode = so-cust-code
+		where so-order-status <> '99'
+		and so-order-date > :lf-earliest-date
+	union
+	select *
+		from sales-order-archive  
+		inner join deb-master on accountcode = so-cust-code
+		where so-order-status <> '99'
+		and so-order-date > :lf-earliest-date
+	detail
+		// Use a counter to control the transaction size.
+		set lf-count += 1
+		if not lf-count % 2000
+			if get-param(1) <> "-b"
+				display lf-count @2,30 pic z(7)9
+					background
+			endif
+			transaction commit
+			transaction begin
+		endif
+		set lf-desc = concat("Sales order for " shortname)
+		do build-keyword parameters are 
+			concat(str(so-order-no) " " so-bo-suffix)
+			IENTSRCH_C_SO IENTSRCH_SC_SO concat(str(so-order-no), " ", so-bo-suffix)
+			lf-desc
+		// and the customer po:
+		if so-cust-reference <> spaces
+			do build-keyword parameters are 
+				so-cust-reference
+				IENTSRCH_C_SO IENTSRCH_SC_CUST_PO concat(str(so-order-no), " ", so-bo-suffix)
+				lf-desc
+		endif
+		// and the invoice no:
+		if so-invoice-no <> spaces
+			do build-keyword parameters are 
+				so-invoice-no
+				IENTSRCH_C_SO IENTSRCH_SC_INV concat(str(so-order-no), " ", so-bo-suffix)
+				lf-desc
+		endif
+		// and the credit note no:
+		if so-credit-note-no <> 0
+			do build-keyword parameters are 
+				str(so-credit-note-no)
+				IENTSRCH_C_SO IENTSRCH_SC_CN concat(str(so-order-no), " ", so-bo-suffix)
+				lf-desc
+		endif
+		// and the customer code:
+		do build-keyword parameters are 
+			so-cust-code
+			IENTSRCH_C_SO IENTSRCH_SC_PARTNER concat(str(so-order-no), " ", so-bo-suffix)
+			lf-desc
+		// and a customisation:
+		// and any linked purchase orders for the order
+		select * from sales-order-line-purchase
+			where so-order-no = :so-order-no
+			and so-bo-suffix = :so-bo-suffix
+		detail
+			do build-keyword parameters are 
+				str(solp-po-order-no)
+				IENTSRCH_C_SO IENTSRCH_SC_PO concat(str(so-order-no),' ',so-bo-suffix) 
+				lf-desc // concat(cre-accountcode " " format-picture(po-order-date,"ddMMMyyyy"))
+		end-select
+	end-select
+end-procedure
+
+procedure rebuild-keyword-sales-lines
+	window @1,1 to @5,50
+		relative to @10,10
+	no-hide
+	title "Rebuild Sales Keywords"
+local
+	lf-count							type number  
+	lf-earliest-date					type date	
+	lf-po-order-no						pic x(10)
+	lf-desc								like sck-description
+	if get-param(1) <> "-b"
+		display "Sales Records :" @2,28 right-coord
+			background
+	endif
+	//
+	// Remove all keywords first
+	//
+//	sql-delete search-central-keywords
+//		where sck-context = 9000
+	//
+	// Pronto SQL does not handle date arithmetic so we need to 
+	// calculate a local variable for use in the sql
+	//
+	set lf-earliest-date = today - (ws-years-of-history * 365.25)
+	//
+	// Get all the sales lines for the last n years
+	//
+	select *
+		from sales-order-line 
+		inner join sales-order on sales-order-line.so-order-no = sales-order.so-order-no 
+			and sales-order-line.so-bo-suffix = sales-order.so-bo-suffix
+		where sol-line-type in ( 'SS', 'DN' ) // , 'SN' )
+		and so-order-status <> '99'
+		and so-order-date > :lf-earliest-date
+	union
+	select *
+		from sales-order-line-archive  
+		inner join sales-order-archive on sales-order-line-archive.so-order-no = sales-order-archive.so-order-no 
+			and sales-order-line-archive.so-bo-suffix = sales-order-archive.so-bo-suffix
+		where sol-line-type in ( 'SS','DN' ) // ,'SN' )
+		and so-order-date > :lf-earliest-date
+	before so-order-no so-bo-suffix
+		//
+		// In this example we need to find linked purchase orders
+		//
+		set lf-po-order-no = spaces
+	detail
+		// Use a counter to control the transaction size.
+		set lf-count += 1
+		if not lf-count % 2000
+			if get-param(1) <> "-b"
+				display lf-count @2,30 pic z(7)9
+					background
+			endif
+			transaction commit
+			transaction begin
+		endif
+		//
+		// Check for a linked order
+		//
+		if sol-line-type = "SS"
+			set lf-po-order-no = spaces
+		endif
+		get sales-order-line-purchase
+			on index so-order-no so-bo-suffix sol-line-seq
+			key is so-order-no so-bo-suffix sol-line-seq
+		on error
+			set lf-po-order-no = str(solp-po-order-no)
+		endon
+		// build the description
+		set lf-desc = concat(so-cust-code " " format-picture(so-order-date,"ddMMMyyyy"))
+		if lf-po-order-no <> spaces
+			string lf-desc appending concat(" PO:" lf-po-order-no)
+		endif
+		// A customisation uses user only fields to create some data that
+		// needs indexing for normal lines (otherwise normal lines are
+		// ignored)
+		if sol-line-type = 'SN'
+			if sol-user-only-num1 <> 0 and so-user-only-alpha4-1 = "TC" and so-user-only-alpha20-1 <> spaces
+				set lf-desc = concat(str(sol-user-only-num1), " ",
+						str-concat(so-user-only-alpha20-1), " ",
+						str-concat(stock-code)
+						)
+				do build-keyword parameters are 
+					lf-desc
+					9000 900008 concat(str(so-order-no), " ", so-bo-suffix)
+					lf-desc
+			endif
+		else
+			// index the text on notes and special lines.
+			do build-keyword parameters are 
+				sol-line-description IENTSRCH_C_SO IENTSRCH_SC_LINE concat(str(so-order-no)," ",so-bo-suffix)
+				lf-desc
+		endif
+	end-select
+end-procedure
+
+procedure rebuild-keyword-purchases
+local
+	lf-count							type number
+	lf-earliest-date					type date
+	lf-desc								like sck-description
+	lf-so-order-no						pic x(20) type string
+	window @1,1 to @5,50
+		relative to @10,10
+	no-hide
+	title "Rebuild Purchases Keywords"
+	if get-param(1) <> "-b"
+		display "Purchase Records :" @2,28 right-coord
+			background
+	endif
+	sql-delete search-central-keywords
+		where sck-context = IENTSRCH_C_PO
+	//
+	set lf-earliest-date = today - (ws-years-of-history * 365.25)
+	select * 
+		from purchase-order-line as t0
+		inner join purchase-order as t1 on t0.po-order-no = t1.po-order-no and t0.po-backorder-flag = t1.po-backorder-flag
+		where po-order-date > :lf-earliest-date
+	before po-order-no po-backorder-flag
+		set lf-desc = spaces
+	detail
+		set lf-count += 1
+		if not lf-count % 2000
+			if get-param(1) <> "-b"
+				display lf-count @2,30 pic z(7)9
+					background
+			endif
+			transaction commit
+			transaction begin
+		endif
+		// get the sales order for linked purchase orders
+		set lf-so-order-no	= spaces
+		get sales-order-line-purchase
+			on index solp-po-order-no solp-backorder-flag solp-l-seq
+			key is po-order-no po-backorder-flag po-l-seq
+		on error
+		else
+			set lf-so-order-no = str(so-order-no)
+		endon
+		// build the description
+		set lf-desc = concat(cre-accountcode " " format-picture(po-order-date,"ddMMMyyyy"))
+		if lf-so-order-no <> spaces
+			string lf-desc appending concat(" SO:" lf-so-order-no)
+		endif
+		// cross reference all text
+		do build-keyword parameters are 
+			po-line-description IENTSRCH_C_PO IENTSRCH_SC_PO concat(str(po-order-no),' ',po-backorder-flag)
+			lf-desc
+	after po-order-no po-backorder-flag
+		// at the end of the PO xref any related sales order
+		select * from sales-order-line-purchase
+			where solp-po-order-no = :po-order-no
+			and solp-backorder-flag = :po-backorder-flag
+		detail
+			do build-keyword parameters are 
+				str(so-order-no)
+				IENTSRCH_C_PO IENTSRCH_SC_SO concat(str(po-order-no),' ',po-backorder-flag)
+				lf-desc
+		end-select
+		//
+		do build-keyword parameters are 
+			po-invoice-details IENTSRCH_C_PO IENTSRCH_SC_INV concat(str(po-order-no),' ',po-backorder-flag)
+			lf-desc
+		do build-keyword parameters are 
+			po-shipment-no IENTSRCH_C_PO IENTSRCH_SC_SHP concat(str(po-order-no),' ',po-backorder-flag)
+			lf-desc
+		// and the notes on the po header
+		do build-keyword parameters are 
+			po-notes IENTSRCH_C_PO IENTSRCH_SC_PO concat(str(po-order-no),' ',po-backorder-flag)
+			lf-desc
+		// and the po number on the po header
+		do build-keyword parameters are 
+			str(po-order-no) IENTSRCH_C_PO IENTSRCH_SC_PO concat(str(po-order-no),' ',po-backorder-flag)
+			lf-desc
+		// and the supplier code
+		do build-keyword parameters are 
+			cre-accountcode IENTSRCH_C_PO IENTSRCH_SC_PARTNER concat(str(po-order-no),' ',po-backorder-flag)
+			lf-desc
+	end-select
+end-procedure
+
+procedure rebuild-keyword-crs
+//
+// This whole routine is for a custom table
+//
+local
+	lf-count							type number
+	lf-earliest-date				type date
+	window @1,1 to @5,50
+		relative to @10,10
+	no-hide
+	title "Rebuild crs Keywords"
+	if get-param(1) <> "-b"
+		display "cr Records :" @2,28 right-coord
+			background
+	endif
+	sql-delete search-central-keywords
+		where sck-context = IENTSRCH_C_CR
+	//
+	set lf-earliest-date = today - (ws-years-of-history * 365.25)
+	select * 
+		from cre-trans as t0
+		inner join cre-master as t1 on t0.cre-accountcode  = t1.cre-accountcode
+	detail
+		set lf-count += 1
+		if not lf-count % 2000
+			if get-param(1) <> "-b"
+				display lf-count @2,30 pic z(7)9
+					background
+			endif
+			transaction commit
+			transaction begin
+		endif
+		do build-keyword parameters are 
+			cr-tr-reference IENTSRCH_C_CR IENTSRCH_SC_LINE cre-accountcode
+			concat(cre-accountcode " " format-picture(cr-tr-date,"ddMMMyyyy"))
+		do build-keyword parameters are 
+			cr-tr-details IENTSRCH_C_CR IENTSRCH_SC_LINE cre-accountcode
+			concat(cre-accountcode " " format-picture(cr-tr-date,"ddMMMyyyy"))
+	end-select
+end-procedure
+
+procedure build-keyword
+//
+// Traverse the input, break into keywords and update the table.
+//
+parameters are 
+	lp-notes 					pic x(1024)
+	lp-context					like sck-context
+	lp-sub-context				like sck-sub-context
+	lp-object-key				like sck-object-key
+	lp-description				like sck-description
+//	lp-sc-desc					like sck-sub-context-value
+local 
+	x 							type number
+	y 							type number
+	lf-keyword					pic x(1024) type string
+	if GUESS_LEADING_ALPHA 
+		do remove-leading-alphas parameter are lp-notes returning lp-notes
+	endif
+	set y = 1
+	for x = 1 to str-len(lp-notes) + 1
+		if substring(lp-notes,x,x)  = spaces
+			set lf-keyword = uppercase(substring(lp-notes,y,x - 1))
+			set y = x + 1
+			do tidy-keyword parameters are lf-keyword returning lf-keyword
+			if lf-keyword != spaces
+				get kwe 
+					on index kwe-word
+					key is lf-keyword
+				on error ENOREC
+					// insert the keywork
+					get search-central-keywords
+						on index sck-keyword sck-context sck-sub-context sck-object-key
+						key is lf-keyword lp-context lp-sub-context lp-object-key
+					on error ENOREC
+						initialise search-central-keywords
+							leaving sck-keyword sck-context sck-sub-context sck-object-key
+						// The description should be more detail on the object
+						// key
+						set sck-description = lp-description
+						// The subcontext VALUE should be more description on
+						// the keyword
+						set sck-sub-context-value = lp-notes
+						insert search-central-keywords
+					endon
+				endon
+			endif
+		endif
+	endfor
+end-procedure
+
+
+procedure tidy-keyword
+//
+// Remove small words and punctuation
+//
+parameters 
+	l-in-kwrd						type string
+returning
+	l-out-kwrd						type string
+local
+	i								type number
+	// '.' are important at the beginning but not the end
+	if substring(l-in-kwrd,1,1) in { LEADING }
+		string l-in-kwrd deleting at 1
+	endif
+	for i = 1 to str-len(l-in-kwrd)
+		if substring(l-in-kwrd,i,i) in { PUNCTUATION }
+			// do nothing
+		else
+			string l-out-kwrd appending substring(l-in-kwrd,i,i)
+	endif
+end-for
+// '.' are unimportant at the beginning but not the end
+if substring(l-out-kwrd,str-len(l-out-kwrd),str-len(l-out-kwrd)) in { TRAILING }
+	string l-out-kwrd deleting at str-len(l-out-kwrd)
+endif
+if l-out-kwrd in { SHORTWORDS }
+	set l-out-kwrd = spaces
+endif
+end-procedure
+
+procedure remove-leading-alphas
+parameters are 
+	lp-notes 					pic x(1024)
+returning 
+	lr-notes 					pic x(1024)
+	//
+	set lr-notes = lp-notes
+	if str-len(lr-notes) > 20
+		exit
+	endif
+	if pattern(lr-notes," ") < str-len(lr-notes)
+		// then there are space delimited words  so exit
+		exit
+	endif
+	if pattern(lr-notes,"[A-Z]") = 1 // starts with uppercase alpha
+		string lr-notes deleting 1 to pattern(lr-notes,"[0-9]") - 1
+	endif
+end-procedure
+

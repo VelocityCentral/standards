@@ -1,0 +1,416 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : rf picking for a type one warehouse
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2011
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: vglrfpick.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 13Jan11	rayb		written
+////////////////////////////////////////////////////////////////////////////////
+
+// TODO:  Add handling locking of orders
+
+#define SCREENSIZE @ws-max-rows,ws-max-cols
+
+#include "../include/i8secabt.spl" 
+#include "../include/i8proglog.spl" 
+
+link "vglrf/vglrfclib"
+
+field 
+	ws-function-title					type string
+	ws-max-cols						type number
+	ws-max-rows						type number
+	ws-current-warehouse				like whse-code
+
+procedure main 
+	get system-control first 
+	on error
+		abort "No Control Record"
+	endon
+	do i8secabt-check-abort
+		parameters are sys-consolidation-division login-id() "ZVRF" "M002"
+		returning ws-function-title 
+	do i8proglog-write-log
+	do vglrfclib-screen-size 
+		returning ws-max-cols ws-max-rows
+	do vglrfclib-get-default-warehouse returning ws-current-warehouse
+	do collectdata entry 
+end-procedure
+
+procedure get-mode-desc
+parameters are 
+	lp-code								pic 9
+returning
+	lr-desc								pic x(20)
+//
+	switch lp-code
+	case 1
+		set lr-desc = "Pick Location"
+	case 2
+		set lr-desc = "Bulk location"
+	case 3
+		set lr-desc = "Bar Code"
+	case 4
+		set lr-desc = "Supplier Code"
+	case 5
+		set lr-desc = "GTIN"
+	case 6
+		set lr-desc = "Alternate Bar Code"
+	case 9
+		set lr-desc = "Exit"
+	else
+		set lr-desc = spaces
+	end-switch
+end-procedure
+
+screen select-option
+returning
+	lr-option							pic 9
+	window @1,1 to SCREENSIZE
+before
+	clear
+	display "Option" @4,1
+	display "1)Pick 2)Bulk 3)BC" @6,1
+	display "4)Supp 5)Gtin" @7,1
+	display "6)Colloqial 9) Exit" @8,1
+detail
+	accept lr-option @4,10
+		help "1,2,3,4,5,6,9"
+		allowed 1,2,3,4,5,6,9
+		optional
+		show-value
+		default lr-option
+	validations
+		if lr-option = 9
+			exit
+		endif
+	end-validations
+after
+	// no escape.
+	if lr-option = 0
+		back-to-detail
+	endif
+end-screen
+
+screen collectdata
+local
+	lf-stock-code						like stock-code
+	lf-ok								type boolean
+	lf-option							pic 9	
+	lf-type-desc						pic x(20)
+	window @1,1 to SCREENSIZE
+before
+	clear
+	display "Collect Data" @1,5 bold
+	display "Stock" @3,1
+	if lf-option = 0
+		do select-option entry once returning lf-option
+		if lf-option = 9
+			exit
+		endif
+	endif
+	do get-mode-desc parameters are lf-option returning lf-type-desc
+	display lf-type-desc @2,1
+detail
+	clear rows 4
+	accept lf-stock-code @3,6
+		help "Scan, Stock Code 0,9"
+		optional 
+		default lf-stock-code
+	validations
+		if lf-stock-code = "0"
+			do select-option entry once returning lf-option
+			if lf-option = 9
+				exit
+			endif
+			refresh prompts
+			re-enter lf-stock-code
+		endif
+		if lf-stock-code = "9"
+			exit
+		endif
+		do vglrfclib-validate-product parameters lf-stock-code spaces
+			returning lf-ok lf-stock-code 
+		if not lf-ok
+			do vglrfclib-display-message parameters "Invalid Stock Code" 3
+			re-enter lf-stock-code
+		endif
+		get stock-master 
+			on index stock-code 
+			key is lf-stock-code
+		on error
+			do vglrfclib-display-message parameters "Invalid Stock Code" 3
+			re-enter lf-stock-code
+		else
+			display stk-description @4,5
+		endon
+	end-validations
+	confirm auto
+		do get-data parameters are lf-stock-code lf-option
+		do clear-bottom
+	end-confirm
+end-screen
+
+procedure clear-bottom
+	clear @5,1 to @ws-max-rows,ws-max-cols
+end-procedure
+
+procedure get-data
+parameters
+	lp-stock-code						like stock-code
+	lp-option							pic 9
+//
+	switch lp-option
+	case 1 2 // pick location
+		do update-location entry once parameters are lp-stock-code lp-option
+	case 3  // barcode
+		do get-barcode correct once parameters are lp-stock-code
+	case 4 6
+		do update-stock-note entry once parameters are lp-stock-code lp-option
+	case 5 // GTIN
+		do update-gtin entry once parameters are lp-stock-code lp-option
+	else
+		do vglrfclib-display-message parameters "Not implemented" 3
+	end-switch
+end-procedure
+
+screen update-gtin
+parameters 
+	lp-stock-code						like stock-code
+	lp-option							pic 9
+local
+	lf-barcode							pic x(20)
+	lf-current-uom						like suc-unit-desc
+	lf-found							type boolean
+//
+before
+	do clear-bottom
+	set lf-current-uom = stk-unit-desc
+detail
+	display  "Gtin :" @5,1
+	display lf-current-uom @5,20
+	accept lf-barcode @6,5
+		help "Scan,1-UOM,9-Exit"
+	validations
+		if lf-barcode = "1"
+			do select-uom parameters are stock-code
+				returning lf-current-uom
+				refresh  data // to display new warehouse code
+			re-enter lf-barcode
+		endif
+	end-validations
+	confirm auto
+	confirmed
+		if lf-barcode <> "9"
+			set lf-found = FALSE
+			select * from stock-unit-conversion
+				where stock-code = :stock-code
+				and suc-unit-desc <> lf-current-uom
+				and suc-trade-unit-no = lf-barcode
+				order by stock-code suc-unit-desc suc-trade-unit-no
+			detail
+				set lf-found = TRUE
+				message "Cannot use this barcode"
+				exit
+			end-select
+			set lf-found = FALSE
+			select * from stock-unit-conversion
+				where stock-code = :stock-code
+				and suc-unit-desc = lf-current-uom
+				order by stock-code suc-unit-desc suc-trade-unit-no
+				for update
+			detail
+				set lf-found = TRUE
+				set suc-trade-unit-no = lf-barcode
+				update stock-unit-conversion
+				on error
+					message "Cannot use this barcode"
+				endon
+				break
+			end-select
+			if not lf-found 
+				message "No update"
+			endif
+		endif
+	end-confirm
+end-screen
+
+menu select-uom
+parameters	
+	lp-stock-code						like stock-code
+returning
+	lr-uom								like stk-unit-desc
+local
+	lf-uom								like stk-unit-desc occurs 20
+	lf-option-text						pic x(20) occurs 20
+	i									type number
+	window @1,1 to @ws-max-rows,ws-max-cols
+//
+before
+	select * from stock-unit-conversion
+		where stock-code = :lp-stock-code
+		order by stock-code suc-unit-desc suc-trade-unit-no
+	detail
+		set i += 1
+		set lf-uom[i] = suc-unit-desc
+		set lf-option-text[i] = concat(str(i) "." suc-unit-desc " (" suc-trade-unit-no ")" )
+	end-select
+	box
+detail
+	option lf-option-text[1] @2,2
+		when i >= 1
+		set lr-uom = lf-uom[1]
+	option lf-option-text[2] @3,2
+		when i >= 2
+		set lr-uom = lf-uom[2]
+	option lf-option-text[3] @4,2
+		when i >= 3
+		set lr-uom = lf-uom[3]
+	option lf-option-text[4] @5,2
+		when i >= 4
+		set lr-uom = lf-uom[4]
+	option lf-option-text[5] @6,2
+		when i >= 5
+		set lr-uom = lf-uom[5]
+	option lf-option-text[6] @7,2
+		when i >= 6
+		set lr-uom = lf-uom[6]
+	option lf-option-text[7] @8,2
+		when i >= 7
+		set lr-uom = lf-uom[7]
+	option lf-option-text[8] @9,2
+		when i >= 8
+		set lr-uom = lf-uom[8]
+	confirm auto
+	confirmed
+		exit
+	end-confirm
+end-menu
+
+
+screen update-location
+parameters 
+	lp-stock-code						like stock-code
+	lp-option							pic 9
+local
+	lf-barcode							pic x(20)
+//
+before
+	do clear-bottom
+detail
+	display  "Location :" @5,1
+	display ws-current-warehouse @5,20
+	accept lf-barcode @6,5
+		help "Scan,1-Whse,9-Exit"
+	validations
+		if lf-barcode = "1"
+			do vglrfclib-select-warehouse
+				returning ws-current-warehouse
+			refresh  // to display new warehouse code
+			re-enter lf-barcode
+		endif
+	end-validations
+	confirm auto
+	confirmed
+		if lf-barcode <> "9"
+			get stock-warehouse-detail
+				on index stock-code whse-code
+				key is stock-code ws-current-warehouse
+				lock
+			on error
+				message "Could not update"
+			else
+				if lp-option = 1
+					set whse-bin-location = lf-barcode
+				elseif lp-option = 2
+					set whse-bulk-location = lf-barcode
+				endif
+				update stock-warehouse-detail
+				on error
+					message "Updte Failed"
+				endon
+			endon
+		endif
+	end-confirm
+end-screen
+
+
+screen get-barcode
+parameters 
+	lp-stock-code						like stock-code
+//
+	select * 
+		from stock-master
+		where stock-code = :lp-stock-code
+before
+	do clear-bottom
+detail
+	accept stk-apn-number @6,5
+		help "Scan Barcode"
+	confirm auto
+	confirmed
+	end-confirm
+end-screen
+
+screen update-stock-note
+parameters 
+	lp-stock-code						like stock-code
+	lp-option							pic 9
+local
+	lf-barcode							pic x(20)
+	lf-note-type						like stock-note-type
+	lf-found							type boolean
+	lf-max-seq							like stock-note-sequence
+//
+before
+	do clear-bottom
+detail
+	accept lf-barcode @6,5
+		help "Scan Barcode"
+	confirm auto
+	confirmed
+		if lp-option = 4 
+			set lf-note-type = "##"
+		elseif lp-option = 6
+			set lf-note-type = "**"
+		endif
+		set lf-found = FALSE
+		select * from stock-notes
+			where stock-code = lp-stock-code
+			and stock-note-type = lf-note-type
+			order by stock-code stock-note-type stock-note-sequence
+		detail
+			if substring(stock-note,1,20) = lf-barcode
+				set lf-found = TRUE
+			endif
+			set lf-max-seq = stock-note-sequence
+		end-select
+		if not lf-found
+			initialise stock-notes
+			set stock-code = lp-stock-code
+			set stock-note-type = lf-note-type
+			set stock-note-sequence = lf-max-seq + 1
+			// make the qty always 1:
+			set stock-note = concat(lf-barcode,"0000000001")
+			insert stock-notes
+			on error
+				do vglrfclib-display-message parameters "Could not record barcode" 3
+			endon
+		end-if
+	end-confirm
+end-screen
+
+
+		
+
+	
+
+			

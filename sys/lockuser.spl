@@ -1,0 +1,219 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : Manage user shells to lock/unlock logins
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2023
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: sys/lockuser.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 09Jan23  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+#include "../include/i8gparam.spl"
+
+#define RESTRICTED_USER_SET ("root" "informix" "idsconx" "appserv" "pronto" "psd" "sysconx")
+
+#define LOG
+
+#ifdef LOG
+link "clib/clibvlog"
+#endif
+ 
+field
+	ws-function-title						type string
+
+object etcpasswd
+	type is external
+	separator is ":"
+	file is "/etc/passwd"
+	record is
+		ep-user								type string
+		ep-x								type string
+		ep-uid								type string
+		ep-groupid							type string
+		ep-name								type string pic x(512)
+		ep-home								type string
+		ep-shell							type string
+	end-record
+
+object mem-ep
+	type is memory
+	record is
+		ep-user							
+		ep-x							
+		ep-uid							
+		ep-groupid						
+		ep-name							
+		ep-home							
+		ep-shell						
+	end-record
+	key is ep-user unique
+
+mode md-lock
+	prompt "Lock"
+
+mode md-unlock
+	prompt "Unlock"
+
+/*  
+Andy,  add the following to sudo (run visudo as root)
+
+<user> ALL = (ALL) NOPASSWD: SETENV: /sbin/usermod -s /sbin/nologin ?*
+<user> ALL = (ALL) NOPASSWD: SETENV: /sbin/usermod -s /bin/bash ?*
+
+*/
+
+procedure main
+local
+	lf-user-id								like user-id
+	lf-lock-mode							type boolean
+	lf-unlock-mode							type boolean
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8secabt-check-abort
+		// Andy, I have left this as the main menu.  You will need to give it
+		// a function and module code and secure it appropriately.
+		parameters are sys-consolidation-division login-id() "ZVG" "M020"
+		returning ws-function-title 
+	do i8proglog-write-log
+	do load-etc-passwd
+	//
+	// The following parameters wil allow you to call from proscreen if you
+	// want to put in on pronto user maintenance
+	//
+	I8GPARAM_ALPHA("-user",spaces,lf-user-id)
+	I8GPARAM_FLAG("-lock",FALSE,lf-lock-mode)
+	I8GPARAM_FLAG("-unlock",FALSE,lf-lock-mode)
+	if lf-user-id != spaces and not lf-lock-mode and not lf-unlock-mode
+		message "A user has been specified but neither -lock nor -unlock has been specified"
+		exit 1
+	else
+		if lf-user-id != spaces
+			if lf-lock-mode
+				do change-lock-status parameters are lf-user-id "lock"
+			else
+				do change-lock-status parameters are lf-user-id "unlock"
+			endif
+		else
+			// nnot caled with parameters so prompt for user
+			do select-user-and-lock
+		endif
+	endif
+end-procedure
+
+screen select-user-and-lock
+	window
+		title ws-function-title
+	datagrid occurs 20
+	select * from system-user-control 
+		inner join mem-ep on user-id = ep-user
+		where ep-user not in RESTRICTED_USER_SET
+	allowed search md-lock md-unlock
+detail
+	if screenmode = md-lock
+		do change-lock-status parameters are user-id "lock"
+		reselect
+		refresh review
+	endif
+	if screenmode = md-unlock
+		do change-lock-status parameters are user-id "unlock"
+		reselect
+		refresh review
+	endif
+	accept user-id @1,1
+		title "User"
+		when screenmode = search
+		show-value
+	display user-employee-name @1,2 pic x(30)
+		title "Name"
+	display if-then-else(ep-shell = "/sbin/nologin", "Locked", "Unlocked") @1,3 pic x(10)
+		title "Status"
+end-screen
+
+procedure change-lock-status
+parameters
+	lp-user-id						like user-id
+	lp-status						pic x(10)
+local
+	lf-cmd							pic x(512) type string
+	//
+	// Verify parameters
+	//
+	get system-user-control
+		on index user-id
+		key is lp-user-id
+		lookup
+	on error ENOREC
+		message "Invalid user " lp-user-id
+		exit 1
+	endon
+	// restricted users
+	if lp-user-id in RESTRICTED_USER_SET
+		message "Cannot change this user - restricted set of users"
+		exit 1
+	endif
+	//
+	if uppercase(lp-status) not in ("LOCK", "UNLOCK")
+		message "Invalid mode " lp-status
+		exit 1
+	endif
+	// Build command
+	set lf-cmd = "sudo -E usermod -s "
+	if uppercase(lp-status) = "LOCK"
+		string lf-cmd appending " /sbin/nologin"
+	else
+		string lf-cmd appending " /bin/bash"
+	endif
+	string lf-cmd appending concat(" " lp-user-id)
+	// Execute
+	command "sh" parameters are "-c" lf-cmd 
+	// Check results
+	on error
+		message "Command Failed"
+		exit 1
+	else
+		if exit-status != 0
+			message "Non Zero Exit Status " exit-status
+			exit 1
+		endif
+	endon
+#ifdef LOG
+	do clibvlog-info parameters are concat("User login changed: " lf-cmd)
+#endif
+	do load-etc-passwd
+end-procedure
+
+
+procedure load-etc-passwd
+	close etcpasswd
+	open etcpasswd read-only
+	on error
+		message "Cant read etc passwd"
+		exit 1
+	endon
+	close mem-ep and remove
+	open mem-ep
+		temporary
+	on error
+		message "Cant read build mem file"
+		exit 1
+	endon
+	select * from etcpasswd
+	detail
+		insert mem-ep
+	endselect
+end-procedure
+
+	
+
+

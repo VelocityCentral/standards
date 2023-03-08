@@ -1,0 +1,74 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : 
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2020
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: std/bmsmenu.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 31Mar20  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+ 
+ 
+procedure main export
+	if batch()
+		exit
+	endif
+	do next main
+endprocedure //main ----------------------------------------------------------
+
+procedure public-determine-if-company-to-be-shown export
+/*
+  This code is needed to use when an RF user is defined for more than one company
+*/
+parameters
+	lp-system-user.*			like system-user.*
+	lp-system-companies.*		like system-companies.*
+returning
+	lr-ok-to-show				type boolean
+local
+	lf-count					type number
+	lf-coy-code					like sys-comp-code
+	//
+	set lr-ok-to-show = TRUE
+	//
+	// does the user have more than one company?  If not then we don't care:
+	select lf-count = count(*)
+		from system-user
+		where user-id = login-id()
+		local-sql
+	end-select
+	if lf-count <= 1
+		exit
+	endif
+	get system-user-control
+		on index user-id
+		key is login-id()
+	on error
+		exit
+	else
+		if user-officer-class[3] != 'T'
+		or user-officer-class[4] != 'R'
+			// then the user is not setup for RF
+			exit
+		endif
+	endon
+	//  If we get to here then the user is setup for RF and is in more than
+	//  one company
+	//  find the company for the current pwd.
+	select lf-coy-code = max(sys-comp-code) 
+		from system-companies
+		where sys-comp-path = dir()
+		local-sql
+	end-select
+	if lf-coy-code != lp-system-companies.sys-comp-code
+		set lr-ok-to-show = FALSE
+	endif
+endprocedure //public-determine-if-company-to-be-shown -----------------------
+

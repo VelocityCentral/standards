@@ -1,0 +1,550 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : Clib to access DI data
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2014
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: c:\usr\pronto\cus\standards\clib\clibdisql.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 29May14	rayb		written
+////////////////////////////////////////////////////////////////////////////////
+//
+
+
+#define SQUIRT(A)   set seq-no = A \
+					set A += .00001 \
+					insert skeleton-work \
+						on error \
+						endon
+#define SQUIRT_NO_INC(A)   set seq-no = A \
+					insert skeleton-work \
+						on error \
+						endon
+#define STRFLD(A)	substring(A,1,str-len(A))
+
+#define TAB ascii-char(9)
+#define MAX_TOT_FLDS 200
+#define MAX_COLS 500
+#define MAX_SECONDARY_FILES 100
+#define SQLQUOTE concat('"',ascii-char(39),'"')
+#define SQLQUOTELEADINGSPACE concat('" ',ascii-char(39),'"')
+
+#include "../include/i8dateval.spl"
+
+
+#define OPERATOR_EQUAL_TO					"A"
+#define OPERATOR_NOT_EQUAL_TO				"B"
+#define OPERATOR_GREATER_THAN				"C"
+#define OPERATOR_GREATER_THAN_OR_EQUAL_TO	"D"
+#define OPERATOR_LESS_THAN					"E"
+#define OPERATOR_LESS_THAN_OR_EQUAL_TO		"F"
+#define OPERATOR_IN							"G"
+#define OPERATOR_NOT_IN						"H"
+#define OPERATOR_BETWEEN						"I"
+#define OPERATOR_NOT_BETWEEN					"J"
+#define OPERATOR_CONTAINS					"K"
+#define OPERATOR_DOES_NOT_CONTAIN			"L"
+
+object skeleton-work
+	type is memory
+	record is
+		seq-no			pic 99999.99999
+		source-line		pic x(1024) type string
+	end-record
+	key is seq-no
+
+object skeleton-source
+	type is text
+	record is
+		source-line
+	end-record
+
+object join-sequence
+	type is memory
+	record is
+		js-recnum		type number
+		js-seq			type number
+		js-table		like ditj-from-table
+	end-record
+	key is js-seq
+	key is js-recnum
+
+
+ 
+procedure library-init
+	get system-control first 
+	on error
+		abort "No Control Record"
+	endon
+end-procedure
+
+procedure build-join-sequence 
+parameters
+	lp-project							like dim-project-id
+local
+	lf-primary-table					like dio-table-name
+	lf-count							type number
+//
+// start with just adding the tables
+//
+	close join-sequence and remove
+	open join-sequence temporary
+	select *
+		from data-intel-objects
+		where dim-project-id = :lp-project
+		and dio-table-type = "A"
+	detail
+		// there can be only one primary table
+		set js-recnum = 1
+		set js-seq = 1
+		set js-table = dio-table-name
+		set lf-primary-table = dio-table-name
+		insert join-sequence
+	end-select
+//
+// Now add all the other tables
+//
+	set js-recnum = 2
+	select * from data-intel-objects
+		where dim-project-id = :lp-project
+		and dio-table-type <> "A"
+	detail
+		set js-table = dio-table-name
+		set js-seq = 0
+		insert join-sequence
+	end-select
+//
+// all tables that are not primary bu have a join directly from the primary
+// are level 2
+//
+	select * from join-sequence
+		where js-seq = 0
+		for update
+	detail
+		select * 
+			from data-intel-table-joins
+			where dim-project-id = :lp-project
+			and ditj-join-selected = YES
+			and ditj-from-table =  :lf-primary-table
+			and ditj-to-table = :js-table
+		detail
+			set js-seq = 2
+			update join-sequence
+			break
+		end-select
+	end-select
+//
+// all tables that are left - if they are not used as the from table in
+// another join then they must be at the end of the chain so make them a big
+// number
+//
+	select * from join-sequence
+		where js-seq = 0
+		for update
+	detail
+		select lf-count = count(*) 
+			from data-intel-table-joins
+			where dim-project-id = :lp-project
+			and ditj-join-selected = YES
+			and ditj-from-table =  :js-table
+		end-select
+		if lf-count = 0 // it is not a table that is a source for anything else - therefore it can be last
+			set js-seq = max-value(js-seq)
+			update join-sequence
+		endif
+	end-select
+// 
+// of the remainder it's just too hard to work out the sequence so let's just
+// use the sequence they are defined in the project.  At this point we have
+// used "1" for the primary, "2" for the secondaries that are based on the
+// primary and a big number for the obvious leaf nodes.  So, let's just add 2
+// to the defined sequence in the joins file
+//
+	select * from join-sequence
+		where js-seq = 0
+		for update
+	detail
+		select *
+			from data-intel-table-joins
+			where dim-project-id = :lp-project
+			and ditj-join-selected = YES
+			and ditj-to-table = :js-table
+		detail
+			// there is one record per join field, we are only interested in
+			// the first one.
+			break
+		end-select
+		set js-seq = ditj-join-sequence + 2
+		update join-sequence
+	end-select
+end-procedure
+
+procedure clibdisql-get-sql export
+parameters
+	lp-project							like dim-project-id
+	lp-include-where					type boolean
+returning
+	lr-xml								type blob
+local
+	lf-doc								type xml-handle
+	lf-root								type xml-handle
+	lf-line								type xml-handle
+	//
+	do clibdisql-build-pronto-sql parameters are lp-project lp-include-where
+	set lf-doc = xml-new-document(spaces,"sql")
+	set lf-root = xml-get-root-node(lf-doc)
+	select * from skeleton-work
+		order by seq-no
+	detail
+		if xml-add-child-node-text(lf-root,"line",spaces,source-line) endif
+	end-select
+	if xml-free-node-handle(lf-root) endif
+	if xml-save-as-text(lf-doc,lr-xml,spaces) endif
+//	if xml-save-as-file(lf-doc,"\tmp\disql.xml",spaces,true) endif
+end-procedure
+
+procedure clibdisql-build-pronto-sql export
+parameters
+	lp-project							like dim-project-id
+	lp-include-where					type boolean
+	// apollow imports the where clause into the conditions so it does not
+	// need them added again
+local
+	lf-seq								like seq-no
+	lf-first-time						type boolean
+	lf-operator							pic x(10)
+	lf-date								type date
+	lf-expression						pic x(1024) type string
+	lf-between1							pic x(1024) type string
+	lf-between2							pic x(1024) type string
+	lf-str-posn							type number
+	set lf-seq = 1
+	open skeleton-work temporary
+	//
+	get data-intel-master
+		on index dim-project-id
+		key is lp-project
+	on error
+		set source-line = concat("ERROR:Cannot get project " lp-project)
+		SQUIRT(lf-seq)
+		exit
+	endon
+	set source-line = str-concat("// SQL Generated from DI Project: " lp-project ":" dim-output-screen-title)
+	SQUIRT(lf-seq)
+	set source-line = "select"
+	SQUIRT(lf-seq)
+	select * from data-intel-fields
+		where dim-project-id = :lp-project
+	detail
+		set source-line = concat(TAB,dif-object-name)
+		string source-line appending "."
+		string source-line appending dif-field-name
+		SQUIRT(lf-seq)
+	end-select
+	// calculated fields
+	// dic-type can have a value of "B".  The notes in datagrid-wiz.spl say
+	// that this should be a separate field - so expect this to change.
+	select *
+		from data-intel-calculations
+		where dim-project-id = :lp-project
+		and dic-type <> 'B'
+	detail
+		repeat
+			set lf-str-posn = pattern(dic-expression ,  "calc.")
+		until lf-str-posn = 0
+			string dic-expression deleting lf-str-posn to lf-str-posn + 4
+			string dic-expression inserting "lf-" at lf-str-posn
+		end-repeat
+		set source-line = concat(TAB,"lf-" rtrim(dic-field-name) " = "
+			dic-expression)
+		SQUIRT(lf-seq)
+	end-select
+	// now the joins
+	do build-join-sequence parameters lp-project
+	select * 
+		from data-intel-objects
+		inner join join-sequence
+			on js-table =  dio-table-name
+		where dim-project-id = :lp-project
+		order by dio-table-type  js-seq // ensures the primary comes first
+	before
+		set source-line = "from"
+		SQUIRT(lf-seq)
+	detail
+		if dio-table-type <> "A"
+			switch on dio-table-join-type
+			case "I"
+				set source-line = concat(TAB,"INNER JOIN ",dio-table-name)
+			case "O"
+				set source-line = concat(TAB,"OUTER JOIN ",dio-table-name)
+			case "L"
+				set source-line = concat(TAB,"LEFT OUTER JOIN ",dio-table-name)
+			case "R"
+				set source-line = concat(TAB,"RIGHT OUTER JOIN ",dio-table-name)
+			case "U"
+				set source-line = concat(TAB,"UNION ",dio-table-name)
+			endswitch
+		else
+			set source-line = concat(TAB,dio-table-name)
+		endif
+		SQUIRT(lf-seq)
+		if dio-table-type <> "A" // there are joins
+			// Now work out the join
+			set lf-first-time = TRUE
+			select * from data-intel-table-joins
+				where dim-project-id = :lp-project
+				and ditj-to-table = :dio-table-name
+				and ditj-join-selected = YES
+			before
+//				set source-line = concat("// " str(js-seq))
+//				SQUIRT(lf-seq)
+				set source-line = concat(TAB,TAB,"ON")
+				SQUIRT(lf-seq)
+			detail
+				set source-line = concat(TAB,TAB,TAB, 
+					str-concat(ditj-to-table,".",ditj-to-field)
+					" = "
+					str-concat(ditj-from-table,".",ditj-from-field)
+					)
+				if lf-first-time
+					set lf-first-time = FALSE
+				else
+					string source-line inserting "AND " at 4
+				endif
+				SQUIRT(lf-seq)
+			end-select
+		endif
+	end-select
+	//
+	// Where clauses
+	//
+	if lp-include-where
+		set lf-first-time = TRUE
+		select *
+			from data-intel-project-filters
+			where dim-project-id = :lp-project
+			order by dipf-filter-id
+		before
+			set source-line = "WHERE"
+			SQUIRT(lf-seq)
+		detail
+			set source-line = str-concat(TAB,dipf-object-name,".",dipf-field-name)
+			do get-operator parameters are dipf-comparison-type returning lf-operator
+			string source-line appending concat(" " lf-operator )
+			if dipf-date-macro-used
+				do get-date-to-use parameters are dipf-expression
+					returning lf-date
+				string source-line appending concat(" ",format-picture(lf-date,'dd/mm/yyyy'))
+			elseif pattern(dipf-expression,"<<")
+				do get-runtime-parameters parameters are dipf-expression
+					dipf-field-name dipf-comparison-type dipf-filter-id
+					returning lf-expression
+				string source-line appending concat(" ",lf-expression)
+			elseif dipf-comparison-type in (OPERATOR_IN,OPERATOR_NOT_IN)
+				string source-line appending  concat("  ",'(',rtrim(dipf-expression),')')
+			elseif dipf-comparison-type in (OPERATOR_BETWEEN,OPERATOR_NOT_BETWEEN)
+				do split-expression-for-between
+					parameters are dipf-expression, ","
+					returning lf-between1 lf-between2
+				string source-line appending  concat(" ",rtrim(lf-between1)," and ", rtrim(lf-between2))
+			elseif dipf-comparison-type in (OPERATOR_CONTAINS, OPERATOR_DOES_NOT_CONTAIN)
+				string source-line appending  str-concat(" str-concat('%',",dipf-expression,",'%')")
+			else
+				string source-line appending concat(" ",dipf-expression)
+			endif
+			//
+			if lf-first-time
+				set lf-first-time = FALSE
+			else
+				string source-line inserting "AND " at 1
+			endif
+			//
+			SQUIRT(lf-seq)
+		end-select
+	endif
+	// Order by
+	select *
+		from data-intel-order-by
+		where dim-project-id = :lp-project
+		order by dim-project-id diob-sequence
+	before
+		set source-line = "ORDER BY"
+		SQUIRT(lf-seq)
+		set lf-first-time = true
+	detail
+		if not lf-first-time
+			string source-line appending ","
+			SQUIRT(lf-seq)
+		endif
+		select *
+			from data-intel-fields
+			where dim-project-id = :lp-project
+			and dif-field-name = diob-field-name
+		detail
+			set source-line = str-concat(TAB,dif-object-name,".",diob-field-name)
+			break
+		end-select
+		set lf-first-time = FALSE
+	after
+		SQUIRT(lf-seq)
+	end-select
+end-procedure
+
+procedure get-date-to-use
+parameters
+	lp-macro-string							like dipf-expression
+returning
+	lr-date									type date
+local
+	lf-ledger								pic x
+	lf-start-end							pic x
+	lf-period								pic x(10)
+	lf-per									like sys-gl-per
+	lf-yr									like sys-gl-yr
+	lf-error-mess							pic x(1024) type string
+	lf-fixed-start-date						type date
+	i										type number
+	//
+	set	i = pattern(lp-macro-string,"(")  // )  this comment just keeps the source in gvim looking right
+	set i += 1
+	set lf-ledger = substring(lp-macro-string,i,i)
+	set i += 2
+	set lf-start-end = substring(lp-macro-string,i,i)
+	set i += 2
+	set lf-period = substring(lp-macro-string,i,pattern(lp-macro-string,")") - 1)
+	// 
+	if lf-ledger = '1'
+		set lf-per = sys-stk-per
+		set lf-yr = sys-stk-yr
+	elseif lf-ledger = '2'
+		set lf-per = sys-dl-per
+		set lf-yr = sys-dl-yr
+	elseif lf-ledger = '3'
+		set lf-per = sys-cl-per
+		set lf-yr = sys-cl-yr
+	elseif lf-ledger = '4'
+		set lf-per = sys-gl-per
+		set lf-yr = sys-gl-yr
+	endif
+	I8DATEVAL_VALIDATE_DATE_STR(lf-start-end,lf-per,lf-yr,
+		lf-period,lr-date,
+		lf-error-mess,lf-fixed-start-date)
+end-procedure
+
+procedure get-runtime-parameters
+parameters
+	lp-expression							like dipf-expression
+	lp-field-name							like dipf-field-name
+	lp-operator								like dipf-comparison-type
+	lp-id									like dipf-filter-id
+returning
+	lr-variables							pic x(1024) type string
+	/*
+	a single field could be in many variables
+	*/
+	if lp-operator in ( OPERATOR_BETWEEN, OPERATOR_NOT_BETWEEN)
+		set lr-variables = str-concat("ws-start-" lp-field-name, "-" str(lp-id)
+							" and ws-end-" lp-field-name "-" str(lp-id))
+	elseif lp-operator in (OPERATOR_IN , OPERATOR_IN)
+		// need to count the number of parameters and create work fields for
+		// each one
+		set lr-variables = "holy shit batman, I haven't written this bit yet"
+	elseif lp-operator in (OPERATOR_CONTAINS, OPERATOR_DOES_NOT_CONTAIN)
+		set lr-variables = str-concat("str-concat('%',ws-" lp-field-name "-" str(lp-id),",'%')")
+	else
+		set lr-variables = str-concat("ws-" lp-field-name "-" str(lp-id))
+	endif
+end-procedure
+
+screen clibdisql-view export
+	window @1,1 to @14,70
+		relative to @10,10
+	select * from skeleton-work
+	datagrid occurs 12
+	allowed search
+detail
+	accept seq-no @1,1 
+		title "seq"
+		when screenmode = search
+		show-value
+	display source-line @1,2
+		title "text"
+end-screen
+
+procedure clibdisql-wp export
+// this procedure is intended for view only so you can cut and paste
+	open skeleton-source temporary local
+	select * from skeleton-work 
+	detail
+		insert skeleton-source
+	endselect
+	command "prowp" parameters are 
+		"-h" "SQL Source"
+		"-b" "20" "90" "10" "10"
+		"-t" "4"
+		file-name(skeleton-source)
+endprocedure //
+
+procedure get-operator
+parameter	
+	lp-code						pic x
+returning	
+	lr-operator						type string
+	//
+	switch on lp-code
+	case OPERATOR_EQUAL_TO
+		set lr-operator = "="
+	case OPERATOR_NOT_EQUAL_TO
+		set lr-operator = "!="
+	case OPERATOR_GREATER_THAN
+		set lr-operator = ">"
+	case OPERATOR_GREATER_THAN_OR_EQUAL_TO
+		set lr-operator = ">="
+	case OPERATOR_LESS_THAN
+		set lr-operator = "<"
+	case OPERATOR_LESS_THAN_OR_EQUAL_TO
+		set lr-operator = "<="
+	case OPERATOR_IN
+		set lr-operator = "IN"
+	case OPERATOR_NOT_IN
+		set lr-operator = "NOT IN"
+	case OPERATOR_BETWEEN
+		set lr-operator = "BETWEEN"
+	case OPERATOR_NOT_BETWEEN
+		set lr-operator = "NOT BETWEEN"
+	case OPERATOR_CONTAINS
+		set lr-operator = "LIKE"
+	case OPERATOR_DOES_NOT_CONTAIN
+		set lr-operator = "NOT LIKE"
+	endswitch
+endprocedure 
+
+procedure split-expression-for-between
+parameters are 
+	lp-expression					pic x(1000) type string
+	lp-separator					pic x
+returning
+	lf-field1						pic x(1000) type string
+	lf-field2						pic x(1000) type string
+local 
+	i								type number
+	lf-in-constant					type boolean
+//
+	set lf-in-constant = false
+	for i = 1 to str-len(lp-expression)
+		if substring(lp-expression,i,i) = lp-separator 
+		and not lf-in-constant
+			set  lf-field1 = substring(lp-expression,1,i - 1)
+			set lf-field2 = substring(lp-expression,(i + 1),str-len(lp-expression))
+			exit
+		elseif substring(lp-expression,i,i)  in ( "'", '"')
+			set lf-in-constant = not lf-in-constant
+		endif
+	end-for
+end-procedure

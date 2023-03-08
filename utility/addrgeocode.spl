@@ -1,0 +1,751 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : Maintain Addresses Via Google Lookup
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2014
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: utility/addrgeocode.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 28Jun14  rjb         written 
+//
+// add the following to m10mast.pcs
+/*
+screen multi-del-address
+	{
+	mode
+		{
+		name = "Google"
+		add = true
+		}
+	trigger
+		{
+		trigger_point = confirmed
+		name = "Google"
+		run = "utility/addrgeocode" "-customer" accountcode
+		type = pronto
+		}
+	}
+*/
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/bmsdef.spl"
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+#include "../include/i8gparam.spl"
+
+#define ADDRLINES 7
+
+link "clib/clibvgeocode"
+
+mode md-select
+	prompt "Select"
+	help "Select this address"
+mode md-order-only
+	prompt "Order Only"
+	help "Use this option to select a one time address for the order that is not stored"
+mode md-map
+	prompt "Map"
+	help "display Map"
+
+field
+	ws-function-title					type string
+	ws-accountcode						like accountcode
+	ws-type								like na-type
+	ws-verify-customer					type boolean
+	ws-verify-whse						type boolean
+	ws-verify-order						type boolean
+	ws-use-all-address					type boolean
+	ws-suppress-vague-warning			type boolean
+	ws-order-no							like so-order-no
+	ws-bo-suffix						like so-bo-suffix
+
+procedure main
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+//	do i8secabt-check-abort
+//		parameters are sys-consolidation-division login-id() "ZVG" "M006"
+//		returning ws-function-title 
+	do i8proglog-write-log
+	I8GPARAM_ALPHA("-customer",spaces,ws-accountcode)
+	I8GPARAM_NUM_ALPHA("-order",0,ws-order-no,ws-bo-suffix)
+	I8GPARAM_ALPHA("-type",spaces,ws-type)
+	I8GPARAM_FLAG("-customer",false,ws-verify-customer)  // default is customer
+	I8GPARAM_FLAG("-order",false,ws-verify-order)  // default is customer
+	I8GPARAM_FLAG("-warehouse",false,ws-verify-whse)
+	I8GPARAM_FLAG("-use-all-address",FALSE,ws-use-all-address) // default is to reserve the name
+	I8GPARAM_FLAG("-nowarn-vague",false,ws-suppress-vague-warning) // default is to reserve the name
+	if not ws-verify-customer
+	and not ws-verify-whse
+	and not ws-verify-order
+		set ws-verify-customer = true
+	endif
+	if ws-accountcode = spaces and ws-verify-customer
+		do get-accountcode entry once
+		if ws-accountcode = spaces
+			exit
+		endif
+	endif
+	if ws-order-no = 0 and ws-verify-order
+		do get-order entry once
+		if ws-order-no = 0
+			exit
+		endif
+	endif
+	if ws-verify-order
+		get sales-order
+			on index so-order-no so-bo-suffix
+			key is ws-order-no ws-bo-suffix
+		on error
+		else
+			do sales-order-address
+				parameters are so-cust-code
+		endon
+	else
+		do address-review 
+	endif
+end-procedure
+
+screen get-order
+	window @1,1 to @3,20
+	title "Order"
+detail
+	accept ws-order-no @2,8
+		title "Order:"
+	accept ws-bo-suffix @2,17
+		uppercase
+		optional
+	validations
+		get sales-order
+			on index so-order-no so-bo-suffix
+			key is ws-order-no ws-bo-suffix
+		on error
+			message "Invalid order" 
+			reenter
+		endon
+	end-validations
+end-screen
+
+screen get-accountcode
+	window @1,1 to @3,20
+	title "Accountcode"
+detail
+	accept ws-accountcode @2,5
+		title "Key:"
+		uppercase
+	validations
+		if ws-verify-customer
+			get deb-master
+				on index accountcode key is ws-accountcode
+			on error
+				message "Invalid Customer"
+				re-enter
+			endon
+		endif
+		if ws-verify-whse
+			get system-table 
+				on index sys-tbl-type sys-tbl-code
+				key is "WH" accountcode
+			on error
+				message "Invalid Warehouse"
+				re-enter
+			endon
+		endif
+	end-validations
+end-screen
+
+screen address-review
+local
+	lf-address-text						pic x(1024) type string
+	lf-address-array						pic x(100) type string occurs ADDRLINES
+	lf-lat									pic -999.9999999
+	lf-long									pic -999.9999999
+	lf-geotype								type string
+	lf-postal-code							type string
+	lf-formatted-address					type string pic x(1024)
+	lf-address-type							type string
+	lf-ok									type boolean
+	lf-message								type string pic x(1024)
+	lf-c-count								type number
+	lf-da-count								type number
+	lf-max-numeric							type string
+	lf-wh-count								type number
+	window @1,1 to @10,70
+	datagrid occurs 8
+	title ws-function-title
+	select *
+		from name-and-address-master
+		where accountcode = :ws-accountcode
+		and (ws-verify-customer
+			and (na-type in ("C" "DA")
+				or num(na-type) between 1 and 99)
+			OR ws-verify-whse
+			and na-type in ("C" "WH")
+			)
+	form-entry
+	allow entry correct remove search md-map
+before
+	select lf-c-count = count(*)
+		from name-and-address-master
+		where accountcode = :ws-accountcode
+		and na-type = "C"
+	end-select
+	select lf-da-count = count(*)
+		from name-and-address-master
+		where accountcode = :ws-accountcode
+		and na-type = "DA"
+	end-select
+	select lf-max-numeric = max(na-type)
+		from name-and-address-master
+		where accountcode = :ws-accountcode
+		and na-type between "00" and "99"
+	end-select
+	select lf-wh-count = count(*)
+		from name-and-address-master
+		where accountcode = :ws-accountcode
+		and na-type = "WH"
+	end-select
+detail
+	if screenmode = md-map
+		set lf-address-array[1] = na-company
+		set lf-address-array[2] = na-street
+		set lf-address-array[3] = na-suburb
+		set lf-address-array[4] = na-country
+		set lf-address-array[5] = na-address-6
+		set lf-address-array[6] = na-address-7
+		do clibvgeocode-display-map
+			parameters are  lf-address-array
+	endif
+	accept na-type @1,1
+		title "Type"
+		uppercase
+		when screenmode in ( entry search )
+		show-value
+	before-accept
+		if screenmode = entry
+			if ws-verify-whse
+				if lf-c-count = 0
+					set na-type = "C"
+				else
+					set na-type = "WH"
+				endif
+			elseif ws-verify-customer
+				if lf-c-count = 0
+					set na-type = "C"
+				elseif lf-max-numeric >= "01"
+					set na-type = format-picture(num(lf-max-numeric) + 1, "99")
+				elseif lf-da-count = 0
+					set na-type = "DA"
+				else
+					set na-type = "01"
+				endif
+			endif
+		endif
+	end-before-accept
+	validations
+		if ws-verify-customer
+			if na-type <> "C"
+			and na-type <> "DA"
+			and num(na-type) not between 1 and 99
+				message "Invalid Type"
+			endif
+		endif
+		if ws-verify-whse
+			if na-type <> "C"
+				message "Invalid Type"
+			endif
+		endif
+		if screenmode = entry
+			get name-and-address-master lookup
+				on index accountcode na-type
+				key is ws-accountcode na-type
+			on error ENOREC
+			else
+				message "This type already exists - enter another"
+				re-enter
+			endon
+		endif
+	end-validations
+	display na-name @1,2
+		title "Addr1"
+	display na-company @1,3
+		title "Addr2"
+	display na-street @1,4
+		title "Addr3"
+	display postcode @1,5
+		title "Post Code"
+#if BMS_DICT_VER > 7200
+	display str-concat(substring(na-map-id,1,10),"/",substring(na-map-id,11,str-len(na-map-id)))  @1,6 pic x(20)
+		title "Lat/Long"
+#else
+	display na-user-only-alpha30-1 @1,6
+		title "Lat/Long"
+#endif
+	display na-user-only-alpha30-2 @1,7
+		title "Accuracy"
+	confirm auto
+	before
+		if screenmode = entry
+			do enter-address entry once
+				parameters are spaces
+				returning lf-address-text
+			if lf-address-text <> spaces
+				do clibvgeocode-select-address
+					parameters are lf-address-text
+					returning 
+						lf-address-array
+						lf-lat
+						lf-long
+						lf-geotype
+						lf-postal-code
+						lf-formatted-address
+						lf-address-type
+				if exit-status != 0
+					do clibvgeocode-get-last-error returning
+						lf-message
+					message lf-message
+				endif
+			endif
+		endif
+		if screenmode = correct
+			do nad-to-array returning lf-address-text
+			do enter-address entry once
+				parameters are lf-address-text
+				returning lf-address-text
+			if lf-address-text <> spaces
+				do clibvgeocode-select-address
+					parameters are lf-address-text
+					returning 
+						lf-address-array
+						lf-lat
+						lf-long
+						lf-geotype
+						lf-postal-code
+						lf-formatted-address
+						lf-address-type
+				if exit-status != 0
+					do clibvgeocode-get-last-error returning lf-message
+					message lf-message
+				endif
+			endif
+		endif
+		if lf-formatted-address <> spaces
+			if ws-use-all-address
+				set na-name = lf-address-array[1]
+				set na-company = lf-address-array[2]
+				set na-street = lf-address-array[3]
+				set na-suburb = lf-address-array[4]
+				set na-country = lf-address-array[5]
+				set na-address-6 = lf-address-array[6]
+				set na-address-7 = lf-address-array[7]
+			else
+				if ws-verify-customer
+					get deb-master
+						on index accountcode 
+						key is ws-accountcode
+					on error
+					endon
+				endif
+				set na-name = shortname
+				set na-company = lf-address-array[1]
+				set na-street = lf-address-array[2]
+				set na-suburb = lf-address-array[3]
+				set na-country = lf-address-array[4]
+				set na-address-6 = lf-address-array[5]
+				set na-address-7 = lf-address-array[6]
+			endif
+#if BMS_DICT_VER > 7200
+			set na-map-id = str(lf-lat) 
+			string na-map-id inserting str(lf-long) at 11
+#else
+			set na-user-only-alpha30-1 = str-concat(str(lf-lat) "/" str(lf-long))
+#endif
+			set na-user-only-alpha30-2 = str-concat(lf-geotype "/" lf-address-type)
+			set na-user-only-alpha4-1 = lf-postal-code
+			set postcode = lf-postal-code
+		endif
+		if not ws-suppress-vague-warning
+		and screenmode in (entry correct)
+			if lf-geotype = "APPROXIMATE"
+			or lf-address-type not in ( "street_address", "route", "intersection")
+				message-box param-text("<<P1>><<BR>><<p2>>"
+					,"This address is a bit vague."
+					,"Select OK to use it or Cancel to re-enter")
+					title is ws-function-title
+					message-buttons MSG_BOX_OK_CANCEL
+					icon MSG_BOX_WARNING
+					optional
+				if message-status = MSG_BOX_CANCEL
+					re-enter na-type
+				endif
+			endif
+		endif
+	confirmed
+		refresh prompts
+		refresh data
+	end-confirm
+end-screen
+
+screen enter-address
+parameters
+	lp-address-text						pic x(1024) type string
+returning
+	lr-address-text						pic x(1024) type string
+	window @1,1 to @3,70
+	title "Enter Address"
+before
+	set lr-address-text = lp-address-text
+detail
+	accept lr-address-text @2,2 pic x(66)
+		default lr-address-text
+end-screen
+
+procedure nad-to-array
+returning 
+	lr-address-string					pic x(1024) type string
+	lr-a-address						pic x(256) type string occurs ADDRLINES
+local
+	i									type number
+	// assume currency on nad
+	set lr-a-address[1] = na-name
+	set lr-a-address[2] = na-company
+	set lr-a-address[3] = na-street
+	set lr-a-address[4] = na-suburb
+	set lr-a-address[5] = na-country
+	set lr-a-address[6] = na-address-6
+	set lr-a-address[7] = na-address-7
+	if not ws-use-all-address
+		for i = 1 to 6
+			set lr-a-address[i] = lr-a-address[i + 1]
+		endfor
+	endif
+	set lr-address-string = lr-a-address[1]
+	for i = 2 to ADDRLINES
+		if lr-a-address[i] <> spaces
+			string lr-address-string appending ","
+			string lr-address-string appending lr-a-address[i]
+		endif
+	endfor
+end-procedure
+
+screen sales-order-address
+parameters
+	lp-accountcode						like accountcode
+local
+	lf-address-text						pic x(1024) type string
+	lf-address-array					pic x(100) type string occurs ADDRLINES
+	lf-lat								pic -999.9999999
+	lf-long								pic -999.9999999
+	lf-geotype							type string
+	lf-postal-code						type string
+	lf-formatted-address				type string pic x(1024)
+	lf-address-type						type string
+	lf-ok								type boolean
+	lf-message							type string pic x(1024)
+	lf-da-count							type number
+	lf-max-numeric						type string
+	lf-select-occurred					type boolean
+	i									type number
+	window @1,1 to @12,70
+	datagrid occurs 8
+	title concat("Select Address for " str(ws-order-no) ws-bo-suffix)
+	select *
+		from name-and-address-master
+		where accountcode = :lp-accountcode
+		and ( na-type = "DA"
+			or num(na-type) between 1 and 99)
+	form-entry
+	allow md-select search entry correct remove search md-order-only md-map
+before
+	select lf-da-count = count(*)
+		from name-and-address-master
+		where accountcode = :lp-accountcode
+		and na-type = "DA"
+	end-select
+	select lf-max-numeric = max(na-type)
+		from name-and-address-master
+		where accountcode = :lp-accountcode
+		and na-type between "00" and "99"
+	end-select
+	set lf-select-occurred = FALSE
+	display  "Either select an address, or press 'Enter' to create a new address on file" @1,1
+		italic
+	display "Or select 'Order Only' to update this order with an address that will not be stored for future use" @2,1
+		italic
+detail
+	if screenmode = remove
+		and num(na-type) not between 1 and 99
+		message "You may only remove 01-99 addresses"
+		continue
+	endif
+	accept na-type @3,1
+		title "Type"
+		uppercase
+		when screenmode in ( entry search )
+		show-value
+	before-accept
+		if screenmode = entry
+			if lf-max-numeric >= "01"
+				set na-type = format-picture(num(lf-max-numeric) + 1, "99")
+			elseif lf-da-count = 0
+				set na-type = "DA"
+			else
+				set na-type = "01"
+			endif
+		endif
+	end-before-accept
+	validations
+		if na-type <> "DA"
+		and num(na-type) not between 1 and 99
+			message "Invalid Type"
+		endif
+		if screenmode = entry
+			get name-and-address-master lookup
+				on index accountcode na-type
+				key is lp-accountcode na-type
+			on error ENOREC
+			else
+				message "This type already exists - enter another"
+				re-enter
+			endon
+		endif
+	end-validations
+	display na-name @3,2
+		title "Addr1"
+	display na-company @3,3
+		title "Addr2"
+	display na-street @3,4
+		title "Addr3"
+	confirm auto
+	before
+		if screenmode in ( entry md-order-only)
+			do enter-address entry once
+				parameters are spaces
+				returning lf-address-text
+			if lf-address-text <> spaces
+				do clibvgeocode-select-address
+					parameters are lf-address-text
+					returning 
+						lf-address-array
+						lf-lat
+						lf-long
+						lf-geotype
+						lf-postal-code
+						lf-formatted-address
+						lf-address-type
+			endif
+		endif
+		if screenmode = correct
+			do nad-to-array returning lf-address-text
+			do enter-address entry once
+				parameters are lf-address-text
+				returning lf-address-text
+			if lf-address-text <> spaces
+				do clibvgeocode-select-address
+					parameters are lf-address-text
+					returning 
+						lf-address-array
+						lf-lat
+						lf-long
+						lf-geotype
+						lf-postal-code
+						lf-formatted-address
+						lf-address-type
+			endif
+		endif
+		if screenmode in ( correct entry )
+			if lf-formatted-address <> spaces
+				if ws-use-all-address
+					set na-name = lf-address-array[1]
+					set na-company = lf-address-array[2]
+					set na-street = lf-address-array[3]
+					set na-suburb = lf-address-array[4]
+					set na-country = lf-address-array[5]
+					set na-address-6 = lf-address-array[6]
+					set na-address-7 = lf-address-array[7]
+				else
+					get deb-master
+						on index accountcode 
+						key is lp-accountcode
+					on error
+					endon
+					set na-name = shortname
+					set na-company = lf-address-array[1]
+					set na-street = lf-address-array[2]
+					set na-suburb = lf-address-array[3]
+					set na-country = lf-address-array[4]
+					set na-address-6 = lf-address-array[5]
+					set na-address-7 = lf-address-array[6]
+				endif
+#if BMS_DICT_VER > 7200
+				set na-map-id = str(lf-lat) 
+				string na-map-id inserting str(lf-long) at 11
+#else
+				set na-user-only-alpha30-1 = str-concat(str(lf-lat) "/" str(lf-long))
+#endif
+				set na-user-only-alpha30-2 = str-concat(lf-geotype "/" lf-address-type)
+				set na-user-only-alpha4-1 = lf-postal-code
+				set postcode = lf-postal-code
+			endif
+			if not ws-suppress-vague-warning
+				if lf-geotype = "APPROXIMATE"
+				or lf-address-type not in ( "street_address", "route", "intersection")
+					message-box param-text("<<P1>><<BR>><<p2>>"
+						,"This address is a bit vague."
+						,"Select OK to use it or Cancel to re-enter")
+						title is ws-function-title
+						message-buttons MSG_BOX_OK_CANCEL
+						icon MSG_BOX_WARNING
+						optional
+					if message-status = MSG_BOX_CANCEL
+						re-enter na-type
+					endif
+				endif
+			endif
+		endif
+	confirmed
+		if screenmode = md-order-only
+			set lf-select-occurred = TRUE
+			get sales-order-delivery
+				on index so-order-no so-bo-suffix so-text-type
+				key is ws-order-no ws-bo-suffix "DA"
+				lock
+			on error ENOREC
+				initialise sales-order-delivery
+					leaving so-order-no so-bo-suffix so-text-type
+				get deb-master
+					on index accountcode
+					key is lp-accountcode
+				on error
+				else
+					for i = 6 down to 1
+						set lf-address-array[i + 1] = lf-address-array[i]
+					end-for
+					set lf-address-array[1] = shortname
+				endon
+				for i = 1 to 7
+					set so-dl-text[i] = lf-address-array[i]
+				end-for
+				set so-dl-user-only-alpha30-1 = str-concat(str(lf-lat) "/" str(lf-long))
+				set so-dl-user-only-alpha30-2 = str-concat(lf-geotype "/" lf-address-type)
+				set so-dl-postcode = lf-postal-code
+				insert sales-order-delivery
+				on error
+				endon
+			else
+				get deb-master
+					on index accountcode
+					key is lp-accountcode
+				on error
+				else
+					for i = 6 down to 1
+						set lf-address-array[i + 1] = lf-address-array[i]
+					end-for
+					set lf-address-array[1] = shortname
+				endon
+				for i = 1 to 7
+					set so-dl-text[i] = lf-address-array[i]
+				end-for
+				set so-dl-user-only-alpha30-1 = str-concat(str(lf-lat) "/" str(lf-long))
+				set so-dl-user-only-alpha30-2 = str-concat(lf-geotype "/" lf-address-type)
+				set so-dl-postcode = lf-postal-code
+				update sales-order-delivery
+				on error
+				endon
+			endon
+			exit
+		elseif screenmode = md-select
+			set lf-select-occurred = TRUE
+			do nad-to-array returning lf-address-text lf-address-array
+			get sales-order-delivery
+				on index so-order-no so-bo-suffix so-text-type
+				key is ws-order-no ws-bo-suffix "DA"
+				lock
+			on error
+				initialise sales-order-delivery
+					leaving so-order-no so-bo-suffix
+				set so-text-type = "DA"
+				if not ws-use-all-address
+					for i = 6 down to 1
+						set lf-address-array[i + 1] = lf-address-array[i]
+					end-for
+					get deb-master
+						on index accountcode
+						key is lp-accountcode
+					on error
+					else
+						set lf-address-array[1] = shortname
+					endon
+				endif
+				for i = 1 to 7
+					set so-dl-text[i] = lf-address-array[i]
+				end-for
+#if BMS_DICT_VER > 7200
+				set so-dl-user-only-alpha30-1 = na-map-id
+#else
+				set so-dl-user-only-alpha30-1 = na-user-only-alpha30-1
+#endif
+				set so-dl-user-only-alpha30-2 = na-user-only-alpha30-2
+				set so-dl-postcode = lf-postal-code
+				insert sales-order-delivery
+				on error
+				endon
+			else
+				if not ws-use-all-address
+					for i = 6 down to 1
+						set lf-address-array[i + 1] = lf-address-array[i]
+					end-for
+					get deb-master
+						on index accountcode
+						key is lp-accountcode
+					on error
+					else
+						set lf-address-array[1] = shortname
+					endon
+				endif
+				for i = 1 to 7
+					set so-dl-text[i] = lf-address-array[i]
+				end-for
+#if BMS_DICT_VER > 7200
+				set so-dl-user-only-alpha30-1 = na-map-id
+#else
+				set so-dl-user-only-alpha30-1 = na-user-only-alpha30-1
+#endif
+				set so-dl-user-only-alpha30-2 = na-user-only-alpha30-2
+				set so-dl-postcode = lf-postal-code
+				update sales-order-delivery
+				on error
+				endon
+			endon
+			exit
+		else // not select
+			refresh prompts
+			refresh data
+		endif
+	end-confirm
+after
+	if not lf-select-occurred
+		message-box param-text("<<P1>><<BR>><<p2>>"
+			,"You have not selected an address"
+			,"Press OK to Select an address or Cancel to exit with no address")
+			title is ws-function-title
+			message-buttons MSG_BOX_OK_CANCEL
+			icon MSG_BOX_STOP
+			optional
+		if message-status = MSG_BOX_OK
+			back-to-detail
+		endif
+	endif
+end-screen
+
+
+
+
+

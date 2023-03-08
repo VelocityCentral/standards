@@ -1,0 +1,176 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : This clib is desgned to return values from os commands
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2014
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: clib/clibvostools.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 25Jun14  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+/*
+
+	This documentation is in RST format.  To view this as a nice pdf goto
+	https://overbits.herokuapp.com/rsteditor/ or rst.ninjs.org and paste this content.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|           |           |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+
+	Alternatively
+
+	 =========== =========== ======================================================== 
+	  Direction   Data Type   Description                                             
+	 =========== =========== ======================================================== 
+	 =========== =========== ======================================================== 
+
+===========
+clibvostool
+===========
+
+A collection of tools for interacting with OS information
+
+clibvostool-ip-address 
+~~~~~~~~~~~~~~~~~~~~~~
+
+Return the Server IP Address
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   Out     |String 40  |Server IP Address                                       |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvostool-hostname 
+~~~~~~~~~~~~~~~~~~~~
+
+Return the Server hostname without the domain name.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   Out     |String 40  |Server Short hostname                                   |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvostool-check-for-parent-process 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Return the Parent Process ID
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   Out     |String 40  |Parent Process Id                                       |
+	+-----------+-----------+--------------------------------------------------------+
+
+*/
+
+ 
+#include "../include/i8proglog.spl"
+#include "../include/i8proglogparam.spl"
+#define RTN_MSG_PIC pic x(100) type string
+ 
+object textfile
+	type is external
+	record is
+		lf-text								type string
+	end-record
+
+procedure library-init
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8proglogparam-write-log parameters are "clibvostool"
+end-procedure
+
+procedure run-cmd
+parameters are
+	lp-cmd									type varchar
+returning
+	lr-status								type number
+	lr-message								RTN_MSG_PIC
+local
+	lf-filename								pic x(256) type string
+	//
+	close textfile and remove
+	on error
+	endon
+	set lf-filename = str-concat('/tmp/cmdout',str(pid()))
+	string lp-cmd appending concat(" > ",lf-filename)
+	command "sh" parameters are '-c' lp-cmd
+	set lr-status = exit-status
+	if exit-status()
+		string lp-cmd inserting "sudo -E " at 1
+		command "sh" parameters are '-c' lp-cmd
+		set lr-status = exit-status
+		if exit-status
+			exit
+		endif
+	endif
+	open textfile
+		file is lf-filename
+end-procedure
+
+procedure get-next-line
+returning
+	lr-text									like lf-text
+	lr-last									type boolean
+	set lr-last = false
+	get textfile next
+	on error
+		set lr-last = true
+	endon
+	set lr-text = lf-text
+end-procedure
+
+procedure clibvostool-ip-address export
+returning
+	lr-ip-address							like lf-text
+	do run-cmd parameters are "hostname -i"
+	do get-next-line returning lr-ip-address
+	close textfile and remove
+end-procedure
+
+procedure clibvostool-hostname export
+returning
+	lr-hostname							like lf-text
+	open textfile
+		file is "/proc/sys/kernel/hosname"
+	on error
+		do run-cmd parameters are "hostname -s"
+	endon
+	do get-next-line returning lr-hostname
+	close textfile and remove
+end-procedure
+
+procedure clibvostool-check-for-parent-process export
+parameters
+	lp-parent-string						type string
+returning
+	lr-found								type boolean
+local
+	lf-last									type boolean
+	lf-text									type string
+	do run-cmd parameters are "ps --no-headers -o ppid,pid,cmd"
+	set lf-last = false
+	while not lf-last
+		do get-next-line returning
+			lf-text lf-last
+		if not lf-last
+			if pattern(lf-text,lp-parent-string) > 0
+				set lr-found = true
+				exit
+			endif
+		endif
+	endwhile
+end-procedure
+

@@ -1,0 +1,77 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : Select Quotes for Printing
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2020
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: so/quoteselect.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 24Jun20  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+ 
+field
+	ws-function-title						type string
+
+mode md-print
+	prompt "Print"
+	help "Print Quote in M/S Word"
+
+procedure main
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8secabt-check-abort
+		parameters are sys-consolidation-division login-id() "ZUSR" "R025"
+		returning ws-function-title 
+	do i8proglog-write-log
+	do quote-select 
+end-procedure
+
+screen quote-select
+	window  @1,1 to @24,80
+	title "Select Quote to Print"
+	select *
+		from sales-order
+		inner join deb-master on so-cust-code = accountcode
+		inner join rep-master on so-rep-code = rep-code
+		where so-order-type-code = "Q"	
+		order by so-order-no so-bo-suffix
+	allowed search md-print
+	datagrid occurs 10
+detail
+	if screenmode = md-print
+		spl "so/quoteprint" parameters are so-order-no so-bo-suffix
+	endif
+	accept so-order-no @1,1
+		title "Order No"
+		when screenmode = search
+		show-value
+	accept so-bo-suffix @1,2
+		title "Suffix"
+		when screenmode = search
+		show-value
+	display so-cust-code @1,3
+		title "Customer"
+	display shortname @1,4
+		title "Name"
+	display so-order-date @1,5
+		title "Quote Date"
+	display so-delivery-date @1,6
+		title "Expiry Date"
+	display so-rep-code @1,7
+		title "Rep"
+	display rep-description @1,8
+		title "Rep Name"
+	display so-order-total-amount @1,9
+		title "Amount"
+end-screen

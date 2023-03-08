@@ -1,0 +1,3999 @@
+<?xml version="1.0"?>
+<kpivalues>
+  <kpi>
+    <kp-id>40</kp-id>
+    <kp-desc>Inventory - Turnover</kp-desc>
+    <values>
+      <arrayitem Desc="Inv. Turnover">
+        <arrayindex>1</arrayindex>
+        <kp-title>Inv. Turnover</kp-title>
+        <kp-low-value>1</kp-low-value>
+        <kp-high-value>36</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Cost Of Sales - Rolling 12">
+        <arrayindex>2</arrayindex>
+        <kp-title>Cost Of Sales - Rolling 12</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Avg Inv. Value - Rolling 12">
+        <arrayindex>3</arrayindex>
+        <kp-title>Avg Inv. Value - Rolling 12</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Inv. Turnover - Rolling 6">
+        <arrayindex>4</arrayindex>
+        <kp-title>Inv. Turnover - Rolling 6</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Cost Of Sales - Rolling 6">
+        <arrayindex>5</arrayindex>
+        <kp-title>Cost Of Sales - Rolling 6</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Avg Inv. Value - Rolling 6">
+        <arrayindex>6</arrayindex>
+        <kp-title>Avg Inv. Value - Rolling 6</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+    </values>
+  </kpi>
+  <kpi>
+    <kp-id>41</kp-id>
+    <kp-desc>Inventory - Value and Items Under Minimum</kp-desc>
+    <values>
+      <arrayitem Desc="Value Under Min.">
+        <arrayindex>1</arrayindex>
+        <kp-title>Value Under Min.</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Items Under Min.">
+        <arrayindex>2</arrayindex>
+        <kp-title>Items Under Min.</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Out of Stock Items">
+        <arrayindex>3</arrayindex>
+        <kp-title>Out of Stock Items</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Value of Minimum">
+        <arrayindex>4</arrayindex>
+        <kp-title>Value of Minimum</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+    </values>
+  </kpi>
+  <kpi>
+    <kp-id>42</kp-id>
+    <kp-desc>Inventory - Value and Items Over Maximum</kp-desc>
+    <values>
+      <arrayitem Desc="Value Over Max.">
+        <arrayindex>1</arrayindex>
+        <kp-title>Value Over Max.</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Items Over Max.">
+        <arrayindex>2</arrayindex>
+        <kp-title>Items Over Max.</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Value of Maximum">
+        <arrayindex>3</arrayindex>
+        <kp-title>Value of Maximum</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+    </values>
+  </kpi>
+  <kpi>
+    <kp-id>43</kp-id>
+    <kp-desc>Inventory - Obsolete Value</kp-desc>
+    <values>
+      <arrayitem Desc="Obsolete Value">
+        <arrayindex>1</arrayindex>
+        <kp-title>Obsolete Value</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Obsolete Qty">
+        <arrayindex>2</arrayindex>
+        <kp-title>Obsolete Qty</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Obsolete Items">
+        <arrayindex>3</arrayindex>
+        <kp-title>Obsolete Items</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+    </values>
+  </kpi>
+  <kpi>
+    <kp-id>44</kp-id>
+    <kp-desc>Inventory - On Consignment Value</kp-desc>
+    <values>
+      <arrayitem Desc="On Consignment Value">
+        <arrayindex>1</arrayindex>
+        <kp-title>On Consignment Value</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="On Consignment Qty">
+        <arrayindex>2</arrayindex>
+        <kp-title>On Consignment Qty</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="On Consignment Items">
+        <arrayindex>3</arrayindex>
+        <kp-title>On Consignment Items</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+    </values>
+  </kpi>
+  <kpi>
+    <kp-id>45</kp-id>
+    <kp-desc>Inventory - On Hand Value</kp-desc>
+    <values>
+      <arrayitem Desc="On Hand Value">
+        <arrayindex>1</arrayindex>
+        <kp-title>On Hand Value</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="On Hand Value (At Avg)">
+        <arrayindex>2</arrayindex>
+        <kp-title>On Hand Value (At Avg)</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="On Hand Value (At Std)">
+        <arrayindex>3</arrayindex>
+        <kp-title>On Hand Value (At Std)</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="On Hand Value (At Last)">
+        <arrayindex>4</arrayindex>
+        <kp-title>On Hand Value (At Last)</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="On Hand Value (At Repl.)">
+        <arrayindex>5</arrayindex>
+        <kp-title>On Hand Value (At Repl.)</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="On Hand Value (At Sales)">
+        <arrayindex>6</arrayindex>
+        <kp-title>On Hand Value (At Sales)</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Qty On Hand">
+        <arrayindex>7</arrayindex>
+        <kp-title>Qty On Hand</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Consign. On Hand Value">
+        <arrayindex>8</arrayindex>
+        <kp-title>Consign. On Hand Value</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Consign. On Hand Value (At Avg)">
+        <arrayindex>9</arrayindex>
+        <kp-title>Consign. On Hand Value (At Avg)</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Consign. On Hand Value (At Std)">
+        <arrayindex>10</arrayindex>
+        <kp-title>Consign. On Hand Value (At Std)</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Consign. On Hand Value (At Last)">
+        <arrayindex>11</arrayindex>
+        <kp-title>Consign. On Hand Value (At Last)</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Consign. On Hand Value (At Repl.)">
+        <arrayindex>12</arrayindex>
+        <kp-title>Consign. On Hand Value (At Repl.)</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Consign. On Hand Value (At Sales)">
+        <arrayindex>13</arrayindex>
+        <kp-title>Consign. On Hand Value (At Sales)</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Consign. Qty On Hand">
+        <arrayindex>14</arrayindex>
+        <kp-title>Consign. Qty On Hand</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Qty Available">
+        <arrayindex>15</arrayindex>
+        <kp-title>Qty Available</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Days Cover">
+        <arrayindex>16</arrayindex>
+        <kp-title>Days Cover</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Weeks Cover">
+        <arrayindex>17</arrayindex>
+        <kp-title>Weeks Cover</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Months Cover">
+        <arrayindex>18</arrayindex>
+        <kp-title>Months Cover</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Avg Daily Demand">
+        <arrayindex>19</arrayindex>
+        <kp-title>Avg Daily Demand</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Avg Weekly Demand">
+        <arrayindex>20</arrayindex>
+        <kp-title>Avg Weekly Demand</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Avg Monthly Demand">
+        <arrayindex>21</arrayindex>
+        <kp-title>Avg Monthly Demand</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+    </values>
+  </kpi>
+  <kpi>
+    <kp-id>46</kp-id>
+    <kp-desc>Inventory - Item Statistics</kp-desc>
+    <values>
+      <arrayitem Desc="Total Items">
+        <arrayindex>1</arrayindex>
+        <kp-title>Total Items</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Normal Items">
+        <arrayindex>2</arrayindex>
+        <kp-title>Normal Items</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Indent Items">
+        <arrayindex>3</arrayindex>
+        <kp-title>Indent Items</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Kits">
+        <arrayindex>4</arrayindex>
+        <kp-title>Kits</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Labour Items">
+        <arrayindex>5</arrayindex>
+        <kp-title>Labour Items</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Manufactured Items">
+        <arrayindex>6</arrayindex>
+        <kp-title>Manufactured Items</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Raw Materials">
+        <arrayindex>7</arrayindex>
+        <kp-title>Raw Materials</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Cross Reference Items">
+        <arrayindex>8</arrayindex>
+        <kp-title>Cross Reference Items</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Special Items">
+        <arrayindex>9</arrayindex>
+        <kp-title>Special Items</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+    </values>
+  </kpi>
+  <kpi>
+    <kp-id>47</kp-id>
+    <kp-desc>Inventory - Ageing</kp-desc>
+    <values>
+      <arrayitem Desc="Total">
+        <arrayindex>1</arrayindex>
+        <kp-title>Total</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Current">
+        <arrayindex>2</arrayindex>
+        <kp-title>Current</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="30 Days">
+        <arrayindex>3</arrayindex>
+        <kp-title>30 Days</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="60 Days">
+        <arrayindex>4</arrayindex>
+        <kp-title>60 Days</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="90 Days">
+        <arrayindex>5</arrayindex>
+        <kp-title>90 Days</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="120+ Days">
+        <arrayindex>6</arrayindex>
+        <kp-title>120+ Days</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+    </values>
+  </kpi>
+  <kpi>
+    <kp-id>48</kp-id>
+    <kp-desc>Inventory - Use By Date Ageing</kp-desc>
+    <values>
+      <arrayitem Desc="Expired">
+        <arrayindex>1</arrayindex>
+        <kp-title>Expired</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="1-30 Days">
+        <arrayindex>2</arrayindex>
+        <kp-title>1-30 Days</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="31-60 Days">
+        <arrayindex>3</arrayindex>
+        <kp-title>31-60 Days</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="61-90 Days">
+        <arrayindex>4</arrayindex>
+        <kp-title>61-90 Days</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="91+ Days">
+        <arrayindex>5</arrayindex>
+        <kp-title>91+ Days</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+    </values>
+  </kpi>
+  <kpi>
+    <kp-id>49</kp-id>
+    <kp-desc>Inventory - Gross Margin Return on Investment (GMROI)</kp-desc>
+    <values>
+      <arrayitem Desc="GMROI YTD">
+        <arrayindex>1</arrayindex>
+        <kp-title>GMROI YTD</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="G/Profit - YTD">
+        <arrayindex>2</arrayindex>
+        <kp-title>G/Profit - YTD</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Avg Inv. Value - YTD">
+        <arrayindex>3</arrayindex>
+        <kp-title>Avg Inv. Value - YTD</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Inv. Value - YTD">
+        <arrayindex>4</arrayindex>
+        <kp-title>Inv. Value - YTD</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+    </values>
+  </kpi>
+  <kpi>
+    <kp-id>50</kp-id>
+    <kp-desc>Inventory - Inventory Days</kp-desc>
+    <values>
+      <arrayitem Desc="Inventory Days">
+        <arrayindex>1</arrayindex>
+        <kp-title>Inventory Days</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Last Year Inv Days">
+        <arrayindex>2</arrayindex>
+        <kp-title>Last Year Inv Days</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Change">
+        <arrayindex>3</arrayindex>
+        <kp-title>Change</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="% Change">
+        <arrayindex>4</arrayindex>
+        <kp-title>% Change</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Variance">
+        <arrayindex>5</arrayindex>
+        <kp-title>Variance</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="% Variance">
+        <arrayindex>6</arrayindex>
+        <kp-title>% Variance</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Cost Of Sales - Rolling 12">
+        <arrayindex>7</arrayindex>
+        <kp-title>Cost Of Sales - Rolling 12</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Cost Of Sales LY - Rolling 12">
+        <arrayindex>8</arrayindex>
+        <kp-title>Cost Of Sales LY - Rolling 12</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Inventory Value - Rolling 12">
+        <arrayindex>9</arrayindex>
+        <kp-title>Inventory Value - Rolling 12</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Inventory Value LY - Rolling 12">
+        <arrayindex>10</arrayindex>
+        <kp-title>Inventory Value LY - Rolling 12</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+    </values>
+  </kpi>
+  <kpi>
+    <kp-id>51</kp-id>
+    <kp-desc>Inventory - Item Zero Sales</kp-desc>
+    <values>
+      <arrayitem Desc="No Sales - YTD">
+        <arrayindex>1</arrayindex>
+        <kp-title>No Sales - YTD</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="No Sales - MTD">
+        <arrayindex>2</arrayindex>
+        <kp-title>No Sales - MTD</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="No Sales - LY YTD">
+        <arrayindex>3</arrayindex>
+        <kp-title>No Sales - LY YTD</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="No Sales - LY MTD">
+        <arrayindex>4</arrayindex>
+        <kp-title>No Sales - LY MTD</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+    </values>
+  </kpi>
+  <kpi>
+    <kp-id>52</kp-id>
+    <kp-desc>Inventory - Forecast Performance</kp-desc>
+    <values>
+      <arrayitem Desc="Forecast Qty">
+        <arrayindex>1</arrayindex>
+        <kp-title>Forecast Qty</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Forecast Qty +1 Period">
+        <arrayindex>2</arrayindex>
+        <kp-title>Forecast Qty +1 Period</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Forecast Qty +2 Periods">
+        <arrayindex>3</arrayindex>
+        <kp-title>Forecast Qty +2 Periods</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Forecast Qty +3 Periods">
+        <arrayindex>4</arrayindex>
+        <kp-title>Forecast Qty +3 Periods</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Forecast Qty +4 Periods">
+        <arrayindex>5</arrayindex>
+        <kp-title>Forecast Qty +4 Periods</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Forecast Qty +5 Periods">
+        <arrayindex>6</arrayindex>
+        <kp-title>Forecast Qty +5 Periods</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Forecast Qty +6 Periods">
+        <arrayindex>7</arrayindex>
+        <kp-title>Forecast Qty +6 Periods</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Forecast Value (At Avg Price)">
+        <arrayindex>8</arrayindex>
+        <kp-title>Forecast Value (At Avg Price)</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Forecast Value (At RRP)">
+        <arrayindex>9</arrayindex>
+        <kp-title>Forecast Value (At RRP)</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Forecast MAPE % - Rolling 12">
+        <arrayindex>10</arrayindex>
+        <kp-title>Forecast MAPE % - Rolling 12</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Sales Qty">
+        <arrayindex>11</arrayindex>
+        <kp-title>Sales Qty</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Sales Value">
+        <arrayindex>12</arrayindex>
+        <kp-title>Sales Value</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Budget Qty">
+        <arrayindex>13</arrayindex>
+        <kp-title>Budget Qty</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Budget Value">
+        <arrayindex>14</arrayindex>
+        <kp-title>Budget Value</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Forecast/Sales Qty Variance">
+        <arrayindex>15</arrayindex>
+        <kp-title>Forecast/Sales Qty Variance</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Forecast Avg Value/Sales Value Variance">
+        <arrayindex>16</arrayindex>
+        <kp-title>Forecast Avg Value/Sales Value Variance</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Forecast RRP Value/Sales Value Variance">
+        <arrayindex>17</arrayindex>
+        <kp-title>Forecast RRP Value/Sales Value Variance</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Budget/Sales Qty Variance">
+        <arrayindex>18</arrayindex>
+        <kp-title>Budget/Sales Qty Variance</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Budget/Sales Value Variance">
+        <arrayindex>19</arrayindex>
+        <kp-title>Budget/Sales Value Variance</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Forecast Qty -1 Period">
+        <arrayindex>20</arrayindex>
+        <kp-title>Forecast Qty -1 Period</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Forecast Qty -2 Periods">
+        <arrayindex>21</arrayindex>
+        <kp-title>Forecast Qty -2 Periods</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Forecast Qty -3 Periods">
+        <arrayindex>22</arrayindex>
+        <kp-title>Forecast Qty -3 Periods</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Forecast Qty -4 Periods">
+        <arrayindex>23</arrayindex>
+        <kp-title>Forecast Qty -4 Periods</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Forecast Qty -5 Periods">
+        <arrayindex>24</arrayindex>
+        <kp-title>Forecast Qty -5 Periods</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Forecast Qty -6 Periods">
+        <arrayindex>25</arrayindex>
+        <kp-title>Forecast Qty -6 Periods</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Forecast Qty -7 Periods">
+        <arrayindex>26</arrayindex>
+        <kp-title>Forecast Qty -7 Periods</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Forecast Qty -8 Periods">
+        <arrayindex>27</arrayindex>
+        <kp-title>Forecast Qty -8 Periods</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Forecast Qty -9 Periods">
+        <arrayindex>28</arrayindex>
+        <kp-title>Forecast Qty -9 Periods</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Forecast Qty -10 Periods">
+        <arrayindex>29</arrayindex>
+        <kp-title>Forecast Qty -10 Periods</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Forecast Qty -11 Periods">
+        <arrayindex>30</arrayindex>
+        <kp-title>Forecast Qty -11 Periods</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Forecast Qty -12 Periods">
+        <arrayindex>31</arrayindex>
+        <kp-title>Forecast Qty -12 Periods</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Sales Qty -1 Period">
+        <arrayindex>32</arrayindex>
+        <kp-title>Sales Qty -1 Period</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Sales Qty -2 Periods">
+        <arrayindex>33</arrayindex>
+        <kp-title>Sales Qty -2 Periods</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Sales Qty -3 Periods">
+        <arrayindex>34</arrayindex>
+        <kp-title>Sales Qty -3 Periods</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Sales Qty -4 Periods">
+        <arrayindex>35</arrayindex>
+        <kp-title>Sales Qty -4 Periods</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Sales Qty -5 Periods">
+        <arrayindex>36</arrayindex>
+        <kp-title>Sales Qty -5 Periods</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Sales Qty -6 Periods">
+        <arrayindex>37</arrayindex>
+        <kp-title>Sales Qty -6 Periods</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Sales Qty -7 Periods">
+        <arrayindex>38</arrayindex>
+        <kp-title>Sales Qty -7 Periods</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Sales Qty -8 Periods">
+        <arrayindex>39</arrayindex>
+        <kp-title>Sales Qty -8 Periods</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Sales Qty -9 Periods">
+        <arrayindex>40</arrayindex>
+        <kp-title>Sales Qty -9 Periods</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Sales Qty -10 Periods">
+        <arrayindex>41</arrayindex>
+        <kp-title>Sales Qty -10 Periods</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Sales Qty -11 Periods">
+        <arrayindex>42</arrayindex>
+        <kp-title>Sales Qty -11 Periods</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Sales Qty -12 Periods">
+        <arrayindex>43</arrayindex>
+        <kp-title>Sales Qty -12 Periods</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+    </values>
+  </kpi>
+  <kpi>
+    <kp-id>53</kp-id>
+    <kp-desc>Inventory - Movement Analysis</kp-desc>
+    <values>
+      <arrayitem Desc="High - Count">
+        <arrayindex>1</arrayindex>
+        <kp-title>High - Count</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="High - On Hand Value">
+        <arrayindex>2</arrayindex>
+        <kp-title>High - On Hand Value</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="High - Sales Value">
+        <arrayindex>3</arrayindex>
+        <kp-title>High - Sales Value</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="High - Avg Demand">
+        <arrayindex>4</arrayindex>
+        <kp-title>High - Avg Demand</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="High - SIF %">
+        <arrayindex>5</arrayindex>
+        <kp-title>High - SIF %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="High - SIF Target %">
+        <arrayindex>6</arrayindex>
+        <kp-title>High - SIF Target %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="High - SIF Target % Variance">
+        <arrayindex>7</arrayindex>
+        <kp-title>High - SIF Target % Variance</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Medium - Count">
+        <arrayindex>8</arrayindex>
+        <kp-title>Medium - Count</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Medium - On Hand Value">
+        <arrayindex>9</arrayindex>
+        <kp-title>Medium - On Hand Value</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Medium - Sales Value">
+        <arrayindex>10</arrayindex>
+        <kp-title>Medium - Sales Value</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Medium - Avg Demand">
+        <arrayindex>11</arrayindex>
+        <kp-title>Medium - Avg Demand</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Medium - SIF %">
+        <arrayindex>12</arrayindex>
+        <kp-title>Medium - SIF %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Medium - SIF Target %">
+        <arrayindex>13</arrayindex>
+        <kp-title>Medium - SIF Target %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Medium - SIF Target % Achieved">
+        <arrayindex>14</arrayindex>
+        <kp-title>Medium - SIF Target % Achieved</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Slow - Count">
+        <arrayindex>15</arrayindex>
+        <kp-title>Slow - Count</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Slow - On Hand Value">
+        <arrayindex>16</arrayindex>
+        <kp-title>Slow - On Hand Value</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Slow - Sales Value">
+        <arrayindex>17</arrayindex>
+        <kp-title>Slow - Sales Value</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Slow - Avg Demand">
+        <arrayindex>18</arrayindex>
+        <kp-title>Slow - Avg Demand</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Slow - SIF %">
+        <arrayindex>19</arrayindex>
+        <kp-title>Slow - SIF %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Slow - SIF Target %">
+        <arrayindex>20</arrayindex>
+        <kp-title>Slow - SIF Target %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Slow - SIF Target % Variance">
+        <arrayindex>21</arrayindex>
+        <kp-title>Slow - SIF Target % Variance</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="High - Orders SIF">
+        <arrayindex>22</arrayindex>
+        <kp-title>High - Orders SIF</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="High - Orders">
+        <arrayindex>23</arrayindex>
+        <kp-title>High - Orders</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Medium - Orders SIF">
+        <arrayindex>24</arrayindex>
+        <kp-title>Medium - Orders SIF</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Medium - Orders">
+        <arrayindex>25</arrayindex>
+        <kp-title>Medium - Orders</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Slow - Orders SIF">
+        <arrayindex>26</arrayindex>
+        <kp-title>Slow - Orders SIF</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Slow - Orders">
+        <arrayindex>27</arrayindex>
+        <kp-title>Slow - Orders</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Active Months">
+        <arrayindex>28</arrayindex>
+        <kp-title>Active Months</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+    </values>
+  </kpi>
+  <kpi>
+    <kp-id>54</kp-id>
+    <kp-desc>Inventory - Sell Through</kp-desc>
+    <values>
+      <arrayitem Desc="Sell Through Year">
+        <arrayindex>1</arrayindex>
+        <kp-title>Sell Through Year</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Sell Through Period">
+        <arrayindex>2</arrayindex>
+        <kp-title>Sell Through Period</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Sell Through Week">
+        <arrayindex>3</arrayindex>
+        <kp-title>Sell Through Week</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Sell Through Day">
+        <arrayindex>4</arrayindex>
+        <kp-title>Sell Through Day</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Opening Inventory Year">
+        <arrayindex>5</arrayindex>
+        <kp-title>Opening Inventory Year</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Opening Inventory Period">
+        <arrayindex>6</arrayindex>
+        <kp-title>Opening Inventory Period</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Opening Inventory Week">
+        <arrayindex>7</arrayindex>
+        <kp-title>Opening Inventory Week</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Opening Inventory Day">
+        <arrayindex>8</arrayindex>
+        <kp-title>Opening Inventory Day</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Sales Year">
+        <arrayindex>9</arrayindex>
+        <kp-title>Sales Year</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Sales Period">
+        <arrayindex>10</arrayindex>
+        <kp-title>Sales Period</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Sales Week">
+        <arrayindex>11</arrayindex>
+        <kp-title>Sales Week</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Sales Day">
+        <arrayindex>12</arrayindex>
+        <kp-title>Sales Day</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="On Hand Qty">
+        <arrayindex>13</arrayindex>
+        <kp-title>On Hand Qty</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="On Hand Value">
+        <arrayindex>14</arrayindex>
+        <kp-title>On Hand Value</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+    </values>
+  </kpi>
+  <kpi>
+    <kp-id>80</kp-id>
+    <kp-desc>AR - Balance and Ageing - Invoice Date</kp-desc>
+    <values>
+      <arrayitem Desc="AR Balance">
+        <arrayindex>1</arrayindex>
+        <kp-title>AR Balance</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Future">
+        <arrayindex>2</arrayindex>
+        <kp-title>Future</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Current">
+        <arrayindex>3</arrayindex>
+        <kp-title>Current</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="30 Days">
+        <arrayindex>4</arrayindex>
+        <kp-title>30 Days</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="60 Days">
+        <arrayindex>5</arrayindex>
+        <kp-title>60 Days</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="90 Days">
+        <arrayindex>6</arrayindex>
+        <kp-title>90 Days</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="120+ Days">
+        <arrayindex>7</arrayindex>
+        <kp-title>120+ Days</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="4 Periods">
+        <arrayindex>8</arrayindex>
+        <kp-title>4 Periods</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="5 Periods">
+        <arrayindex>9</arrayindex>
+        <kp-title>5 Periods</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="6 Periods">
+        <arrayindex>10</arrayindex>
+        <kp-title>6 Periods</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="7 Periods">
+        <arrayindex>11</arrayindex>
+        <kp-title>7 Periods</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="8 Periods">
+        <arrayindex>12</arrayindex>
+        <kp-title>8 Periods</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="9 Periods">
+        <arrayindex>13</arrayindex>
+        <kp-title>9 Periods</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="10 Periods">
+        <arrayindex>14</arrayindex>
+        <kp-title>10 Periods</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="11 Periods">
+        <arrayindex>15</arrayindex>
+        <kp-title>11 Periods</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="12+ Periods">
+        <arrayindex>16</arrayindex>
+        <kp-title>12+ Periods</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="30+ Days">
+        <arrayindex>17</arrayindex>
+        <kp-title>30+ Days</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="60+ Days">
+        <arrayindex>18</arrayindex>
+        <kp-title>60+ Days</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="90+ Days">
+        <arrayindex>19</arrayindex>
+        <kp-title>90+ Days</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Future %">
+        <arrayindex>20</arrayindex>
+        <kp-title>Future %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Current %">
+        <arrayindex>21</arrayindex>
+        <kp-title>Current %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="30 Days %">
+        <arrayindex>22</arrayindex>
+        <kp-title>30 Days %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="60 Days %">
+        <arrayindex>23</arrayindex>
+        <kp-title>60 Days %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="90 Days %">
+        <arrayindex>24</arrayindex>
+        <kp-title>90 Days %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="120+ Days %">
+        <arrayindex>25</arrayindex>
+        <kp-title>120+ Days %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="4 Periods %">
+        <arrayindex>26</arrayindex>
+        <kp-title>4 Periods %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="5 Periods %">
+        <arrayindex>27</arrayindex>
+        <kp-title>5 Periods %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="6 Periods %">
+        <arrayindex>28</arrayindex>
+        <kp-title>6 Periods %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="7 Periods %">
+        <arrayindex>29</arrayindex>
+        <kp-title>7 Periods %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="8 Periods %">
+        <arrayindex>30</arrayindex>
+        <kp-title>8 Periods %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="9 Periods %">
+        <arrayindex>31</arrayindex>
+        <kp-title>9 Periods %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="10 Periods %">
+        <arrayindex>32</arrayindex>
+        <kp-title>10 Periods %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="11 Periods %">
+        <arrayindex>33</arrayindex>
+        <kp-title>11 Periods %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="12+ Periods %">
+        <arrayindex>34</arrayindex>
+        <kp-title>12+ Periods %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="30+ Days %">
+        <arrayindex>35</arrayindex>
+        <kp-title>30+ Days %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="60+ Days %">
+        <arrayindex>36</arrayindex>
+        <kp-title>60+ Days %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="90+ Days %">
+        <arrayindex>37</arrayindex>
+        <kp-title>90+ Days %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Customers with Trans. Count">
+        <arrayindex>38</arrayindex>
+        <kp-title>Customers with Trans. Count</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Zero/Credit Balance Count">
+        <arrayindex>39</arrayindex>
+        <kp-title>Zero/Credit Balance Count</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Future Count">
+        <arrayindex>40</arrayindex>
+        <kp-title>Future Count</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Current Count">
+        <arrayindex>41</arrayindex>
+        <kp-title>Current Count</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="30+ Day Count">
+        <arrayindex>42</arrayindex>
+        <kp-title>30+ Day Count</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="60+ Day Count">
+        <arrayindex>43</arrayindex>
+        <kp-title>60+ Day Count</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="90+ Day Count">
+        <arrayindex>44</arrayindex>
+        <kp-title>90+ Day Count</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="120+ Day Count">
+        <arrayindex>45</arrayindex>
+        <kp-title>120+ Day Count</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Zero Balance Count %">
+        <arrayindex>46</arrayindex>
+        <kp-title>Zero Balance Count %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Future Count %">
+        <arrayindex>47</arrayindex>
+        <kp-title>Future Count %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Current Count %">
+        <arrayindex>48</arrayindex>
+        <kp-title>Current Count %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="30+ Day Count %">
+        <arrayindex>49</arrayindex>
+        <kp-title>30+ Day Count %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="60+ Day Count %">
+        <arrayindex>50</arrayindex>
+        <kp-title>60+ Day Count %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="90+ Day Count %">
+        <arrayindex>51</arrayindex>
+        <kp-title>90+ Day Count %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="120+ Day Count %">
+        <arrayindex>52</arrayindex>
+        <kp-title>120+ Day Count %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+    </values>
+  </kpi>
+  <kpi>
+    <kp-id>81</kp-id>
+    <kp-desc>AR - Balance and Ageing - Due Date</kp-desc>
+    <values>
+      <arrayitem Desc="AR Balance">
+        <arrayindex>1</arrayindex>
+        <kp-title>AR Balance</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Future">
+        <arrayindex>2</arrayindex>
+        <kp-title>Future</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Current">
+        <arrayindex>3</arrayindex>
+        <kp-title>Current</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="30 Days">
+        <arrayindex>4</arrayindex>
+        <kp-title>30 Days</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="60 Days">
+        <arrayindex>5</arrayindex>
+        <kp-title>60 Days</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="90 Days">
+        <arrayindex>6</arrayindex>
+        <kp-title>90 Days</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="120+ Days">
+        <arrayindex>7</arrayindex>
+        <kp-title>120+ Days</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="4 Periods">
+        <arrayindex>8</arrayindex>
+        <kp-title>4 Periods</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="5 Periods">
+        <arrayindex>9</arrayindex>
+        <kp-title>5 Periods</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="6 Periods">
+        <arrayindex>10</arrayindex>
+        <kp-title>6 Periods</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="7 Periods">
+        <arrayindex>11</arrayindex>
+        <kp-title>7 Periods</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="8 Periods">
+        <arrayindex>12</arrayindex>
+        <kp-title>8 Periods</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="9 Periods">
+        <arrayindex>13</arrayindex>
+        <kp-title>9 Periods</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="10 Periods">
+        <arrayindex>14</arrayindex>
+        <kp-title>10 Periods</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="11 Periods">
+        <arrayindex>15</arrayindex>
+        <kp-title>11 Periods</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="12+ Periods">
+        <arrayindex>16</arrayindex>
+        <kp-title>12+ Periods</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="30+ Days">
+        <arrayindex>17</arrayindex>
+        <kp-title>30+ Days</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="60+ Days">
+        <arrayindex>18</arrayindex>
+        <kp-title>60+ Days</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="90+ Days">
+        <arrayindex>19</arrayindex>
+        <kp-title>90+ Days</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Future %">
+        <arrayindex>20</arrayindex>
+        <kp-title>Future %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Current %">
+        <arrayindex>21</arrayindex>
+        <kp-title>Current %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="30 Days %">
+        <arrayindex>22</arrayindex>
+        <kp-title>30 Days %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="60 Days %">
+        <arrayindex>23</arrayindex>
+        <kp-title>60 Days %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="90 Days %">
+        <arrayindex>24</arrayindex>
+        <kp-title>90 Days %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="120+ Days %">
+        <arrayindex>25</arrayindex>
+        <kp-title>120+ Days %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="4 Periods %">
+        <arrayindex>26</arrayindex>
+        <kp-title>4 Periods %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="5 Periods %">
+        <arrayindex>27</arrayindex>
+        <kp-title>5 Periods %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="6 Periods %">
+        <arrayindex>28</arrayindex>
+        <kp-title>6 Periods %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="7 Periods %">
+        <arrayindex>29</arrayindex>
+        <kp-title>7 Periods %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="8 Periods %">
+        <arrayindex>30</arrayindex>
+        <kp-title>8 Periods %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="9 Periods %">
+        <arrayindex>31</arrayindex>
+        <kp-title>9 Periods %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="10 Periods %">
+        <arrayindex>32</arrayindex>
+        <kp-title>10 Periods %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="11 Periods %">
+        <arrayindex>33</arrayindex>
+        <kp-title>11 Periods %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="12+ Periods %">
+        <arrayindex>34</arrayindex>
+        <kp-title>12+ Periods %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="30+ Days %">
+        <arrayindex>35</arrayindex>
+        <kp-title>30+ Days %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="60+ Days %">
+        <arrayindex>36</arrayindex>
+        <kp-title>60+ Days %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="90+ Days %">
+        <arrayindex>37</arrayindex>
+        <kp-title>90+ Days %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Customers with Trans. Count">
+        <arrayindex>38</arrayindex>
+        <kp-title>Customers with Trans. Count</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Zero/Credit Balance Count">
+        <arrayindex>39</arrayindex>
+        <kp-title>Zero/Credit Balance Count</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Future Count">
+        <arrayindex>40</arrayindex>
+        <kp-title>Future Count</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Current Count">
+        <arrayindex>41</arrayindex>
+        <kp-title>Current Count</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="30+ Day Count">
+        <arrayindex>42</arrayindex>
+        <kp-title>30+ Day Count</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="60+ Day Count">
+        <arrayindex>43</arrayindex>
+        <kp-title>60+ Day Count</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="90+ Day Count">
+        <arrayindex>44</arrayindex>
+        <kp-title>90+ Day Count</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="120+ Day Count">
+        <arrayindex>45</arrayindex>
+        <kp-title>120+ Day Count</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Zero Balance Count %">
+        <arrayindex>46</arrayindex>
+        <kp-title>Zero Balance Count %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Future Count %">
+        <arrayindex>47</arrayindex>
+        <kp-title>Future Count %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Current Count %">
+        <arrayindex>48</arrayindex>
+        <kp-title>Current Count %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="30+ Day Count %">
+        <arrayindex>49</arrayindex>
+        <kp-title>30+ Day Count %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="60+ Day Count %">
+        <arrayindex>50</arrayindex>
+        <kp-title>60+ Day Count %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="90+ Day Count %">
+        <arrayindex>51</arrayindex>
+        <kp-title>90+ Day Count %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="120+ Day Count %">
+        <arrayindex>52</arrayindex>
+        <kp-title>120+ Day Count %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+    </values>
+  </kpi>
+  <kpi>
+    <kp-id>82</kp-id>
+    <kp-desc>AR - Customers Statistics</kp-desc>
+    <values>
+      <arrayitem Desc="Total Customers">
+        <arrayindex>1</arrayindex>
+        <kp-title>Total Customers</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="OK">
+        <arrayindex>2</arrayindex>
+        <kp-title>OK</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="No Supply">
+        <arrayindex>3</arrayindex>
+        <kp-title>No Supply</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Legal Action">
+        <arrayindex>4</arrayindex>
+        <kp-title>Legal Action</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Closed">
+        <arrayindex>5</arrayindex>
+        <kp-title>Closed</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Deleted">
+        <arrayindex>6</arrayindex>
+        <kp-title>Deleted</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Service Only">
+        <arrayindex>7</arrayindex>
+        <kp-title>Service Only</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="% OK">
+        <arrayindex>8</arrayindex>
+        <kp-title>% OK</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="% No Supply">
+        <arrayindex>9</arrayindex>
+        <kp-title>% No Supply</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="% Legal Action">
+        <arrayindex>10</arrayindex>
+        <kp-title>% Legal Action</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="% Closed">
+        <arrayindex>11</arrayindex>
+        <kp-title>% Closed</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="% Deleted">
+        <arrayindex>12</arrayindex>
+        <kp-title>% Deleted</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="% Service Only">
+        <arrayindex>13</arrayindex>
+        <kp-title>% Service Only</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+    </values>
+  </kpi>
+  <kpi>
+    <kp-id>83</kp-id>
+    <kp-desc>AR - New and Closed Customers</kp-desc>
+    <values>
+      <arrayitem Desc="New YTD">
+        <arrayindex>1</arrayindex>
+        <kp-title>New YTD</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="New MTD">
+        <arrayindex>2</arrayindex>
+        <kp-title>New MTD</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="New LY YTD">
+        <arrayindex>3</arrayindex>
+        <kp-title>New LY YTD</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="New LY MTD">
+        <arrayindex>4</arrayindex>
+        <kp-title>New LY MTD</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Closed YTD">
+        <arrayindex>5</arrayindex>
+        <kp-title>Closed YTD</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Closed MTD">
+        <arrayindex>6</arrayindex>
+        <kp-title>Closed MTD</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Closed LY YTD">
+        <arrayindex>7</arrayindex>
+        <kp-title>Closed LY YTD</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Closed LY MTD">
+        <arrayindex>8</arrayindex>
+        <kp-title>Closed LY MTD</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+    </values>
+  </kpi>
+  <kpi>
+    <kp-id>84</kp-id>
+    <kp-desc>AR - Invoices</kp-desc>
+    <values>
+      <arrayitem Desc="Inv Outstanding Value">
+        <arrayindex>1</arrayindex>
+        <kp-title>Inv Outstanding Value</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Inv Outstanding Count">
+        <arrayindex>2</arrayindex>
+        <kp-title>Inv Outstanding Count</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Inv Overdue Value">
+        <arrayindex>3</arrayindex>
+        <kp-title>Inv Overdue Value</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Inv Overdue Count">
+        <arrayindex>4</arrayindex>
+        <kp-title>Inv Overdue Count</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Inv Overdue %">
+        <arrayindex>5</arrayindex>
+        <kp-title>Inv Overdue %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+    </values>
+  </kpi>
+  <kpi>
+    <kp-id>85</kp-id>
+    <kp-desc>AR - Accounts Receivable Days</kp-desc>
+    <values>
+      <arrayitem Desc="AR Days">
+        <arrayindex>1</arrayindex>
+        <kp-title>AR Days</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Last Year AR Days">
+        <arrayindex>2</arrayindex>
+        <kp-title>Last Year AR Days</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Change">
+        <arrayindex>3</arrayindex>
+        <kp-title>Change</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="% Change">
+        <arrayindex>4</arrayindex>
+        <kp-title>% Change</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Variance">
+        <arrayindex>5</arrayindex>
+        <kp-title>Variance</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="% Variance">
+        <arrayindex>6</arrayindex>
+        <kp-title>% Variance</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Balance Ex-Tax">
+        <arrayindex>7</arrayindex>
+        <kp-title>Balance Ex-Tax</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Sales">
+        <arrayindex>8</arrayindex>
+        <kp-title>Sales</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="LY Balance Ex-Tax">
+        <arrayindex>9</arrayindex>
+        <kp-title>LY Balance Ex-Tax</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="LY Sales">
+        <arrayindex>10</arrayindex>
+        <kp-title>LY Sales</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Active Days">
+        <arrayindex>11</arrayindex>
+        <kp-title>Active Days</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Debits">
+        <arrayindex>12</arrayindex>
+        <kp-title>Debits</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Credits">
+        <arrayindex>13</arrayindex>
+        <kp-title>Credits</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Tax">
+        <arrayindex>14</arrayindex>
+        <kp-title>Tax</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="LY Debits">
+        <arrayindex>15</arrayindex>
+        <kp-title>LY Debits</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="LY Credits">
+        <arrayindex>16</arrayindex>
+        <kp-title>LY Credits</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="LY Tax">
+        <arrayindex>17</arrayindex>
+        <kp-title>LY Tax</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+    </values>
+  </kpi>
+  <kpi>
+    <kp-id>86</kp-id>
+    <kp-desc>AR - Customer Zero Sales</kp-desc>
+    <values>
+      <arrayitem Desc="Count - YTD">
+        <arrayindex>1</arrayindex>
+        <kp-title>Count - YTD</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Count - MTD">
+        <arrayindex>2</arrayindex>
+        <kp-title>Count - MTD</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+    </values>
+  </kpi>
+  <kpi>
+    <kp-id>87</kp-id>
+    <kp-desc>AR - Ageing by Dimension - Invoice Date</kp-desc>
+    <values>
+      <arrayitem Desc="AR Balance">
+        <arrayindex>1</arrayindex>
+        <kp-title>AR Balance</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="% of Total">
+        <arrayindex>2</arrayindex>
+        <kp-title>% of Total</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Total">
+        <arrayindex>3</arrayindex>
+        <kp-title>Total</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="% Above Average">
+        <arrayindex>4</arrayindex>
+        <kp-title>% Above Average</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Average">
+        <arrayindex>5</arrayindex>
+        <kp-title>Average</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Count">
+        <arrayindex>6</arrayindex>
+        <kp-title>Count</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Minimum">
+        <arrayindex>7</arrayindex>
+        <kp-title>Minimum</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Maximum">
+        <arrayindex>8</arrayindex>
+        <kp-title>Maximum</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+    </values>
+  </kpi>
+  <kpi>
+    <kp-id>88</kp-id>
+    <kp-desc>AR - Ageing by Dimension - Due Date</kp-desc>
+    <values>
+      <arrayitem Desc="AR Balance">
+        <arrayindex>1</arrayindex>
+        <kp-title>AR Balance</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="% of Total">
+        <arrayindex>2</arrayindex>
+        <kp-title>% of Total</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Total">
+        <arrayindex>3</arrayindex>
+        <kp-title>Total</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="% Above Average">
+        <arrayindex>4</arrayindex>
+        <kp-title>% Above Average</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Average">
+        <arrayindex>5</arrayindex>
+        <kp-title>Average</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Count">
+        <arrayindex>6</arrayindex>
+        <kp-title>Count</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Minimum">
+        <arrayindex>7</arrayindex>
+        <kp-title>Minimum</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Maximum">
+        <arrayindex>8</arrayindex>
+        <kp-title>Maximum</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+    </values>
+  </kpi>
+  <kpi>
+    <kp-id>89</kp-id>
+    <kp-desc>AR - Master Data - Ageing by Dimension - Invoice Date</kp-desc>
+    <values>
+      <arrayitem Desc="AR Balance">
+        <arrayindex>1</arrayindex>
+        <kp-title>AR Balance</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="% of Total">
+        <arrayindex>2</arrayindex>
+        <kp-title>% of Total</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Total">
+        <arrayindex>3</arrayindex>
+        <kp-title>Total</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="% Above Average">
+        <arrayindex>4</arrayindex>
+        <kp-title>% Above Average</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Average">
+        <arrayindex>5</arrayindex>
+        <kp-title>Average</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Count">
+        <arrayindex>6</arrayindex>
+        <kp-title>Count</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Minimum">
+        <arrayindex>7</arrayindex>
+        <kp-title>Minimum</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Maximum">
+        <arrayindex>8</arrayindex>
+        <kp-title>Maximum</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+    </values>
+  </kpi>
+  <kpi>
+    <kp-id>90</kp-id>
+    <kp-desc>AR - Master Data - Ageing by Dimension - Due Date</kp-desc>
+    <values>
+      <arrayitem Desc="AR Balance">
+        <arrayindex>1</arrayindex>
+        <kp-title>AR Balance</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="% of Total">
+        <arrayindex>2</arrayindex>
+        <kp-title>% of Total</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Total">
+        <arrayindex>3</arrayindex>
+        <kp-title>Total</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="% Above Average">
+        <arrayindex>4</arrayindex>
+        <kp-title>% Above Average</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Average">
+        <arrayindex>5</arrayindex>
+        <kp-title>Average</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Count">
+        <arrayindex>6</arrayindex>
+        <kp-title>Count</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Minimum">
+        <arrayindex>7</arrayindex>
+        <kp-title>Minimum</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Maximum">
+        <arrayindex>8</arrayindex>
+        <kp-title>Maximum</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+    </values>
+  </kpi>
+  <kpi>
+    <kp-id>91</kp-id>
+    <kp-desc>AR - Transaction Analysis</kp-desc>
+    <values>
+      <arrayitem Desc="YTD Value">
+        <arrayindex>1</arrayindex>
+        <kp-title>YTD Value</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="LY YTD Value">
+        <arrayindex>2</arrayindex>
+        <kp-title>LY YTD Value</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="YTD Value - Ex Tax">
+        <arrayindex>3</arrayindex>
+        <kp-title>YTD Value - Ex Tax</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="LY YTD Value - Ex Tax">
+        <arrayindex>4</arrayindex>
+        <kp-title>LY YTD Value - Ex Tax</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="MTD Value">
+        <arrayindex>5</arrayindex>
+        <kp-title>MTD Value</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="LY MTD Value">
+        <arrayindex>6</arrayindex>
+        <kp-title>LY MTD Value</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="MTD Value - Ex Tax">
+        <arrayindex>7</arrayindex>
+        <kp-title>MTD Value - Ex Tax</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="LY MTD Value - Ex Tax">
+        <arrayindex>8</arrayindex>
+        <kp-title>LY MTD Value - Ex Tax</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="YTD Count">
+        <arrayindex>9</arrayindex>
+        <kp-title>YTD Count</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="MTD Count">
+        <arrayindex>10</arrayindex>
+        <kp-title>MTD Count</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="LY YTD Count">
+        <arrayindex>11</arrayindex>
+        <kp-title>LY YTD Count</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="LY MTD Count">
+        <arrayindex>12</arrayindex>
+        <kp-title>LY MTD Count</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+    </values>
+  </kpi>
+  <kpi>
+    <kp-id>120</kp-id>
+    <kp-desc>AP - Balance and Ageing - Invoice Date</kp-desc>
+    <values>
+      <arrayitem Desc="AP Balance">
+        <arrayindex>1</arrayindex>
+        <kp-title>AP Balance</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Future">
+        <arrayindex>2</arrayindex>
+        <kp-title>Future</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Current">
+        <arrayindex>3</arrayindex>
+        <kp-title>Current</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="30 Days">
+        <arrayindex>4</arrayindex>
+        <kp-title>30 Days</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="60 Days">
+        <arrayindex>5</arrayindex>
+        <kp-title>60 Days</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="90 Days">
+        <arrayindex>6</arrayindex>
+        <kp-title>90 Days</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="120+ Days">
+        <arrayindex>7</arrayindex>
+        <kp-title>120+ Days</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="4 Periods">
+        <arrayindex>8</arrayindex>
+        <kp-title>4 Periods</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="5 Periods">
+        <arrayindex>9</arrayindex>
+        <kp-title>5 Periods</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="6 Periods">
+        <arrayindex>10</arrayindex>
+        <kp-title>6 Periods</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="7 Periods">
+        <arrayindex>11</arrayindex>
+        <kp-title>7 Periods</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="8 Periods">
+        <arrayindex>12</arrayindex>
+        <kp-title>8 Periods</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="9 Periods">
+        <arrayindex>13</arrayindex>
+        <kp-title>9 Periods</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="10 Periods">
+        <arrayindex>14</arrayindex>
+        <kp-title>10 Periods</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="11 Periods">
+        <arrayindex>15</arrayindex>
+        <kp-title>11 Periods</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="12+ Periods">
+        <arrayindex>16</arrayindex>
+        <kp-title>12+ Periods</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="30+ Days">
+        <arrayindex>17</arrayindex>
+        <kp-title>30+ Days</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="60+ Days">
+        <arrayindex>18</arrayindex>
+        <kp-title>60+ Days</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="90+ Days">
+        <arrayindex>19</arrayindex>
+        <kp-title>90+ Days</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Future %">
+        <arrayindex>20</arrayindex>
+        <kp-title>Future %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Current %">
+        <arrayindex>21</arrayindex>
+        <kp-title>Current %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="30 Days %">
+        <arrayindex>22</arrayindex>
+        <kp-title>30 Days %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="60 Days %">
+        <arrayindex>23</arrayindex>
+        <kp-title>60 Days %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="90 Days %">
+        <arrayindex>24</arrayindex>
+        <kp-title>90 Days %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="120+ Days %">
+        <arrayindex>25</arrayindex>
+        <kp-title>120+ Days %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="4 Periods %">
+        <arrayindex>26</arrayindex>
+        <kp-title>4 Periods %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="5 Periods %">
+        <arrayindex>27</arrayindex>
+        <kp-title>5 Periods %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="6 Periods %">
+        <arrayindex>28</arrayindex>
+        <kp-title>6 Periods %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="7 Periods %">
+        <arrayindex>29</arrayindex>
+        <kp-title>7 Periods %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="8 Periods %">
+        <arrayindex>30</arrayindex>
+        <kp-title>8 Periods %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="9 Periods %">
+        <arrayindex>31</arrayindex>
+        <kp-title>9 Periods %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="10 Periods %">
+        <arrayindex>32</arrayindex>
+        <kp-title>10 Periods %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="11 Periods %">
+        <arrayindex>33</arrayindex>
+        <kp-title>11 Periods %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="12+ Periods %">
+        <arrayindex>34</arrayindex>
+        <kp-title>12+ Periods %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="30+ Days %">
+        <arrayindex>35</arrayindex>
+        <kp-title>30+ Days %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="60+ Days %">
+        <arrayindex>36</arrayindex>
+        <kp-title>60+ Days %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="90+ Days %">
+        <arrayindex>37</arrayindex>
+        <kp-title>90+ Days %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Suppliers with Trans. Count">
+        <arrayindex>38</arrayindex>
+        <kp-title>Suppliers with Trans. Count</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Zero/Debit Balance Count">
+        <arrayindex>39</arrayindex>
+        <kp-title>Zero/Debit Balance Count</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Future Count">
+        <arrayindex>40</arrayindex>
+        <kp-title>Future Count</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Current Count">
+        <arrayindex>41</arrayindex>
+        <kp-title>Current Count</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="30+ Day Count">
+        <arrayindex>42</arrayindex>
+        <kp-title>30+ Day Count</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="60+ Day Count">
+        <arrayindex>43</arrayindex>
+        <kp-title>60+ Day Count</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="90+ Day Count">
+        <arrayindex>44</arrayindex>
+        <kp-title>90+ Day Count</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="120+ Day Count">
+        <arrayindex>45</arrayindex>
+        <kp-title>120+ Day Count</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Zero Balance Count %">
+        <arrayindex>46</arrayindex>
+        <kp-title>Zero Balance Count %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Future Count %">
+        <arrayindex>47</arrayindex>
+        <kp-title>Future Count %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Current Count %">
+        <arrayindex>48</arrayindex>
+        <kp-title>Current Count %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="30+ Day Count %">
+        <arrayindex>49</arrayindex>
+        <kp-title>30+ Day Count %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="60+ Day Count %">
+        <arrayindex>50</arrayindex>
+        <kp-title>60+ Day Count %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="90+ Day Count %">
+        <arrayindex>51</arrayindex>
+        <kp-title>90+ Day Count %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="120+ Day Count %">
+        <arrayindex>52</arrayindex>
+        <kp-title>120+ Day Count %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+    </values>
+  </kpi>
+  <kpi>
+    <kp-id>121</kp-id>
+    <kp-desc>AP - Balance and Ageing - Pay By Date</kp-desc>
+    <values>
+      <arrayitem Desc="AP Balance">
+        <arrayindex>1</arrayindex>
+        <kp-title>AP Balance</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Future">
+        <arrayindex>2</arrayindex>
+        <kp-title>Future</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Current">
+        <arrayindex>3</arrayindex>
+        <kp-title>Current</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="30 Days">
+        <arrayindex>4</arrayindex>
+        <kp-title>30 Days</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="60 Days">
+        <arrayindex>5</arrayindex>
+        <kp-title>60 Days</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="90 Days">
+        <arrayindex>6</arrayindex>
+        <kp-title>90 Days</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="120+ Days">
+        <arrayindex>7</arrayindex>
+        <kp-title>120+ Days</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="4 Periods">
+        <arrayindex>8</arrayindex>
+        <kp-title>4 Periods</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="5 Periods">
+        <arrayindex>9</arrayindex>
+        <kp-title>5 Periods</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="6 Periods">
+        <arrayindex>10</arrayindex>
+        <kp-title>6 Periods</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="7 Periods">
+        <arrayindex>11</arrayindex>
+        <kp-title>7 Periods</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="8 Periods">
+        <arrayindex>12</arrayindex>
+        <kp-title>8 Periods</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="9 Periods">
+        <arrayindex>13</arrayindex>
+        <kp-title>9 Periods</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="10 Periods">
+        <arrayindex>14</arrayindex>
+        <kp-title>10 Periods</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="11 Periods">
+        <arrayindex>15</arrayindex>
+        <kp-title>11 Periods</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="12+ Periods">
+        <arrayindex>16</arrayindex>
+        <kp-title>12+ Periods</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="30+ Days">
+        <arrayindex>17</arrayindex>
+        <kp-title>30+ Days</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="60+ Days">
+        <arrayindex>18</arrayindex>
+        <kp-title>60+ Days</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="90+ Days">
+        <arrayindex>19</arrayindex>
+        <kp-title>90+ Days</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Future %">
+        <arrayindex>20</arrayindex>
+        <kp-title>Future %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Current %">
+        <arrayindex>21</arrayindex>
+        <kp-title>Current %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="30 Days %">
+        <arrayindex>22</arrayindex>
+        <kp-title>30 Days %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="60 Days %">
+        <arrayindex>23</arrayindex>
+        <kp-title>60 Days %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="90 Days %">
+        <arrayindex>24</arrayindex>
+        <kp-title>90 Days %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="120+ Days %">
+        <arrayindex>25</arrayindex>
+        <kp-title>120+ Days %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="4 Periods %">
+        <arrayindex>26</arrayindex>
+        <kp-title>4 Periods %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="5 Periods %">
+        <arrayindex>27</arrayindex>
+        <kp-title>5 Periods %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="6 Periods %">
+        <arrayindex>28</arrayindex>
+        <kp-title>6 Periods %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="7 Periods %">
+        <arrayindex>29</arrayindex>
+        <kp-title>7 Periods %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="8 Periods %">
+        <arrayindex>30</arrayindex>
+        <kp-title>8 Periods %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="9 Periods %">
+        <arrayindex>31</arrayindex>
+        <kp-title>9 Periods %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="10 Periods %">
+        <arrayindex>32</arrayindex>
+        <kp-title>10 Periods %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="11 Periods %">
+        <arrayindex>33</arrayindex>
+        <kp-title>11 Periods %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="12+ Periods %">
+        <arrayindex>34</arrayindex>
+        <kp-title>12+ Periods %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="30+ Days %">
+        <arrayindex>35</arrayindex>
+        <kp-title>30+ Days %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="60+ Days %">
+        <arrayindex>36</arrayindex>
+        <kp-title>60+ Days %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="90+ Days %">
+        <arrayindex>37</arrayindex>
+        <kp-title>90+ Days %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Suppliers with Trans. Count">
+        <arrayindex>38</arrayindex>
+        <kp-title>Suppliers with Trans. Count</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Zero/Debit Balance Count">
+        <arrayindex>39</arrayindex>
+        <kp-title>Zero/Debit Balance Count</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Future Count">
+        <arrayindex>40</arrayindex>
+        <kp-title>Future Count</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Current Count">
+        <arrayindex>41</arrayindex>
+        <kp-title>Current Count</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="30+ Day Count">
+        <arrayindex>42</arrayindex>
+        <kp-title>30+ Day Count</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="60+ Day Count">
+        <arrayindex>43</arrayindex>
+        <kp-title>60+ Day Count</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="90+ Day Count">
+        <arrayindex>44</arrayindex>
+        <kp-title>90+ Day Count</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="120+ Day Count">
+        <arrayindex>45</arrayindex>
+        <kp-title>120+ Day Count</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Zero Balance Count %">
+        <arrayindex>46</arrayindex>
+        <kp-title>Zero Balance Count %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Future Count %">
+        <arrayindex>47</arrayindex>
+        <kp-title>Future Count %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Current Count %">
+        <arrayindex>48</arrayindex>
+        <kp-title>Current Count %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="30+ Day Count %">
+        <arrayindex>49</arrayindex>
+        <kp-title>30+ Day Count %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="60+ Day Count %">
+        <arrayindex>50</arrayindex>
+        <kp-title>60+ Day Count %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="90+ Day Count %">
+        <arrayindex>51</arrayindex>
+        <kp-title>90+ Day Count %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="120+ Day Count %">
+        <arrayindex>52</arrayindex>
+        <kp-title>120+ Day Count %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+    </values>
+  </kpi>
+  <kpi>
+    <kp-id>122</kp-id>
+    <kp-desc>AP - Supplier Statistics</kp-desc>
+    <values>
+      <arrayitem Desc="Total Suppliers">
+        <arrayindex>1</arrayindex>
+        <kp-title>Total Suppliers</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Local">
+        <arrayindex>2</arrayindex>
+        <kp-title>Local</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Foreign">
+        <arrayindex>3</arrayindex>
+        <kp-title>Foreign</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="OK">
+        <arrayindex>4</arrayindex>
+        <kp-title>OK</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="No Supply">
+        <arrayindex>5</arrayindex>
+        <kp-title>No Supply</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="QA Hold">
+        <arrayindex>6</arrayindex>
+        <kp-title>QA Hold</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Stock ONLY">
+        <arrayindex>7</arrayindex>
+        <kp-title>Stock ONLY</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Special ONLY">
+        <arrayindex>8</arrayindex>
+        <kp-title>Special ONLY</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Auto INV">
+        <arrayindex>9</arrayindex>
+        <kp-title>Auto INV</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Closed">
+        <arrayindex>10</arrayindex>
+        <kp-title>Closed</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Inactive">
+        <arrayindex>11</arrayindex>
+        <kp-title>Inactive</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+    </values>
+  </kpi>
+  <kpi>
+    <kp-id>123</kp-id>
+    <kp-desc>AP - New Suppliers</kp-desc>
+    <values>
+      <arrayitem Desc="New YTD">
+        <arrayindex>1</arrayindex>
+        <kp-title>New YTD</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="New MTD">
+        <arrayindex>2</arrayindex>
+        <kp-title>New MTD</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="New LY YTD">
+        <arrayindex>3</arrayindex>
+        <kp-title>New LY YTD</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="New LY MTD">
+        <arrayindex>4</arrayindex>
+        <kp-title>New LY MTD</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+    </values>
+  </kpi>
+  <kpi>
+    <kp-id>124</kp-id>
+    <kp-desc>AP - Invoices</kp-desc>
+    <values>
+      <arrayitem Desc="Inv Outstanding Value">
+        <arrayindex>1</arrayindex>
+        <kp-title>Inv Outstanding Value</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Inv Outstanding Count">
+        <arrayindex>2</arrayindex>
+        <kp-title>Inv Outstanding Count</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Inv Overdue Value">
+        <arrayindex>3</arrayindex>
+        <kp-title>Inv Overdue Value</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Inv Overdue Count">
+        <arrayindex>4</arrayindex>
+        <kp-title>Inv Overdue Count</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Inv Overdue %">
+        <arrayindex>5</arrayindex>
+        <kp-title>Inv Overdue %</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+    </values>
+  </kpi>
+  <kpi>
+    <kp-id>125</kp-id>
+    <kp-desc>AP - Accounts Payable Days</kp-desc>
+    <values>
+      <arrayitem Desc="AP Days">
+        <arrayindex>1</arrayindex>
+        <kp-title>AP Days</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Last Year AP Days">
+        <arrayindex>2</arrayindex>
+        <kp-title>Last Year AP Days</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Change">
+        <arrayindex>3</arrayindex>
+        <kp-title>Change</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="% Change">
+        <arrayindex>4</arrayindex>
+        <kp-title>% Change</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Variance">
+        <arrayindex>5</arrayindex>
+        <kp-title>Variance</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="% Variance">
+        <arrayindex>6</arrayindex>
+        <kp-title>% Variance</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Balance Ex-Tax">
+        <arrayindex>7</arrayindex>
+        <kp-title>Balance Ex-Tax</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Purchases">
+        <arrayindex>8</arrayindex>
+        <kp-title>Purchases</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="LY Balance Ex-Tax">
+        <arrayindex>9</arrayindex>
+        <kp-title>LY Balance Ex-Tax</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="LY Purchases">
+        <arrayindex>10</arrayindex>
+        <kp-title>LY Purchases</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Active Days">
+        <arrayindex>11</arrayindex>
+        <kp-title>Active Days</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+    </values>
+  </kpi>
+  <kpi>
+    <kp-id>260</kp-id>
+    <kp-desc>Project - Percent Complete</kp-desc>
+    <values>
+      <arrayitem Desc="Activity % Complete">
+        <arrayindex>1</arrayindex>
+        <kp-title>Activity % Complete</kp-title>
+        <kp-low-value>5</kp-low-value>
+        <kp-high-value>90</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Actual/Budget % Complete">
+        <arrayindex>2</arrayindex>
+        <kp-title>Actual/Budget % Complete</kp-title>
+        <kp-low-value>5</kp-low-value>
+        <kp-high-value>90</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Total Hours">
+        <arrayindex>3</arrayindex>
+        <kp-title>Total Hours</kp-title>
+        <kp-low-value>50</kp-low-value>
+        <kp-high-value>5000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Total Hours Complete">
+        <arrayindex>4</arrayindex>
+        <kp-title>Total Hours Complete</kp-title>
+        <kp-low-value>50</kp-low-value>
+        <kp-high-value>3000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Total Budget">
+        <arrayindex>5</arrayindex>
+        <kp-title>Total Budget</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Total Actual">
+        <arrayindex>6</arrayindex>
+        <kp-title>Total Actual</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Total Profit">
+        <arrayindex>7</arrayindex>
+        <kp-title>Total Profit</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Total Income">
+        <arrayindex>8</arrayindex>
+        <kp-title>Total Income</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Total Cost to Complete">
+        <arrayindex>9</arrayindex>
+        <kp-title>Total Cost to Complete</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Total Contract">
+        <arrayindex>10</arrayindex>
+        <kp-title>Total Contract</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Total Contract Variations">
+        <arrayindex>11</arrayindex>
+        <kp-title>Total Contract Variations</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="In Progress Budget">
+        <arrayindex>12</arrayindex>
+        <kp-title>In Progress Budget</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="In Progress Actual">
+        <arrayindex>13</arrayindex>
+        <kp-title>In Progress Actual</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="In Progress Profit">
+        <arrayindex>14</arrayindex>
+        <kp-title>In Progress Profit</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="In Progress Income">
+        <arrayindex>15</arrayindex>
+        <kp-title>In Progress Income</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="In Progress Cost to Complete">
+        <arrayindex>16</arrayindex>
+        <kp-title>In Progress Cost to Complete</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="In Progress Contract">
+        <arrayindex>17</arrayindex>
+        <kp-title>In Progress Contract</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="In Progress Contract Variations">
+        <arrayindex>18</arrayindex>
+        <kp-title>In Progress Contract Variations</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+    </values>
+  </kpi>
+  <kpi>
+    <kp-id>261</kp-id>
+    <kp-desc>Project - Budget Margins</kp-desc>
+    <values>
+      <arrayitem Desc="Original Margin %">
+        <arrayindex>1</arrayindex>
+        <kp-title>Original Margin %</kp-title>
+        <kp-low-value>5</kp-low-value>
+        <kp-high-value>90</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Current Margin %">
+        <arrayindex>2</arrayindex>
+        <kp-title>Current Margin %</kp-title>
+        <kp-low-value>5</kp-low-value>
+        <kp-high-value>90</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Forecast Margin %">
+        <arrayindex>3</arrayindex>
+        <kp-title>Forecast Margin %</kp-title>
+        <kp-low-value>5</kp-low-value>
+        <kp-high-value>90</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Current Margin Inc. Var. %">
+        <arrayindex>4</arrayindex>
+        <kp-title>Current Margin Inc. Var. %</kp-title>
+        <kp-low-value>5</kp-low-value>
+        <kp-high-value>90</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Forecast Margin Inc. Var. %">
+        <arrayindex>5</arrayindex>
+        <kp-title>Forecast Margin Inc. Var. %</kp-title>
+        <kp-low-value>5</kp-low-value>
+        <kp-high-value>90</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Original Margin">
+        <arrayindex>6</arrayindex>
+        <kp-title>Original Margin</kp-title>
+        <kp-low-value>5</kp-low-value>
+        <kp-high-value>90</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Original Margin &amp; Value">
+        <arrayindex>7</arrayindex>
+        <kp-title>Original Margin &amp; Value</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Current Margin">
+        <arrayindex>8</arrayindex>
+        <kp-title>Current Margin</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Current Margin &amp; Value">
+        <arrayindex>9</arrayindex>
+        <kp-title>Current Margin &amp; Value</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Forecast Margin">
+        <arrayindex>10</arrayindex>
+        <kp-title>Forecast Margin</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Forecast Margin &amp; Value">
+        <arrayindex>11</arrayindex>
+        <kp-title>Forecast Margin &amp; Value</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Current Margin Inc. Var.">
+        <arrayindex>12</arrayindex>
+        <kp-title>Current Margin Inc. Var.</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Current Margin Inc. Var &amp; Value">
+        <arrayindex>13</arrayindex>
+        <kp-title>Current Margin Inc. Var &amp; Value</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Forecast Margin Inc. Var.">
+        <arrayindex>14</arrayindex>
+        <kp-title>Forecast Margin Inc. Var.</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Forecast Margin &amp; Value Inc. Var.">
+        <arrayindex>15</arrayindex>
+        <kp-title>Forecast Margin &amp; Value Inc. Var.</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+    </values>
+  </kpi>
+  <kpi>
+    <kp-id>262</kp-id>
+    <kp-desc>Project - Deviation of Planned Budget</kp-desc>
+    <values>
+      <arrayitem Desc="FCTC">
+        <arrayindex>1</arrayindex>
+        <kp-title>FCTC</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Original Budget">
+        <arrayindex>2</arrayindex>
+        <kp-title>Original Budget</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Variance">
+        <arrayindex>3</arrayindex>
+        <kp-title>Variance</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Variance %">
+        <arrayindex>4</arrayindex>
+        <kp-title>Variance %</kp-title>
+        <kp-low-value>5</kp-low-value>
+        <kp-high-value>90</kp-high-value>
+      </arrayitem>
+    </values>
+  </kpi>
+  <kpi>
+    <kp-id>263</kp-id>
+    <kp-desc>Project - Actual vs Budget</kp-desc>
+    <values>
+      <arrayitem Desc="Actual Costs">
+        <arrayindex>1</arrayindex>
+        <kp-title>Actual Costs</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Original Budget">
+        <arrayindex>2</arrayindex>
+        <kp-title>Original Budget</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Current Budget">
+        <arrayindex>3</arrayindex>
+        <kp-title>Current Budget</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Forecast Budget">
+        <arrayindex>4</arrayindex>
+        <kp-title>Forecast Budget</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Original Variance">
+        <arrayindex>5</arrayindex>
+        <kp-title>Original Variance</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Current Variance">
+        <arrayindex>6</arrayindex>
+        <kp-title>Current Variance</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Forecast Variance">
+        <arrayindex>7</arrayindex>
+        <kp-title>Forecast Variance</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Original Var. %">
+        <arrayindex>8</arrayindex>
+        <kp-title>Original Var. %</kp-title>
+        <kp-low-value>5</kp-low-value>
+        <kp-high-value>90</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Current Var. %">
+        <arrayindex>9</arrayindex>
+        <kp-title>Current Var. %</kp-title>
+        <kp-low-value>5</kp-low-value>
+        <kp-high-value>90</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Forecast Var. %">
+        <arrayindex>10</arrayindex>
+        <kp-title>Forecast Var. %</kp-title>
+        <kp-low-value>5</kp-low-value>
+        <kp-high-value>90</kp-high-value>
+      </arrayitem>
+    </values>
+  </kpi>
+  <kpi>
+    <kp-id>264</kp-id>
+    <kp-desc>Project - Forecast Revenue</kp-desc>
+    <values>
+      <arrayitem Desc="MTD">
+        <arrayindex>1</arrayindex>
+        <kp-title>MTD</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="YTD">
+        <arrayindex>2</arrayindex>
+        <kp-title>YTD</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Full Year">
+        <arrayindex>3</arrayindex>
+        <kp-title>Full Year</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Full Year Next Year">
+        <arrayindex>4</arrayindex>
+        <kp-title>Full Year Next Year</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Period +1">
+        <arrayindex>5</arrayindex>
+        <kp-title>Period +1</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Period +2">
+        <arrayindex>6</arrayindex>
+        <kp-title>Period +2</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Period +3">
+        <arrayindex>7</arrayindex>
+        <kp-title>Period +3</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Period +4">
+        <arrayindex>8</arrayindex>
+        <kp-title>Period +4</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Period +5">
+        <arrayindex>9</arrayindex>
+        <kp-title>Period +5</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Period +6">
+        <arrayindex>10</arrayindex>
+        <kp-title>Period +6</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Period +7">
+        <arrayindex>11</arrayindex>
+        <kp-title>Period +7</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Period +8">
+        <arrayindex>12</arrayindex>
+        <kp-title>Period +8</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Period +9">
+        <arrayindex>13</arrayindex>
+        <kp-title>Period +9</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Period +10">
+        <arrayindex>14</arrayindex>
+        <kp-title>Period +10</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Period +11">
+        <arrayindex>15</arrayindex>
+        <kp-title>Period +11</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Period +12">
+        <arrayindex>16</arrayindex>
+        <kp-title>Period +12</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Period +13">
+        <arrayindex>17</arrayindex>
+        <kp-title>Period +13</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Period +14">
+        <arrayindex>18</arrayindex>
+        <kp-title>Period +14</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Period +15">
+        <arrayindex>19</arrayindex>
+        <kp-title>Period +15</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Period +16">
+        <arrayindex>20</arrayindex>
+        <kp-title>Period +16</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Period +17">
+        <arrayindex>21</arrayindex>
+        <kp-title>Period +17</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Period +18">
+        <arrayindex>22</arrayindex>
+        <kp-title>Period +18</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Period +19">
+        <arrayindex>23</arrayindex>
+        <kp-title>Period +19</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Period +20">
+        <arrayindex>24</arrayindex>
+        <kp-title>Period +20</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Period +21">
+        <arrayindex>25</arrayindex>
+        <kp-title>Period +21</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Period +22">
+        <arrayindex>26</arrayindex>
+        <kp-title>Period +22</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Period +23">
+        <arrayindex>27</arrayindex>
+        <kp-title>Period +23</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Period +24">
+        <arrayindex>28</arrayindex>
+        <kp-title>Period +24</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Period +25">
+        <arrayindex>29</arrayindex>
+        <kp-title>Period +25</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Period +26">
+        <arrayindex>30</arrayindex>
+        <kp-title>Period +26</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Period +27">
+        <arrayindex>31</arrayindex>
+        <kp-title>Period +27</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Period +28">
+        <arrayindex>32</arrayindex>
+        <kp-title>Period +28</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Period +29">
+        <arrayindex>33</arrayindex>
+        <kp-title>Period +29</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Period +30">
+        <arrayindex>34</arrayindex>
+        <kp-title>Period +30</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Period +31">
+        <arrayindex>35</arrayindex>
+        <kp-title>Period +31</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Period +32">
+        <arrayindex>36</arrayindex>
+        <kp-title>Period +32</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Period +33">
+        <arrayindex>37</arrayindex>
+        <kp-title>Period +33</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Period +34">
+        <arrayindex>38</arrayindex>
+        <kp-title>Period +34</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Period +35">
+        <arrayindex>39</arrayindex>
+        <kp-title>Period +35</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Period +36">
+        <arrayindex>40</arrayindex>
+        <kp-title>Period +36</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Period +37">
+        <arrayindex>41</arrayindex>
+        <kp-title>Period +37</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Period +38">
+        <arrayindex>42</arrayindex>
+        <kp-title>Period +38</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Period +39">
+        <arrayindex>43</arrayindex>
+        <kp-title>Period +39</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Period +40">
+        <arrayindex>44</arrayindex>
+        <kp-title>Period +40</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Period +41">
+        <arrayindex>45</arrayindex>
+        <kp-title>Period +41</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Period +42">
+        <arrayindex>46</arrayindex>
+        <kp-title>Period +42</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Period +43">
+        <arrayindex>47</arrayindex>
+        <kp-title>Period +43</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Period +44">
+        <arrayindex>48</arrayindex>
+        <kp-title>Period +44</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Period +45">
+        <arrayindex>49</arrayindex>
+        <kp-title>Period +45</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Period +46">
+        <arrayindex>50</arrayindex>
+        <kp-title>Period +46</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Period +47">
+        <arrayindex>51</arrayindex>
+        <kp-title>Period +47</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Period +48">
+        <arrayindex>52</arrayindex>
+        <kp-title>Period +48</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Period +49">
+        <arrayindex>53</arrayindex>
+        <kp-title>Period +49</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Period +50">
+        <arrayindex>54</arrayindex>
+        <kp-title>Period +50</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Period +51">
+        <arrayindex>55</arrayindex>
+        <kp-title>Period +51</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Period +52">
+        <arrayindex>56</arrayindex>
+        <kp-title>Period +52</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Period +53">
+        <arrayindex>57</arrayindex>
+        <kp-title>Period +53</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Period +54">
+        <arrayindex>58</arrayindex>
+        <kp-title>Period +54</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Period +55">
+        <arrayindex>59</arrayindex>
+        <kp-title>Period +55</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Period +56">
+        <arrayindex>60</arrayindex>
+        <kp-title>Period +56</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Period +57">
+        <arrayindex>61</arrayindex>
+        <kp-title>Period +57</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Period +58">
+        <arrayindex>62</arrayindex>
+        <kp-title>Period +58</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Period +59">
+        <arrayindex>63</arrayindex>
+        <kp-title>Period +59</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Period +60">
+        <arrayindex>64</arrayindex>
+        <kp-title>Period +60</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+    </values>
+  </kpi>
+  <kpi>
+    <kp-id>265</kp-id>
+    <kp-desc>Project - Estimate to Complete and Estimate at Completion</kp-desc>
+    <values>
+      <arrayitem Desc="Est. To Complete">
+        <arrayindex>1</arrayindex>
+        <kp-title>Est. To Complete</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Est. At Completion">
+        <arrayindex>2</arrayindex>
+        <kp-title>Est. At Completion</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+    </values>
+  </kpi>
+  <kpi>
+    <kp-id>266</kp-id>
+    <kp-desc>Project - Claims</kp-desc>
+    <values>
+      <arrayitem Desc="Claims">
+        <arrayindex>1</arrayindex>
+        <kp-title>Claims</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Claims Value">
+        <arrayindex>2</arrayindex>
+        <kp-title>Claims Value</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Claims To Be Submitted">
+        <arrayindex>3</arrayindex>
+        <kp-title>Claims To Be Submitted</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Claims To Be Submitted Value">
+        <arrayindex>4</arrayindex>
+        <kp-title>Claims To Be Submitted Value</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Unpaid Claims">
+        <arrayindex>5</arrayindex>
+        <kp-title>Unpaid Claims</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Unpaid Claims Value">
+        <arrayindex>6</arrayindex>
+        <kp-title>Unpaid Claims Value</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Entered Claims">
+        <arrayindex>7</arrayindex>
+        <kp-title>Entered Claims</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Entered Claim Value">
+        <arrayindex>8</arrayindex>
+        <kp-title>Entered Claim Value</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Awaiting Approval Claims">
+        <arrayindex>9</arrayindex>
+        <kp-title>Awaiting Approval Claims</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Awaiting Approval Claim Value">
+        <arrayindex>10</arrayindex>
+        <kp-title>Awaiting Approval Claim Value</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="On Hold Claims">
+        <arrayindex>11</arrayindex>
+        <kp-title>On Hold Claims</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="On Hold Claim Value">
+        <arrayindex>12</arrayindex>
+        <kp-title>On Hold Claim Value</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Approved to Submit Claims">
+        <arrayindex>13</arrayindex>
+        <kp-title>Approved to Submit Claims</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Approved to Submit Claim Value">
+        <arrayindex>14</arrayindex>
+        <kp-title>Approved to Submit Claim Value</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Submitted Claims">
+        <arrayindex>15</arrayindex>
+        <kp-title>Submitted Claims</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Submitted Claim Value">
+        <arrayindex>16</arrayindex>
+        <kp-title>Submitted Claim Value</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Certified Claims">
+        <arrayindex>17</arrayindex>
+        <kp-title>Certified Claims</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Certified Claim Value">
+        <arrayindex>18</arrayindex>
+        <kp-title>Certified Claim Value</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Invoiced Claims">
+        <arrayindex>19</arrayindex>
+        <kp-title>Invoiced Claims</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Invoiced Claim Value">
+        <arrayindex>20</arrayindex>
+        <kp-title>Invoiced Claim Value</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Paid Claims">
+        <arrayindex>21</arrayindex>
+        <kp-title>Paid Claims</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+      <arrayitem Desc="Paid Claim Value">
+        <arrayindex>22</arrayindex>
+        <kp-title>Paid Claim Value</kp-title>
+        <kp-low-value>10000</kp-low-value>
+        <kp-high-value>50000</kp-high-value>
+      </arrayitem>
+    </values>
+  </kpi>
+</kpivalues>

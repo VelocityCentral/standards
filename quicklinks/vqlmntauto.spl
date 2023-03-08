@@ -1,0 +1,551 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : maintain auto found links
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2018
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: quicklinks/vqlmntauto.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 19Mar18  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+/*
+
+For full documentation see clibvqlauto
+
+*/
+ 
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+#include "../include/i8dictopen.spl"
+#include "../include/m4enqstk.spl"
+#include "../include/m1enqdeb.spl"
+#include "../include/m2enqcre.spl"
+#define COLOURCODE colour if-then-else(vql-status < 90, RED , GREEN ) on 0
+
+link "clib/clibvqlauto"
+ 
+field
+	ws-function-title						type string
+
+mode md-rename
+	prompt "Rename"
+	help "Change the name of the file to enable auto identification"
+mode md-open
+	prompt "Open File"
+mode md-reprocess
+	prompt "re&Process"
+	help "re-run the identification routines to assign to Pronto Object"
+mode md-delete
+	prompt "Delete"
+	help "Delete file from Storage"
+mode md-parameters
+	prompt "Parameters"
+	help "Maintain the system parameters that control auto quicklinks"
+mode md-manual-add
+	prompt "Manual Add"
+	help "Manually Add link to Pronto Object (table)"
+mode md-reload
+	prompt "Reload"
+	help "Reload all quicklinks from directory"
+
+procedure main
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	get quicklink-parameters first
+	on error
+		do clibvqlauto-maintain-parameters
+	endon
+	do i8secabt-check-abort
+		parameters are sys-consolidation-division login-id() "ZQL" "M001"
+		returning ws-function-title 
+	do i8proglog-write-log
+	do open-dictionary
+	do maintain-auto-links
+end-procedure
+
+screen maintain-auto-links
+local
+	lf-return							pic x(1024) type string
+	window
+	title ws-function-title
+	datagrid occurs 22
+	select *
+		from quicklink-import
+	allowed search remove md-open md-rename md-reprocess md-delete md-manual-add md-parameters
+		md-reload
+detail
+	if screenmode = md-parameters
+		do clibvqlauto-maintain-parameters
+	endif
+	if screenmode = md-open
+		do open-file parameters are vql-resolved-path 
+	endif
+	if screenmode = md-rename
+		do rename-file entry once parameters are vql-path vql-filename vql-id
+		reselect
+		refresh
+	endif
+	if screenmode = md-reprocess
+		do delete-and-reprocess parameters are vql-path vql-filename vql-id TRUE
+		reselect
+		refresh
+	endif
+	if screenmode = md-delete
+		do delete-from-storage parameters are vql-path vql-filename vql-id
+		reselect 
+		refresh
+	endif
+	if screenmode = md-manual-add
+		do manual-add entry once parameters vql-path vql-filename vql-id
+	endif
+	if screenmode = md-reload
+		message-box param-text("<<P1>><<BR>><<p2>><<BR>><<P3>>"
+			,"This function is usually run from an application service."
+			,"It may take quite some time to run."
+			,"Are you sure?")
+			title is ws-function-title
+			message-buttons  MSG_BOX_YES_NO
+			icon MSG_BOX_QUESTION
+		if message-status() = MSG_BOX_YES
+			spl "quicklinks/vqlautorebuild"
+				parameters "-rebuild"
+				returning lf-return
+			message-box param-text("<<P1>><<BR>><<p2>>"
+				,"The function completed with the following message"
+				,lf-return)
+				title is ws-function-title
+				message-buttons  MSG_BOX_OK
+				icon MSG_BOX_INFORMATION
+		endif
+	endif
+	accept vql-id @1,1
+		title "ID"
+		when screenmode = search
+		show-value
+		COLOURCODE
+	display vql-filename @1,2 pic x(20)
+		title "File Name"
+		COLOURCODE
+	display vql-path @1,3 pic x(30)
+		title "Path"
+		COLOURCODE
+	display vql-resolved-path @1,4 pic x(30)
+		title "New Path"
+		COLOURCODE
+	display vql-status @1,5 pic zz
+		title "Status"
+		COLOURCODE
+	display vql-message @1,6 pic x(30)
+		title "Message"
+		COLOURCODE
+	display vql-date-time-added @1,7 
+		title "Date Time Found"
+		COLOURCODE
+end-screen
+
+screen rename-file
+parameters are 
+	lp-path								like ql-path
+	lp-filename							like ql-path
+	lp-rec-id							like vql-id
+local
+	lf-new-file							like ql-path
+	lf-old-filename						like ql-path
+	lf-new-filename						like ql-path
+	lf-ok								type boolean
+	lf-message							pic x(1024) type string
+	lf-old-extension					pic x(20) type string
+	i									type number
+	window @1,1 to @6,80
+		title ws-function-title
+before
+	set lf-old-extension = substring(lp-filename,pattern(lp-filename,".") + 1,strlen(lp-filename))
+detail
+	display lp-path @2,20 pic x(60)
+		title "Current Path"
+		foreground prompts
+	display lp-filename @3,20 pic x(60)
+		title "Current Name"
+		foreground prompts
+	accept  lf-new-file @4,20 pic x(60)
+		title "New Name"
+	validations
+		for i = 1 to str-len(lf-new-file)
+			if substring(lf-new-file,i,i) in ( "\" "/" "$" "%" "@" "!" "," "|" "(" ")" )
+				message-box param-text("<<P1>><<BR>><<p2>>"
+					,"There are invalid characters in the filename"
+					,"Do not enter a path.  It must be just the filename component")
+					title is ws-function-title
+					message-buttons MSG_BOX_CANCEL
+					icon MSG_BOX_STOP
+				re-enter
+			endif
+		endfor
+		if not pattern(lf-new-file,".")
+			string lf-new-file appending str-concat(".", lf-old-extension)
+		endif
+	end-validations
+	confirm auto
+	confirmed
+		//
+		set lf-old-filename = lp-path
+		if substring(lf-old-filename,strlen(lf-old-filename),strlen(lf-old-filename)) not in ( "\" "/")
+			string lf-old-filename appending "/"
+		endif
+		string lf-old-filename appending lp-filename
+		//
+		set lf-new-filename = lp-path
+		if substring(lf-new-filename,strlen(lf-new-filename),strlen(lf-new-filename)) not in ( "\" "/")
+			string lf-new-filename appending "/"
+		endif
+		string lf-new-filename appending lf-new-file
+		//
+		if file-exists(lf-new-filename,FALSE)
+			message-box param-text("<<P1>><<BR>><<p2>><<BR>><<p3>>"
+				,"The new file already exists."
+				,"Please enter a name that does not already exist"
+				,lf-new-filename)
+				title is ws-function-title
+				message-buttons MSG_BOX_CANCEL
+				icon MSG_BOX_STOP
+			re-enter lf-new-file
+		endif
+		// 
+		if not file-exists(lf-old-filename,FALSE)
+			message-box param-text("<<P1>><<BR>><<p2>>"
+				,"The old file does not exist."
+				,"There is something not right here, delete the record and re-add")
+				title is ws-function-title
+				message-buttons MSG_BOX_CANCEL
+				icon MSG_BOX_STOP
+			re-enter lf-new-file
+		endif
+		//
+		command "mv" parameters are lf-old-filename lf-new-filename
+		if exit-status() != 0
+			message-box param-text("<<P1>><<BR>><<p2>>"
+				,"The rename operation was not successful"
+				,"Do you have sufficient security?")
+				title is ws-function-title
+				message-buttons MSG_BOX_CANCEL
+				icon MSG_BOX_STOP
+			re-enter lf-new-file
+		endif
+		do delete-and-reprocess parameters are lp-path lf-new-file lp-rec-id TRUE
+			returning lf-ok lf-message
+		if not lf-ok
+			message-box lf-message
+				title is ws-function-title
+				message-buttons MSG_BOX_CANCEL
+				icon MSG_BOX_STOP
+		endif
+	end-confirm
+end-screen
+
+procedure delete-from-storage
+parameters are 
+	lp-path								like ql-path
+	lp-filename							like ql-path
+	lp-rec-id							like vql-id
+local
+	lf-filename							like ql-path
+	lf-ok								type boolean
+	lf-message							pic x(1024) type string
+	//
+	set lf-filename = lp-path
+	if substring(lf-filename,strlen(lf-filename),strlen(lf-filename)) not in ( "\" "/")
+		string lf-filename appending "/"
+	endif
+	string lf-filename appending lp-filename
+	//
+	if file-exists(lf-filename,FALSE)
+		command "rm" parameters are "-f" lf-filename
+	endif
+	if file-exists(lf-filename,FALSE)
+		message-box param-text("<<P1>><<BR>><<p2>>"
+			,"The delete operation was not successful"
+			,"Do you have sufficient security?")
+			title is ws-function-title
+			message-buttons MSG_BOX_CANCEL
+			icon MSG_BOX_STOP
+		exit
+	endif
+	do delete-and-reprocess parameters are lp-path lp-filename lp-rec-id FALSE
+		returning lf-ok lf-message
+	if not lf-ok
+		message-box lf-message
+			title is ws-function-title
+			message-buttons MSG_BOX_CANCEL
+			icon MSG_BOX_STOP
+	endif
+end-procedure
+
+procedure delete-and-reprocess
+parameters are 
+	lp-path								like ql-path
+	lp-filename							like ql-path
+	lp-rec-id							like vql-id
+	lp-reprocess						type boolean
+returning 
+	lr-ok								type boolean
+	lr-message							pic x(1024) type string
+local
+	lf-ok								type boolean
+	//
+	set lr-ok = FALSE
+	get quicklink-import 
+		on index vql-id 
+		key is lp-rec-id
+		lock
+	on error
+		set lr-message =  param-text("<<P1>><<BR>><<p2>>"
+			,"Unable to lock the import record"
+			,"Contact Support")
+		exit
+	else
+		delete quicklink-import
+		on error
+			set lr-message =  param-text("<<P1>><<BR>><<p2>>"
+				,"Unable to delete the import record"
+				,"Contact Support")
+			exit
+		endon
+	endon
+	if lp-reprocess
+		do clibvqlauto-set-logging-status parameters are TRUE
+		do clibvqlauto-assign-object
+			parameters are lp-filename lp-path 
+		if exit-status != 0
+			set lr-message = "This filename was not linked"
+			exit
+		endif
+		do clibvqlauto-set-logging-status parameters are FALSE
+	endif
+	set lr-ok = TRUE
+end-procedure
+
+procedure open-file
+parameters are 
+	lp-path								like ql-path
+local 
+	lf-path								like ql-path
+	lf-url								type boolean		
+	//
+	if uppercase(substring(ql-path,1,4)) = '4GL:'
+		message-box "You cannot open this kind of file here"
+			title is ws-function-title
+			message-buttons  MSG_BOX_CANCEL
+			icon MSG_BOX_STOP
+	else
+		set lf-path = lp-path
+		set lf-url = FALSE
+		//
+		if pattern(lf-path,'.')
+		or pattern(uppercase(lf-path),'HTTP:')
+		or pattern(uppercase(lf-path),'FTP:')
+		or pattern(uppercase(lf-path),'MAILTO:')
+		or pattern(uppercase(lf-path),'WWW.')
+			//dont add backslash
+			set lf-url = TRUE
+			// Need to add quotes around the document so Windows ShellExecute function 
+			// will recognize the filename with spaces
+			set lf-path = concat('"',str-concat(lf-path),'"')
+		else
+			// May need to a add backslash to a directory! (space in name)
+			if substring(lf-path,strlen(lf-path),strlen(lf-path)) <> '\'
+				string lf-path appending '\'
+			endif
+		endif
+		//
+		do public-determine-open-path
+			parameter
+				quick-links.*
+				lf-path
+				lf-url
+			returning
+				lf-path
+				lf-url
+		//
+		if lf-url
+		or file-exists(lf-path,0) 
+		or file-exists(lf-path,1) 
+			command lf-path
+				external
+				no-wait
+			on error
+			endon
+		else									   
+			message-box "You cannot open this kind of file here"
+				title is ws-function-title
+				message-buttons  MSG_BOX_CANCEL
+				icon MSG_BOX_STOP
+		endif					                   
+	endif
+endprocedure //open-item -----------------------------------------------------
+
+screen manual-add
+parameters
+	lp-path								like ql-path
+	lp-filename							like ql-path
+	lp-id								like vql-id
+local
+	lf-radio-table						like ql-table
+	lf-max-seq							like ql-sequence
+	window
+	title ws-function-title
+	select * from quick-links
+	form-entry
+before
+	box @2,1 to @4,80
+		title "Table"
+	set ql-table = "stock-master"
+	set ql-path = spaces
+detail
+	radio-button lf-radio-table
+		@3,20 "stock-master" title "Stock"
+		@3,30 "deb-master" title "Customer"
+		@3,38 "cre-master" title "Supplier"
+		@3,50 " " title "Manual Enter"
+		right-coordinate
+		default ql-table
+		validations
+			//
+		end-validations
+		on change
+			set ql-table = lf-radio-table
+			refresh ql-table
+		end-on
+	end-radio-button 
+	accept ql-table @5,20
+		when lf-radio-table = spaces
+		show-value
+		default ql-table
+		title "Table"
+	validations
+		get dict-object
+			on index obj-name 
+			key is ql-table
+		on error
+			message error-description(file-status())
+			get dict-usr-object
+				on index obj-name
+				key is ql-table
+			on error
+				message-box param-text("<<P1>><<BR>><<p2>>"
+					,"This is an invalid object name"
+					,"Try Again or press Help")
+					title is ws-function-title
+					message-buttons MSG_BOX_CANCEL
+					icon MSG_BOX_STOP
+				re-enter ql-table
+			endon
+		endon
+	end-validations
+	accept ql-key @6,20
+		title "Key Value"
+	on help-key
+		if ql-table not in { "stock-master" "deb-master" "cre-master" }
+			message-box param-text("<<P1>><<BR>><<p2>>"
+				,"Help is only available for the standard files"
+				,"You are responsible for getting the correct key values")
+				title is ws-function-title
+				message-buttons MSG_BOX_CANCEL
+				icon MSG_BOX_STOP
+		else
+			switch ql-table
+			case "stock-master"
+				do m4enqstk-enquire-on-stock
+					parameters ql-key SPACES SPACES
+					returning ql-key
+				reenter	optional
+			case "deb-master"
+				do m1enqdeb-enquire-on-debtors
+					parameter ql-key
+					returning ql-key
+				re-enter optional
+			case "cre-master"
+				do m2enqcre-enquire-on-creditors
+					parameters ql-key M2ENQDEF_SHOW_BALANCE SPACES
+					returning ql-key
+				reenter optional
+			end-switch
+		endif
+	end-on
+	accept ql-description @7,20
+		title "Description"
+	accept ql-path @8,20 pic x(70)
+		title "Quick link"
+		default ql-path
+	before-accept
+		if ql-path = spaces
+			do clibqlauto-apply-prefix parameters lp-filename lp-path vql-ql-root
+				returning ql-path
+		endif
+	end-before-accept
+	confirm auto
+	before
+		set ql-data-area = lowercase(sys-consolidation-division)
+		select lf-max-seq = max(ql-sequence)
+			from quick-links
+			where ql-data-area = :ql-data-area
+			and ql-table = :ql-table
+			and ql-key = :ql-key
+		end-select
+		set ql-sequence = lf-max-seq + 10
+		set ql-created-by-user = login-id
+		set ql-date-time = gmt()
+	confirmed
+	end-confirm
+end-screen
+
+procedure public-determine-open-path export
+////////////////////////////////////////////////////////////////////////
+//<CLIB_DOC>
+//This procedure can be used to manipulate the path being used to open a quick-link record
+//
+//<P1> Entire current quick-link record
+//<P2> Path as derived by core program
+//<P3> URL flag as derived by core procedure
+//
+//<R1> Path as derived by this procedure - default is <P2>
+//<R2> URL flag as determined by this procedure - default is <P3>
+////////////////////////////////////////////////////////////////////////
+parameter
+		lp-ql.*								like quick-links.*
+		lp-path								like ql-path
+		lp-url								type boolean
+returning
+		lr-path								like ql-path
+		lr-url								type boolean
+	//
+	set lr-path = lp-path
+	set lr-url = lp-url
+endprocedure// public-determine-open-path ------------------------------------
+
+procedure open-dictionary
+	do i8dictopen-open-dictionary
+		parameters	
+			DICTDEF_ALL_MAIN_DICT_TABLES//M-all the main dictionary files
+			DICTDEF_BMS_DICT			//objname:dict,dict-usr,dict-distributor
+			DICTDEF_ENV_PRODICT			//dictionary and path without suffix
+			SPACES						//only used if opening individual
+			TRUE						//Display message/abort if error found!
+			TRUE						//Open files read-only
+	//
+	do i8dictopen-open-dictionary
+		parameters	
+			DICTDEF_INDIVIDUAL_TABLES//individual
+			DICTDEF_USR_DICT		//objname:dict,dict-usr,dict-distributor
+			DICTDEF_ENV_PROUSRDICT	//dictionary and path without suffix
+			DICTDEF_DICT_DOCUMENTATION	//only used if opening individual
+			TRUE					//Display message/abort if error found!
+			FALSE					//Open files read-only
+endprocedure //open-dictionary -----------------------------------------------

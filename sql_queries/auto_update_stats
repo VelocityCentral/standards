@@ -1,0 +1,25 @@
+select  FIRST 25  
+aus_ci_stime, 
+aus_ci_database,  
+aus_ci_missed_tables,  
+aus_ci_need_tables - aus_ci_done_tables - 
+	decode(aus_ci_need_tables,0,0,	(select count(unique aus_cmd_partnum)
+									from sysadmin:aus_cmd_list
+                                 	where aus_cmd_priority > 100000
+	                                 and aus_cmd_dbs_partnum = aus_ci_dbs_partnum)) 
+as large_tables,
+ decode(aus_ci_need_tables,0,0,(select count(unique aus_cmd_partnum)
+					           from sysadmin:aus_cmd_list           
+					           where aus_cmd_priority > 100000
+					           and aus_cmd_dbs_partnum = aus_ci_dbs_partnum)) as small_tables, 
+aus_ci_done_tables
+  FROM sysadmin:aus_cmd_info  
+  WHERE aus_ci_database IS NOT NULL
+  
+  
+  SELECT SUM(aus_ci_missed_tables) as missed,  
+  sum(aus_ci_need_tables)- SUM(aus_ci_done_tables) as need,  
+  SUM(aus_ci_done_tables) as done,  
+  MIN(aus_ci_stime)::DATETIME YEAR TO MINUTE as start  
+  FROM sysadmin:aus_cmd_info
+   WHERE aus_ci_database is NOT NULL

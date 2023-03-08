@@ -1,0 +1,1388 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : Automatic Assigning of files to pronto objects for quicklinks
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2018
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: quicklinks/clibvqlauto.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 19Mar18  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+//
+/*
+
+	This documentation is in RST format.  To view this as a nice pdf goto
+	https://overbits.herokuapp.com/rsteditor/ or rst.ninjs.org and paste this content.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|           |           |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+
+	Alternatively
+
+	 =========== =========== ======================================================== 
+	  Direction   Data Type   Description                                             
+	 =========== =========== ======================================================== 
+	 =========== =========== ======================================================== 
+
+.. |date| date::
+.. header:: |date| Auto Quicklinks Documentation
+.. footer:: Page ###Page### of ###Total###
+
+===========
+clibvqlauto
+===========
+
+Although this document is titled CLIBqlauto, this file contains the documentation for the auto quicklink system as a whole.
+
+This clib is part of the Velocity Auto Quicklink facility that automatically updates quicklinks
+based on the name of the file or the path in which it is stored.
+
+There are three tables required to support the auto quicklinks system and these should be installed in the distributor dictionary.  These are documented below.
+
+
+There are three programs that use this clib
+
+	+---------------+----------+-----------------------------------------------------+
+	| Pgm Name      |Security  | Description                                         |
+	+===============+==========+=====================================================+
+	|vqlmntauto     | ZQL.M001 | Parameter maintenance and dashboard showing what    |
+	|               |          | links were found and any containing errors          |
+	+---------------+----------+-----------------------------------------------------+
+	|vqladdauto     | ZQL.T001 |Should be run with an interval parameter.            |
+	|               |          |Pgm will look at all files created in the last n     |
+	|               |          |minutes and add these to quicklinks.                 |
+	|               |          |                                                     |
+	+---------------+----------+-----------------------------------------------------+
+	|vqlautorebuild | ZQL.T002 |Complete rebuild.                                    |
+	|               |          |                                                     |
+	|               |          |-email followed by an email address will send a      |
+	|               |          |completion email to the recipient.                   |
+	|               |          |                                                     |
+	|               |          |if no other parameters are specified then the pgm    |
+	|               |          |will initialise the quicklinks and                   |
+	|               |          |quicklinks-import tables and then process all        |
+	|               |          |folders in quicklink-paths.                          |
+	|               |          |                                                     |
+	|               |          |if you wish to specify folders via parameters then   |
+	|               |          |pgm needs to be called once for each folder and      |
+	|               |          |Once at the start to initialise the tables.          |
+	|               |          |                                                     |
+	|               |          |-initialise                                          |
+	|               |          |Deletes all entries from quicklinks table for the    |
+	|               |          |current data area where                              |
+	|               |          |the ql-code = 'AF' (Autofound)                       |
+	|               |          |                                                     |
+	|               |          |Subsequent times specifying the folder recurse       |
+	|               |          |parameters.                                          |
+	+---------------+----------+-----------------------------------------------------+
+
+A reasonable machine will do a complete rebuild of 100,000 files in about 5 minutes.
+
+It is intended that vqladdauto is run at frequencies that match the change
+in files in the linked folder
+
+It is intended that vqlautorebuild is run weekly for a complete rebuild.  
+
+Plenty of logging will occur in the system-event-log to show what is happening.
+During the implementation phase, it is recommended that use is made of -debug and -maxrecords parameters.
+In live running these parameters should be avoided as they will create a large amount of IO.
+
+The programs are designed be run by application services.
+
+.. Note:: CORE Installation
+
+	This routine has "public" procedures that we expect to be overridden at each installation.
+	Therefore **It is important that it is loaded in $CORE/clib**
+
+	This will require changing the path to the include file to the full path (rather than using
+	a relative path).
+
+Use exit-status and -get-last-error for error handling
+
+Installation Steps
+~~~~~~~~~~~~~~~~~~
+
+* Create the tables in the dictionary
+* Create the module and function codes, Assign Roles and build security (Don't forget appserv must have access)
+* install programs 
+* build a list of folders and file names strucutres you are expecting.
+* Set Parameters wth vqlmntauto
+
+Module and Function codes
+-------------------------
+
+ ======  ========   ==================================  ==== ===========================  ==============
+ Module  Function   Description                         Icon Command                      Parameters
+ ======  ========   ==================================  ==== ===========================  ==============
+ ZQL      M001      Maintain Auto Generated Quicklinks   4   quicklinks/vqlmntauto         None
+ ZQL      T001      Generate Automatic Quicklinks        6   quicklinks/vqladdauto         None
+ ZQL      T002      Rebuild of Auto Quicklinks           4   quicklinks/vqlautorebuild     None
+ ======  ========   ==================================  ==== ===========================  ==============
+
+File Installation
+-----------------
+
+The following files need to be copied and compiled.
+
+  ==========   ====================  =======
+  Folder       Program File          Compile
+  ==========   ====================  =======
+  Quicklinks   vqlmntauto.spl          Yes
+  quicklinks   vqladdauto.spl          Yes
+  quicklinks   vqlautorebuild.spl      Yes
+  quicklinks   ivqlauto.spl            No
+  clib         clibvqlauto.spl         Yes
+  ==========   ====================  =======
+
+
+
+Setting up the parameters - vqlmntauto.spl
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The rebuild and add options have a -recurse option that will cause recursive traversals of a particular folder.
+If you are not expecting sub folders then each expected folder path should appear in the parameters list.
+Below is an example of what a parameter list might look like
+
+	=====================================  ===================  =====================
+	Unix Path                              Quicklinks Path      Object
+	=====================================  ===================  =====================
+	/pro/data/winfiles/employees           \\pronto\employees   resource-master
+	/pro/data/winfiles/eft                 \\pronto\eft         cre-master
+	/pro/data/winfiles/statements          \\pronto\statements  deb-master
+	/pro/data/winfiles/quicklinks/machine  \\pronto\quicklinks  stock-serial-machine
+	/pro/data/winfiles/quicklinks          \\pronto\quicklinks  
+	=====================================  ===================  =====================
+
+The sequence is important.  Start with the most specific going towards the most general.
+
+Overrides
+~~~~~~~~~
+It is expected that any given installation will override certain routines.  In particular 
+-public-determine-quicklink, -public-insert-acl and -public-description-from-filename.  See below for details.
+
+Application Services
+~~~~~~~~~~~~~~~~~~~~
+Vqladdauto 
+----------
+Vqladdauto accepts the following parameters:
+
+	=====================  ==============================================================================
+	Parameter Name         Description
+	=====================  ==============================================================================
+	-folder <folder name>  The folder to search.  This could be a parent folder.
+	-today                 Only look at files that were created or changed today
+	-minsago <n>           Only look at files created in the last n minutes.  In which case this should 
+	                       be the same as than the number of minutes between executions of the service.  
+	-recurse               This will cause the execution to recurse through all the subfolders.
+	=====================  ==============================================================================
+
+Unfortunately, appservices has a limit of 40 characters for any parameter and sometimes this is insufficient
+for a folder name.  In which case create a custom program that is included in appservices and get it to 
+run vqladdauto.  Don't forget the returning parameter.
+
+Don’t forget to click the option for a returning parameter
+
+Vqlautorebuild
+--------------
+This may take a while depending on the number of files.  It is probably a good idea to run it once a week on a weekend.
+There are two ways to run this function.  If no parameters are passed then the quicklink-import table is truncated 
+and the all the quicklinks with ql-code set to 'AF' (auto find) are deleted and the entries are re-built from 
+the quicklink-paths table.
+
+The second method is to rebuild the paths from a selection of folders manually, bypassing the quicklink-paths entry 
+(or conceivably adding to those already generated).  This is done by either:
+
+*  running the program with no parameters followed by running it with the -folder and -recurse options
+*  or, running the program with the -initialise parameter (which will remove the AF quicklinks and truncate 
+   the import table) followed by running it with the -folder and -recurse options one or more times.
+
+Vqlautorebuild accepts the following parameters:
+
+	=====================  ==================================================================================
+	Parameter Name         Description
+	=====================  ==================================================================================
+	-folder <folder name>  The folder to search.  This could be a parent folder.
+	-initialise            delete all quicklinks where ql-code is set to AF and truncate the import table.
+	-recurse               This will cause the execution to recurse through all the subfolders.
+	-email                 An email address to send a completion email message
+	-debug	               Will create significant amount of entries in system-event-log for debugging.
+	-maxrecords            Places an upper limit on the total number of records returned by the find command				
+	=====================  ==================================================================================
+
+Don’t forget to click the option for a returning parameter
+
+Dashboard
+~~~~~~~~~
+
+Use vqlmntauto to see the dashboard.  The status field is particularly useful.  90 indicates that the file was 
+successfully linked to a Pronto object.  Anything else requires attention.  Create an alert intelligence 
+trigger over this file. Use after insert with the status field not 90.  
+Make it group delay by 5 minutes and use this as the body text::
+
+	[HEADER]<html><table align=center border="0" style="border: 2px solid;border-color:silver"
+	[HEADER]cellpadding=5 cellspacing=0>
+	[HEADER]<style type="text/css"> th {border-bottom: 1px solid; border-color:silver; background-color:#FFFFE1; 
+	[HEADER]text-align:left}</style>
+	[HEADER]<tr align=left><th>File Name</th><th>Message</th><th>Found</th></tr>
+	<tr bgcolor="#E6FAFF">
+	  <td>{n.vql-filename}</td>
+	  <td>{n.vql-message}</td>
+	  <td>{n.vql-date-time-added}</td>
+	 </tr>
+	[FOOTER]</tbody></table><br><hr>
+
+The dashboard entries are colour coded. Red lines indicate that the file as not linked.  
+Use the Open function to view the link.
+There are three things that can be done at this point:
+
+*  Use the rename and re-Process functions.  This will rename the file and create an auto link.
+*  Use the Delete button to remove the file from the disk and delete it from the import table.
+*  Use the manual add function to create a manual link.  This has the same effect as manually adding 
+   the link to the system.  You will be prompted to select the table and key values for the table.
+
+Tables
+~~~~~~
+
+The following tables are required in the distributor dictionary.
+
+quicklink-import
+----------------
+
+Description : Quicklink Import
+
+Table Name : vqlimport0
+
+
+Indexes
+
+    +-----+------+------+----------+
+    |Index|Unique|Fields|Descending|
+    +=====+======+======+==========+
+    |1    |YES   |vql-id|          |
+    +-----+------+------+----------+
+
+Field List
+
+    +-------------------+---------------+---------+-----------------+
+    |Field              |Description    |Data Type|Pic              |
+    +===================+===============+=========+=================+
+    |vql-id             |ID             |Numeric  |9(10)            |
+    +-------------------+---------------+---------+-----------------+
+    |vql-filename       |Filename       |Alpha    |x(256)           |
+    +-------------------+---------------+---------+-----------------+
+    |vql-path           |Path           |Alpha    |x(512)           |
+    +-------------------+---------------+---------+-----------------+
+    |vql-resolved-path  |Resolved Path  |Alpha    |x(512)           |
+    +-------------------+---------------+---------+-----------------+
+    |vql-status         |Status         |Numeric  |9(4)             |
+    +-------------------+---------------+---------+-----------------+
+    |vql-message        |Message        |Alpha    |x(256)           |
+    +-------------------+---------------+---------+-----------------+
+    |vql-object         |Pronto Object  |Alpha    |x(60)            |
+    +-------------------+---------------+---------+-----------------+
+    |vql-keys           |Keys           |Alpha    |x(256)           |
+    +-------------------+---------------+---------+-----------------+
+    |vql-date-time-added|Date Time Added|Local DTM|dd/mm/yy hh:mm:ss|
+    +-------------------+---------------+---------+-----------------+
+
+
+quicklink-parameters
+--------------------
+
+Description : Quicklink Parameters
+
+Table Name : vqlparas0
+
+
+Indexes
+
+    +-----+------+------+----------+
+    |Index|Unique|Fields|Descending|
+    +=====+======+======+==========+
+    |1    |YES   |vql-id|          |
+    +-----+------+------+----------+
+
+Field List
+
+    +-------------+--------------------+---------+------+
+    |Field        |Description         |Data Type|Pic   |
+    +=============+====================+=========+======+
+    |vql-id       |ID                  |Numeric  |9(10) |
+    +-------------+--------------------+---------+------+
+    |vql-root     |Quicklinks Root Node|Alpha    |x(512)|
+    +-------------+--------------------+---------+------+
+    |vql-ql-root  |Quicklink Root      |Alpha    |x(512)|
+    +-------------+--------------------+---------+------+
+    |vql-separator|Field Separator     |Alpha    |x(1)  |
+    +-------------+--------------------+---------+------+
+
+
+quicklink-paths
+---------------
+
+Description : Quicklink Paths
+
+Table Name : vqlpaths0
+
+
+Indexes
+
+    +-----+------+-------------+----------+
+    |Index|Unique|Fields       |Descending|
+    +=====+======+=============+==========+
+    |1    |YES   |vql-id       |          |
+    +-----+------+-------------+----------+
+    |2    |YES   |vql-unix-path|          |
+    +-----+------+-------------+----------+
+
+Field List
+
+    +-----------------+-----------------------------------+---------+------+
+    |Field            |Description                        |Data Type|Pic   |
+    +=================+===================================+=========+======+
+    |vql-id           |ID                                 |Numeric  |9(10) |
+    +-----------------+-----------------------------------+---------+------+
+    |vql-unix-path    |Unix Path                          |Alpha    |x(512)|
+    +-----------------+-----------------------------------+---------+------+
+    |vql-ql-path      |Quicklink Path                     |Alpha    |x(512)|
+    +-----------------+-----------------------------------+---------+------+
+    |vql-pronto-object|Default Pronto Object for this path|Alpha    |x(128)|
+    +-----------------+-----------------------------------+---------+------+
+
+Routines
+~~~~~~~~
+
+clibvqlauto-assign-object 
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Determine the pronto object and related keys from a given file name and path.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|  In       |String 1k  |Filename without path                                   |
+	+-----------+-----------+--------------------------------------------------------+
+	|  In       |String 1k  |Unix Path                                               |
+	+-----------+-----------+--------------------------------------------------------+
+	|  Out      |Boolean    |True if successful match to pronto object and keys      |
+	+-----------+-----------+--------------------------------------------------------+
+	|  Out      |String 256 |Any Error Message                                       |
+	+-----------+-----------+--------------------------------------------------------+
+	|  Out      |String 128 |The name of he linked Pronto Object                     |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |String 128 |Array of keys to Pronto Object                          |
+	|           |Occurs 10  |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+
+
+
+clibqlauto-apply-prefix 
+~~~~~~~~~~~~~~~~~~~~~~~
+
+This routines takes a unix path and filename and replaces it with a correct windows path.
+
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|  In       |String 1k  |Filename without path                                   |
+	+-----------+-----------+--------------------------------------------------------+
+	|  In       |String 1k  |Unix Path                                               |
+	+-----------+-----------+--------------------------------------------------------+
+	|  In       |String 1k  |Windows Path                                            |
+	+-----------+-----------+--------------------------------------------------------+
+	|  Out      |String 1k  |Correct Windows Path                                    |
+	+-----------+-----------+--------------------------------------------------------+
+
+
+clibvqlauto-public-description-from-filename 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+This routine is an override to the standard one found in the programs listed above.
+It provides the implementor with the ability to programatically change the generated description.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|  In       |String 1k  |Filename without path                                   |
+	+-----------+-----------+--------------------------------------------------------+
+	|  In       |String 1k  |Unix Path                                               |
+	+-----------+-----------+--------------------------------------------------------+
+	|  In       |String 1k  |Pronto Table                                            |
+	+-----------+-----------+--------------------------------------------------------+
+	|  In       |String 1k  |System Generated description                            |
+	+-----------+-----------+--------------------------------------------------------+
+	|  Out      |String 1k  |Override Description                                    |
+	+-----------+-----------+--------------------------------------------------------+
+
+Below is an example of how to write a new description for debtor statements and eft files
+where the relevant date is part of the file name::
+
+	procedure clibvqlauto-public-description-from-filename export
+	parameters
+		lp-filename					pic x(1024) type string
+		lp-path						pic x(1024) type string
+		lp-table					pic x(1024) type string
+		lp-description				pic x(1024) type string
+	returning
+		lr-description				pic x(1024) type string
+	local
+		lf-date						type date
+		lf-work						type string
+		lf-year						type string
+		lf-month					type string
+		lf-day						type string
+		if pattern(uppercase(lp-filename), '_STAT_')
+			//  debtors statemetn
+			set lf-date = julian(01,
+				num( substring(lp-filename,
+						pattern(lp-filename,'_STAT_')  + 11,
+						strlen(lp-filename) - 4)),
+				num( substring(lp-filename,
+						pattern(lp-filename,'_STAT_')  + 6,
+						pattern(lp-filename,'_STAT_')  + 9,)))
+			set lr-description = concat( 'Statement ' 
+				str(year(lf-date)) ' ' month-name(lf-date))
+		elseif pattern(lp-filename,'_RA_') <> 0
+			set lf-work = substring(lp-filename,pattern(lp-filename,"_RA_") + 4,strlen(lp-filename))
+			set lf-year = substring(lf-work,1,4)
+			set lf-work = substring(lf-work,6,strlen(lf-work))
+			set lf-month = substring(lf-work,1,pattern(lf-work,"_") - 1)
+			set lf-work = substring(lf-work,pattern(lf-work,"_") + 1,strlen(lf-work))
+			set lf-day = substring(lf-work,1,pattern(lf-work,".") - 1)
+			set lf-date = julian(num(lf-day),num(lf-month),num(lf-year))
+			set lr-description = concat( 'Remittance ' 
+				str(year(lf-date)) ' ' month-name(lf-date) ' ' str(day(lf-date)))
+		endif
+	end-procedure
+
+clibvqlauto-public-determine-quicklink 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+This routine is called BEFORE the standard routine.  This allows overriding of the 
+standard logic that determines a quicklink from a file and folder path
+
+The key task of this routine is return the pronto object and the related keys to
+appropriate record.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 1k  |The name of file with an extension but no path.         |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |String 1k  |The UNIX path to file excluding the file name and any   |
+	|           |           |trailing /                                              |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |String 1k  |File prefix                                             |
+	|           |           |This is Windows path to the file via samba.             |
+	|           |           |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |String 128 |Array of keys to Pronto Object                          |
+	|           |Occurs 10  |                                                        |
+	|           |           |This is the filename separated by the separator         |
+	|           |           |or space as defined in the parameters.                  |
+	|           |           |                                                        |
+	|           |           |It is assumed that the keys to the object are the       |
+	|           |           |leading parts of the file name                          |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |Boolean    |True if object and keys determined                      |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |String 128 |Pronto Object Name                                      |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |String 128 |Array of keys to Pronto Object                          |
+	|           |Occurs 10  |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |String 50  |Quick links description                                 |
+	+-----------+-----------+--------------------------------------------------------+
+
+Below is an example of how it expected this routine might be used::
+
+	procedure clibvqlauto-public-determine-quicklink export
+	parameters are 
+		lp-filename					pic x(1024) type string
+		lp-path						pic x(1024) type string
+		lp-prefix					pic x(1024) type string
+		lp-keys 					KEYSARRAY
+	returning  
+		lr-object-and-keys-found	type boolean
+		lr-object					pic x(128) type string
+		lr-keys 					KEYSARRAY
+		lr-description				like ql-description
+	local 
+		i							type number
+		lf-resource-no				like resource-no
+		//
+		set lr-object-and-keys-found = FALSE
+		if pattern(lp-path,"/pro/data/winfiles/statements") = 1
+		or pattern(lp-path,"/pro/data/winfiles/eft") = 1
+			// Don't check anything else - otherwise we will be here forever.
+			exit
+		endif
+		for i = 1 to occurence(lp-keys)
+			set lr-keys[i] = lp-keys[i]
+		end-for
+		//
+		if pattern(lp-path,"/pro/data/winfiles/employees") = 1
+			// We expect the first part of the key to be the employee code
+			do get-resource-no-from-code parameters are lp-keys[1]
+				returning lf-resource-no
+			get resource-master
+				on index resource-no
+				key is lf-resource-no
+			on error
+				LOG("Unable to determine employee from resource code")
+			else
+				set lr-keys[*] = spaces
+				set lr-keys[1] = str(lf-resource-no)
+				set lr-object = 'resource-master'
+				set lr-description = "Employee File"
+				set lr-object-and-keys-found = TRUE
+			endon
+		elseif pattern(lp-path,"/pro/data/winfiles/quicklinks/machine") = 1
+			// custom object
+			select * from stock-serial-machine
+				where serial-no = lr-keys[1]
+			detail
+				set lr-keys[2] = serial-stock-code
+				for i = 3 to occurrence(lr-keys)
+				set lr-keys[i] = spaces
+			endfor
+				set lr-object = 'stock-serial-machine'
+			set lr-description = spaces
+			set lr-object-and-keys-found = TRUE
+				break
+			end-select
+		endif
+	end-procedure
+
+
+clibvqlauto-public-insert-acl 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+This routine allows for the entry of ACCESS CONTROL LISTS that provide security
+for access to the quicklink. 
+
+.. Note:: It does not alter the samba security. It simply controls the open function
+          within quicklinks.
+
+There are no return parameters however auto-transaction is enabled and this transaction
+will span the addition of the quicklink record.  That means you can use exit 1 in this
+override to cause a rollback of the addition of the quicklink.  This is important if
+the program is expecting to add an acl for security reasons.  If, for any reason, the 
+acl does not get added the quicklink will be open for all access (because it has just been
+added).  It is better to not add the record at all than allow security breach.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |Record     |Quicklinks record just added                            |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |String 1k  |Filename excluding path but including extension         |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |String 1k  |Unix path to the file                                   |
+	+-----------+-----------+--------------------------------------------------------+
+
+Below is an example of an acl might be implemented::
+
+	procedure clibvqlauto-public-insert-acl export
+		auto-transaction
+	parameters are 
+		qlrec.*						like quick-links
+		lp-filename					pic x(1024) type string
+		lp-path						pic x(1024) type string
+		if qlrec.ql-table = 'resource-master'
+			initialise quick-links-acl
+			set ql-data-area  = qlrec.ql-data-area
+			set ql-table = qlrec.ql-table
+			set ql-key = qlrec.ql-key
+			set ql-sequence = qlrec.ql-sequence
+			set qlacl-sequence = 10
+			set qlacl-type = "F"
+			set qlacl-code = "ZUSR.S016"
+			set qlacl-maint-ctrl = "O"
+			insert quick-links-acl
+			on error
+				exit 1
+			endon
+		endif
+	end-procedure
+
+clibvqlauto-set-logging-status 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Logging will write records to the system-event-log.  It will write *A LOT OF RECORDS*.
+Therefore it will have an impact on performance.
+
+It is recommended that this is only used for debugging.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |Boolean    |True - enabled.  False - disabled.                      |
+	+-----------+-----------+--------------------------------------------------------+
+
+If you wish to have logging in your override program then you should copy the same code
+from here (i.e. the field definition (ws-logging-enabled) and the #define for LOG(A))
+
+You should also implement -set-logging-status in the override using this technique::
+
+	procedure clibvqlauto-set-logging-status export
+	parameters
+		lp-logging-state					type boolean
+		set ws-logging-enabled = lp-logging-state
+		do next clibvqlauto-set-logging-status parameters are lp-logging-state
+	end-procedure
+
+Logging is disabled in the standard programs EXCEPT in the re-process function of vqlmntauto
+
+
+Here is a useful query to see what has been logged::
+
+	SELECT *
+	FROM system_event_log
+	WHERE sel_type = 'APPS'
+	AND vj_utc2local(sel_date_time) > (CURRENT - (14 UNITS minute))
+	ORDER BY sel_date_time desc
+
+
+clibvqlauto-check-for-existing-links 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+This routine can be called at any time but typically it will be for a single run of the 
+calling program.
+
+When enabled it will cause every insert to check that the passed file does not occur
+anywhere in the quick-links table prior to insert.  The query to check this unimaginably
+slow because there is no suitable index so only enable this function if you need it.
+
+It is strongly recommended that you do not enable it for rebuilds.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|    In     |Boolean    |True=Check file is not already linked.                  |
+	|           |           |                                                        |
+	|           |           |False=Do Not check                                      |
+	+-----------+-----------+--------------------------------------------------------+
+*/
+
+#include "../include/i8proglogparam.spl"
+#include "../quicklinks/ivqlauto.spl"
+ 
+#define KEYSARRAY  pic x(128) type string occurs 10
+
+link 'clib/clibwrtevntlog'
+
+#define LOG(A) \
+	if ws-logging-enabled \
+		do clibwrtevntlog-write-log parameters are IWRTEVNTLOG_LEVEL_DEBUG 'APPS'   \
+			str-concat(substring(get-param(0),pattern(get-param(0),"[~/]*$"),str-len(get-param(0))) \
+			,"|",str(pid())) \
+		A \
+	endif
+
+field
+	ws-last-error						pic x(1024) type string 
+	ws-logging-enabled					type boolean
+	ws-check-for-existing-links			type boolean
+	ws-data-area						like ql-data-area
+
+mode md-system-parameters
+	prompt "System Parameters"
+	help "Maintain System Wide Parameters"
+
+procedure library-init
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8proglogparam-write-log parameters are "clibvqlauto"
+	set ws-check-for-existing-links = FALSE
+	set ws-logging-enabled = FALSE
+	do open-files
+	get quicklink-parameters
+		first
+	on error
+		initialise quicklink-parameters
+		set vql-id = 1
+		set vql-root = "/pro/data"
+		set vql-ql-root = concat("http://" node-name() "/ext")
+		set vql-separator = "_"
+		insert quicklink-parameters
+		on error
+			abort "Unable to initialise parameters"
+		endon
+	endon
+end-procedure
+
+procedure open-files 
+	open quicklink-import
+	on error ENOENT
+		open quicklink-import create permanent
+		on error
+			abort "Unable to create import file"
+		endon
+	endon
+	open quicklink-parameters
+	on error ENOENT
+		open quicklink-parameters create permanent
+		on error
+			abort "Unable to create parameters file"
+		endon
+	endon
+	open quicklink-paths
+	on error ENOENT
+		open quicklink-paths create permanent
+		on error
+			abort "Unable to create paths file"
+		endon
+	endon
+end-procedure
+
+procedure clibvqlauto-get-last-error export
+returning
+	lr-message							like ws-last-error
+	set lr-message = ws-last-error
+end-procedure
+
+procedure clibvqlauto-set-logging-status export
+parameters
+	lp-logging-state					type boolean
+	// True : Logging enabled.
+	set ws-logging-enabled = lp-logging-state
+end-procedure
+
+procedure clibvqlauto-check-for-existing-links export
+parameters
+	lp-check-state						type boolean
+	//
+	set ws-check-for-existing-links = lp-check-state
+end-procedure
+
+procedure clibvqlauto-assign-object export
+parameters
+	lp-filename							pic x(1024) type string
+	lp-path								pic x(1024) type string
+returning
+	lr-pronto-object					pic x(128) type string
+	lr-keys								KEYSARRAY
+local 
+	lf-ok								type boolean
+	lf-message							pic x(256) type string
+	lf-id								type number
+	lf-object-and-keys-found			type boolean
+//	lf-contents							type number
+	lf-description						like ql-description
+	//
+	LOG(str-concat("clib processing PATH:" lp-path " FILE:" lp-filename))
+	if substring(lp-path,1,1) != "/"
+		LOG("This program should be called with full path names not relative path names")
+	endif
+	initialise quicklink-import 
+	set vql-id = lf-id
+	set vql-filename = lp-filename
+	set vql-path = lp-path
+	set vql-status = 0 // inserted
+	set vql-message = "Imported"
+	set vql-status = IVQLAUTO_FILE_FOUND
+	set vql-message = "Unable to detect automatically"
+	set vql-date-time-added = systime()
+	//
+	set vql-status = IVQLAUTO_NO_PATH_DEFN
+	// check paths file
+	//
+	select * from quicklink-paths
+		where vql-unix-path = lp-path
+	detail
+		set lr-pronto-object = vql-pronto-object
+		do determine-quicklink
+			parameters are lp-filename lp-path vql-ql-path lr-pronto-object
+			returning  lf-object-and-keys-found lr-pronto-object lr-keys lf-description
+		if exit-status() = 1
+			// this object already exists in quicklinks
+			LOG("Exit Status 1")
+			set vql-message = "File already exists in quicklinks"
+			set vql-status = IVQLAUTO_LINK_EXISTS
+			do add-next-import-record parameters are lp-filename lp-path
+			exit 0
+		endif
+		do clibqlauto-apply-prefix
+			parameters are lp-filename lp-path vql-ql-path 
+			returning vql-resolved-path
+		if lf-object-and-keys-found
+			do insert-quicklink
+				parameters are lp-filename lp-path vql-ql-path lr-pronto-object lr-keys lf-description
+				returning lf-ok lf-message 
+			if lf-ok
+				set vql-status = IVQLAUTO_LINK_ESTABLISHED
+				set vql-message = lf-message
+			else
+				set vql-status = IVQLAUTO_FILE_FOUND
+				set vql-message = lf-message
+			endif
+			LOG(vql-message)
+			do add-next-import-record parameters are lp-filename lp-path
+			break
+		else
+			LOG("Object Not Determined")
+			set ws-last-error = "Object Not Determined"
+			set vql-status = IVQLAUTO_NO_OBJ_KEYS
+			set vql-message = "Unable to determine object"
+			do add-next-import-record parameters are lp-filename lp-path
+			exit 1
+		endif
+	end-select
+end-procedure
+
+procedure add-next-import-record
+parameters
+	lp-filename							pic x(1024) type string
+	lp-path								pic x(1024) type string
+local
+	lf-id								like vql-id
+// buffer contents other than id must be set
+	select lf-id = max(vql-id)
+		from quicklink-import
+	end-select
+	set lf-id += 1
+	set vql-id = lf-id
+	insert quicklink-import
+	on error
+		LOG(concat(lp-path,"/",lp-filename, " not added to quicklink import because " error-description(file-status())))
+	endon
+end-procedure
+
+procedure clibqlauto-apply-prefix export
+// Use this routine to remove the path
+// from the file and subsitute it with the right quicklink path
+parameters are 
+	lp-filename							pic x(1024) type string
+	lp-path								pic x(1024) type string
+	lp-prefix							pic x(1024) type string
+returning  
+	lr-path								pic x(1024) type string
+local
+	lf-backslash-used					type boolean
+	lf-remove-from						type number
+	i									type number
+	//
+	// find the bit where both the prefix and path match.  FROM THE END.
+	// ignoring slash characters
+	if pattern(lp-prefix , "\\")	// note that this is escaped
+		set lf-backslash-used = TRUE
+		do str-substitute parameters are lp-prefix "\" "/" returning lp-prefix
+	endif
+	// now slowly remove one character at a time from the front of the prefix
+	// until we find a match in the path....
+	for i = 1 to str-len(lp-prefix)
+		set lf-remove-from =  pattern(lp-path,substring(lp-prefix,i,str-len(lp-prefix)))
+		if lf-remove-from != 0
+			break  // we found it
+		endif
+	end-for
+	// now i is the position in the PREFIX where they start to be the same
+	// and lf-remove-from is the poistion in the incoming path where they
+	// start to be the same.
+	string lp-prefix deleting i to str-len(lp-prefix) 
+	string lp-prefix appending "/"
+	set lr-path = lp-path
+	string lr-path deleting 1 to lf-remove-from - 1
+	string lr-path inserting lp-prefix at 1
+	if substring(lr-path,str-len(lr-path),str-len(lr-path)) != "/"
+		string lr-path appending "/"
+	endif
+	string lr-path appending lp-filename
+	if lf-backslash-used
+		do str-substitute parameters are lr-path "/" "\" returning lr-path
+	endif
+end-procedure
+
+procedure keys-array-to-string
+parameters are
+	lp-keys								KEYSARRAY
+returning
+	lr-string							pic x(1024) type string
+local
+	i 									type number
+	// there must be 1.
+	set lr-string = lp-keys[1]
+	for i = 2 to occurence(lp-keys)	
+		if lp-keys[i] != spaces
+			string lr-string appending concat("/" lp-keys[i])
+		endif
+	end-for
+end-procedure
+
+procedure check-for-existing-link
+parameters
+	lp-filename							pic x(1024) type string
+	lp-prefix							pic x(1024) type string
+returning
+	lr-found							type boolean
+	lr-object							pic x(128) type string
+	lr-keys 							KEYSARRAY
+	lr-description						like ql-description
+local
+	lf-path								like ql-path
+	lf-area								like ql-data-area
+	lf-count							type number
+	set lr-found = FALSE
+	// Check for a non-auto link to the file
+	set lf-path = lp-prefix
+	if substring(lf-path,str-len(lf-path),str-len(lf-path)) not in { '/' '\' }
+		string lf-path appending "/"
+	endif
+	string lf-path appending lp-filename
+	do get-data-area returning lf-area
+	//
+	// This query is achingly slow.  We should not do this for a full rebuild
+	//
+	select lf-count = count(*)
+		from quick-links
+		where ql-data-area = :lf-area
+		and ql-path = :lf-path
+		database-sql
+	end-select
+	if lf-count > 0
+		set lr-found = TRUE
+		set lr-object = ql-table
+		set lr-description = ql-description
+		do qlpath-to-keys-array parameters are ql-path returning lr-keys
+		exit
+	end-if
+end-procedure
+
+procedure insert-quicklink
+parameters are 
+	lp-filename							pic x(1024) type string
+	lp-path								pic x(1024) type string
+	lp-prefix							pic x(1024) type string
+	lp-object							pic x(128) type string
+	lp-keys 							KEYSARRAY
+	lp-description						like ql-description
+returning  
+	lr-ok								type boolean
+	lr-message							pic x(512) type string
+local
+	lf-seq								like ql-sequence
+	lf-key								like ql-key
+	lf-path								like ql-path
+	i									type number
+	lf-data-area						like ql-data-area
+	lf-error-no							type number
+	lf-commit							type boolean
+	//
+	LOG(concat("insert-quicklink:",lp-description))
+	do get-data-area returning lf-data-area
+	do keys-array-to-string parameter are lp-keys returning lf-key
+	//
+	do clibqlauto-apply-prefix parameters are lp-filename lp-path lp-prefix
+		returning lf-path
+	//
+	// does it already exist?
+	//
+	set i = 0
+	select i = count(*)
+		from quick-links 
+		where ql-data-area = :lf-data-area
+		and ql-table = :lp-object
+		and ql-key = :lf-key
+		and ql-path = :lf-path
+		DATABASE-SQL
+	end-select
+	if i > 0
+		set lr-message = "Already Exists in quicklinks so not adding"
+		set lr-ok = FALSE
+		exit
+	endif
+	//
+	// Add it
+	//
+	select lf-seq = max(ql-sequence)
+		from quick-links
+		where ql-data-area = :lf-data-area
+		and ql-table = :lp-object
+		and ql-key = :lf-key
+	end-select
+	set lf-seq += 10
+	set lf-commit = TRUE
+	initialise quick-links
+	set ql-sequence = lf-seq
+	set ql-data-area = lf-data-area
+	set ql-table = lp-object
+	set ql-key = lf-key
+	set ql-path = lf-path
+	set ql-description = lp-description
+	set ql-created-by-user = login-id
+	set ql-date-time = sys-time
+	set ql-user-only-alpha4-1 = 'AF'
+	do clibvqlauto-public-code-from-filename
+		parameters lp-filename lp-path lp-object lp-description
+		returning ql-code
+	if ql-code = spaces
+		set ql-code = 'AF'
+	endif
+	insert quick-links
+	on error
+		set lf-error-no = file-status()
+		LOG(error-description(lf-error-no))
+		set lr-message = concat("unable to add:" error-description(lf-error-no))
+		set lr-ok = FALSE
+	else
+		set lr-message = "Quicklink Automatically Added"
+		set lr-ok = TRUE
+	endon
+		do clibvqlauto-public-insert-acl
+			parameters are quick-links.* lp-filename lp-path
+		if exit-status != 0
+			LOG("An error occurred during addition of the access control list")
+		endif
+end-procedure
+
+procedure clibvqlauto-public-description-from-filename export
+parameters
+	lp-filename							pic x(1024) type string
+	lp-path								pic x(1024) type string
+	lp-table							pic x(1024) type string
+	lp-description						pic x(1024) type string
+returning
+	lr-description						pic x(1024) type string
+	//
+	set lr-description = lp-description
+end-procedure
+
+procedure clibvqlauto-public-code-from-filename export
+parameters
+	lp-filename							pic x(1024) type string
+	lp-path								pic x(1024) type string
+	lp-table							pic x(1024) type string
+	lp-description						pic x(1024) type string
+returning
+	lr-code								like ql-code
+	//
+	set lr-code = 'AF'
+end-procedure
+
+procedure split-keys
+parameters
+	lp-filename							pic x(1024) type string
+returning
+	lr-keys								KEYSARRAY
+local 
+	i									type number
+	j									type number
+	//
+	set j = 1
+	for i = 1 to str-len(lp-filename)
+		// At GDR I found they had customers with spaces in the customer code.
+		// These ended up in the saved invoice from truform so I removed
+		// this check and all seemed well.
+		// if substring(lp-filename,i,i) in { ' ' vql-separator }
+		if substring(lp-filename,i,i) in { vql-separator }
+			set j += 1
+			if j > occurence(lr-keys)
+				exit 1
+			endif
+		elseif substring(lp-filename,i,i) = "." 
+			exit 0
+		else
+			string lr-keys[j] appending substring(lp-filename,i,i)
+		endif
+	endfor
+end-procedure
+
+procedure qlpath-to-keys-array
+parameters 
+	lp-key								like ql-key
+returning
+	lr-keys								KEYSARRAY
+local
+	i									type number
+	j									type number
+	//
+	set j = 1
+	for i = 1 to str-len(lp-key)
+		if substring(lp-key,i,i) = "|"
+			set j += 1
+		else
+			string lr-keys[j] appending substring(lp-key,i,i) 
+		endif
+	endfor
+end-procedure
+
+procedure determine-quicklink 
+parameters are 
+	lp-filename							pic x(1024) type string
+	lp-path								pic x(1024) type string
+	lp-prefix							pic x(1024) type string
+	lp-object							pic x(128) type string
+returning  
+	lr-object-and-keys-found			type boolean
+	lr-object							pic x(128) type string
+	lr-keys 							KEYSARRAY
+	lr-description						like ql-description
+local
+	i									type number
+	lf-keys 							KEYSARRAY
+	lf-key-count						type number
+	lf-found 							type boolean
+	//
+	set lr-object-and-keys-found = FALSE
+	//
+	if ws-check-for-existing-links
+		LOG("Checking Existing Link")
+	do check-for-existing-link
+		parameters lp-filename lp-prefix
+		returning lf-found lr-object lr-keys lr-description
+	if lf-found
+		LOG("Existing Link found")
+		set lr-object-and-keys-found = TRUE
+		exit 1
+	end-if
+	endif
+	//
+	do split-keys parameters are lp-filename returning lf-keys
+	do clibvqlauto-public-determine-quicklink
+		parameters are lp-filename lp-path lp-prefix lf-keys 
+		returning  lr-object-and-keys-found lr-object lr-keys lr-description
+	if not lr-object-and-keys-found
+		LOG(str-concat('NO Override/' lp-object "/" lf-keys[1]))
+		if lp-object = spaces or lp-object = "stock-master"
+			get stock-master on index stock-code key is lf-keys[1]
+			on error
+			else
+				set lf-key-count = 1
+				LOG("Must be Stock Master")
+				set lr-object = "stock-master"
+				set lr-object-and-keys-found = TRUE
+			endon
+		elseif lp-object = spaces or lp-object = "deb-master"
+			get deb-master on index accountcode key is lf-keys[1]
+			on error
+			else
+				set lf-key-count = 1
+				LOG("Must be debtor Master")
+				set lr-object = "deb-master"
+				set lr-object-and-keys-found = TRUE
+			endon
+		elseif lp-object = spaces or lp-object = "cre-master"
+			get cre-master on index cre-accountcode key is lf-keys[1]
+			on error
+			else
+				set lf-key-count = 1
+				LOG("Must be creditor Master")
+				set lr-object = "cre-master"
+				set lr-object-and-keys-found = TRUE
+			endon
+		endif
+		for i = lf-key-count + 1 to occurence(lf-keys)
+			if lr-description = spaces
+				set lr-description = lf-keys[i]
+			else
+				string lr-description appending concat( " ",lf-keys[i])
+			endif
+			set lf-keys[i] = spaces
+		end-for
+		for i = 1 to occurence(lf-keys)
+			set lr-keys[i] = lf-keys[i]
+		endfor
+		do clibvqlauto-public-description-from-filename
+			parameters lp-filename lp-path lr-object lr-description			
+			returning lr-description		
+	endif
+end-procedure
+
+procedure clibvqlauto-public-determine-quicklink export
+/*
+this routine is called BEFORE the standard routine.
+Returns:
+lr-object - the name of the pronto object.
+lr-keys - an array of keys to the object.  It must be ONLY the key values.
+lr-object-and-keys-found - if false then the standard routine runs,
+	if True it means the override found something and that should be used.
+*/
+parameters are 
+	lp-filename							pic x(1024) type string
+	lp-path								pic x(1024) type string
+	lp-prefix							pic x(1024) type string
+	lp-keys 							KEYSARRAY
+returning  
+	lr-object-and-keys-found			type boolean
+	lr-object							pic x(128) type string
+	lr-keys 							KEYSARRAY
+	lr-description						like ql-description
+local 
+	i									type number
+	//
+	for i = 1 to occurence(lp-keys)
+		set lr-keys[i] = lp-keys[i]
+	end-for
+	// Change the following to true if your override finds something
+	set lr-object-and-keys-found = FALSE
+end-procedure
+
+procedure clibvqlauto-public-insert-acl export
+	auto-transaction
+parameters are 
+	qlrec.*								like quick-links
+	lp-filename							pic x(1024) type string
+	lp-path								pic x(1024) type string
+/*
+This procedure is called within the procedure that adds quicklinks.
+Use to add access-control-lists for a given file.
+
+The routine implements auto-transaction so it is important that the correct
+exit status is returned on failed add.  This is vital because if you are 
+going to add an ACL then we can assume that the addition is critical.  IF 
+the acl add fails, then we should not insert the quicklink at all, as there
+is the potential for uncontrolled access to a file that you wanted controlled access.
+
+Sample Code::
+
+	if qlrec.ql-table = 'resource-master'
+		initialise quick-links-acl
+		set ql-data-area  = qlrec.ql-data-area
+		set ql-table = qlrec.ql-table
+		set ql-key = qlrec.ql-key
+		set ql-sequence = qlrec.ql-sequence
+		set qlacl-sequence = 10
+		set qlacl-type = "F"
+		set qlacl-code = "ZUSR.S016"
+		set qlacl-maint-ctrl = "O"
+		insert quick-links-acl
+		on error
+			exit 1
+		endon
+	endif
+
+*/
+
+
+end-procedure
+
+screen clibvqlauto-maintain-parameters export
+	window
+	datagrid occurs 14
+	select *
+		from quicklink-paths
+		order by vql-id
+	allowed search entry correct remove md-system-parameters
+detail
+	if screenmode = md-system-parameters
+		do maintain-system-parameters correct once
+	endif
+	accept vql-id @1,1
+		title "ID"
+	accept vql-unix-path @1,2 pic x(30)
+		title "Unix Path"
+		help "The full unix path to a particular file"
+	accept vql-ql-path @1,3 pic x(30)
+		title "Quicklinks Path"
+		help "The Quicklinks path that will be substitued"
+	accept vql-pronto-object @1,4 pic x(60)
+		title "Object"
+		help "The pronto object that will be linked to the file"
+		optional
+end-screen
+
+screen maintain-system-parameters
+	window
+	select *
+		from quicklink-parameters
+		where vql-id = 1
+before
+	get quicklink-parameters 
+		on index vql-id 
+		key is 1
+	on error
+		initialise quicklink-parameters
+		set vql-id = 1
+		insert quicklink-parameters
+	endon
+detail
+	accept vql-root @2,10 pic x(70)
+		prompt "Root"
+	display "The root node is a unix folder on this system that is the root node" @3,2
+		foreground prompts
+	display "of all quicklinks.  This path will be replaced with quicklinks path" @4,2
+		foreground prompts
+	display "for all linked files" @5,2
+		foreground prompts
+	accept vql-ql-root @7,10 pic x(70)
+		Prompt "Quicklink Root"
+	display "This is the path that will replace the root unit path in the quicklink entry" @8,2
+		foreground prompts
+	display "This will be either a Samba Drive or an http path that can be accessed via the Web Client" @9,2
+		foreground prompts
+ 	accept vql-separator @11,10
+		prompt "Separator"
+	display "This character should be used in file names to separate multiple key components" @12,2
+		foreground prompts
+	display "e.g. A serialised item has two keys - the stock code and the serial number." @13,2
+		foreground prompts
+	display "to link a file to a pronto serial number both the stock code and the serial number" @14,2
+		foreground prompts
+	display "must be in the file name - separated by this character" @15,2
+		foreground prompts
+	display "Note that the system will use EITHER spaces OR this character as the separator." @16,2
+		foreground prompts
+	confirm auto
+	end-confirm
+end-screen
+
+procedure str-substitute
+parameters
+	lp-string					pic x(1024) type string
+	lp-replace-char				pic x
+	lp-with-char				pic x
+returning
+	lr-string					pic x(1024) type string
+	//
+	// be careful to protect spaces
+	set lr-string = lp-string
+	while pattern(lr-string,lp-replace-char) != 0
+		string lr-string replacing lp-with-char at pattern(lr-string,lp-replace-char)
+	end-while
+end-procedure
+
+procedure get-data-area
+returning 
+	lr-data-area					like ql-data-area
+	if ws-data-area != spaces
+		set lr-data-area = ws-data-area
+		exit 0
+	endif
+	get system-companies
+		on index sys-comp-code
+		key is sys-consolidation-division
+	on error
+		exit
+	endon
+	do basename parameters are sys-comp-path
+		returning lr-data-area
+	set ws-data-area = lr-data-area
+end-procedure
+
+procedure basename
+parameters are
+	lp-path										pic x(512) type string
+returning
+	lr-base										pic x(512) type string
+	lr-path										pic x(512) type string
+local
+	i								type number
+	for i = strlen(lp-path) down to 1
+		if substring(lp-path,i,i) in { '/' '\' }
+			break
+		endif
+	endfor
+	set lr-base = substring(lp-path,i + 1,str-len(lp-path))
+	set lr-path = substring(lp-path,1, i - 1 )
+end-procedure

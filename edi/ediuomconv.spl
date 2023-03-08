@@ -1,0 +1,127 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : EDI UOM Conversions Codes 
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2011
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: ediuomconv.spl
+//
+// Methods:
+//
+// Maintenance
+// (P1) -m
+//
+// Enquiry
+// (P1) -e
+// (R1) Return EDI UOM Code (optional)
+//
+// Modification History
+// Date		Who	SDR		What
+// 22Feb2	mdr	77		Adapted for GD Rutter
+// 10May11	mdr 		Written	
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include '../include/i8secabt.spl'
+#include '../include/i8proglog.spl'
+#include '../include/i8secok.spl'
+#include '../include/i85codes.spl'
+
+field
+	ws-function-title					type string
+
+mode md-select
+	prompt 'Select'
+	help 'Press [ENTER] to select marked code'
+	currency
+
+procedure main
+returning 
+	lr-edi-uom-desc						like v-edi-uom-desc
+	local field
+		lf-ok							type boolean
+	get system-control
+		first
+	on error
+		abort 'No Control Record'
+	endon
+	if get-param(1) = '-m'
+		do i8secabt-check-abort
+			parameters are sys-consolidation-division login-id() 'ZEDI' 'M052'
+			returning ws-function-title
+		do i8proglog-write-log
+		do uom-screen search entry correct remove 
+	else
+		do i8secok-check-ok
+			parameters are sys-consolidation-division login-id() 'ZEDI' 'E052'
+			returning lf-ok ws-function-title
+		do i8proglog-write-log
+		do uom-screen md-select search returning lr-edi-uom-desc
+	endif
+end-procedure
+
+screen uom-screen 
+returning 
+	lr-edi-uom-desc						like v-edi-uom-desc
+	window @1,1 to @22,40
+	title is ws-function-title
+	select * from edi-uom-conversions
+		order by v-edi-uom-desc
+	datagrid occurs 21
+	review-from-start
+before
+detail
+	accept v-edi-uom-desc @1,1 pic x(20)
+		title 'EDI UOM'
+		help 'Enter an EDI UOM for conversion'
+		show-value
+		when screenmode() in {search entry}
+	validations
+		if screenmode() = entry
+			get edi-uom-conversions
+				lookup
+				on index v-edi-uom-desc
+			on error
+			else
+				message 'This EDI UOM code already exists'
+				re-enter
+			endon
+		endif
+	end-validations
+	accept v-edi-pronto-uom-desc @1,2 pic x(20)
+		title 'Pronto UOM'
+		help 'Enter the Pronto UOM that releates to the EDI UOM'
+		show-value
+		when screenmode() in {search entry correct}
+		default v-edi-pronto-uom-desc
+		on help-key
+			set sys-tbl-type = 'UM'					
+			do i85codes-table-help					
+			if sys-tbl-code > SPACES
+				set v-edi-pronto-uom-desc = sys-tbl-code
+			endif
+			reenter
+			optional
+		end-on
+	validations
+		get system-table
+		on index sys-tbl-type sys-tbl-code
+		key is 'UM' v-edi-pronto-uom-desc
+		lookup
+	on error
+		message 'Pronto UOM does not exist'
+		re-enter
+	end-on
+	end-validations
+	confirm default is no
+		when screenmode() = remove
+	confirmed
+		if screenmode() = md-select
+			set lr-edi-uom-desc = v-edi-uom-desc
+			exit
+		endif
+	end-confirm
+end-screen

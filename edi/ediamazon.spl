@@ -1,0 +1,1237 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : EDI Receiver Program
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2012
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: edi/ediplcreceiver.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 20Sep17	rjb	log 115	Written
+//=========================================================================//
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include '../include/i8secabt.spl'
+#include '../include/i8proglog.spl'
+#include '../include/i8cmdcopy.spl'
+#include '../include/i8cmdrm.spl'
+#include "../include/iwrtevntlog.spl"
+
+link 'clib/clibwrtevntlog'
+
+#define LOG(A) \
+	do clibwrtevntlog-write-log parameters are IWRTEVNTLOG_LEVEL_DEBUG 'APPS'   \
+		str-concat(substring(get-param(0),pattern(get-param(0),"[~/]*$"),str-len(get-param(0))) \
+		,"|",str(pid())) \
+	A
+
+// #define EMAILADDR 'ray.burns@velocityglobal.co.nz'
+#define EMAILADDR 'ray.burns@velocityglobal.co.nz'
+#define INPUTPATTERN '^?*.xml'
+
+
+
+// #define XML-HANDLE		number
+//#define NODE_TEXT(A,B) xml-node-text(xml-get-child-by-name(A,B,spaces))
+#define NODE_TEXT(A,B) xml-node-text(xml-get-child-by-name(A,B,xml-node-ns-prefix(A)))
+// #define NODE_TEXT_NS(A,B,C) xml-node-text(xml-get-child-by-name(A,B,C))
+#define NODE_DATE(A,B) \
+	julian( num(substring(xml-node-text(xml-get-child-by-name(A,B,spaces)),7,8)), \
+		 	num(substring(xml-node-text(xml-get-child-by-name(A,B,spaces)),5,6)), \
+			num(substring(xml-node-text(xml-get-child-by-name(A,B,spaces)),1,4)))
+
+link 'clib/clibserial'
+link "clib/clibvpdf"
+link 'clib/clibvedi.spl'
+link 'clib/clibvdate.spl'
+ 
+#define FTPFOLDER '/tmp'
+
+object amz-trans
+	type is external
+	separator is "	"  // careful - there is tab between the quotes
+	record is
+		at-date							pic x(128) type string
+		at-order-id						pic x(128) type string
+		at-sku							pic x(128) type string
+		at-trans-type					pic x(128) type string
+		at-payment-type					pic x(128) type string
+		at-payment-detail				pic x(128) type string
+		at-amount						pic x(128) type string
+		at-quantity						pic x(128) type string
+		at-product-title				pic x(128) type string
+	end-record
+
+object amz-trans-mem
+	type is memory
+	record is
+		am-seq							type number
+		am-date							type date
+		am-order-id						pic x(60) type string
+		am-sku							pic x(60) type string
+		am-trans-type					pic x(60) type string
+		am-payment-type					pic x(60) type string
+		am-payment-detail				pic x(128) type string
+		am-amount						type number
+		am-quantity						type number
+	end-record
+	key is am-seq
+	key is am-order-id am-seq
+
+field
+	ws-function-title					type string
+	ws-data-area						like ql-data-area
+	ws-data-directory					pic x(512) type string
+	ws-datadir-in						type string pic x(100)
+	ws-datadir-in-save					type string pic x(100)
+	ws-ql-description					like ql-description
+	ws-ql-path							like ql-path
+	ws-ql-path-parameter				like ql-path
+//	ws-mail-send						type boolean
+
+
+procedure main
+returning	
+	lr-results							pic x(1024) type string
+local
+	x									type number
+	lf-send-mail						type boolean
+	lf-file-count						type number
+	get system-control first
+	on error
+		abort 'No Control Record'
+	endon
+	get system-companies
+		on index sys-comp-code
+		key is sys-consolidation-division
+	on error
+		abort 'No System Companies Record'
+	endon
+	set lr-results = "No Orders to Process at this time"
+	do i8secabt-check-abort
+		parameters are sys-consolidation-division login-id() 'ZEDI' 'T050'
+		returning ws-function-title 
+	do i8proglog-write-log
+	// Set Working Directories
+	set ws-datadir-in = str-concat(get-env('PROEDI'),'/in/amazon')
+	set ws-datadir-in-save = str-concat(get-env('PROEDI'),'/in_save/amazon')
+	// Determine Data Area
+	set ws-data-directory = dir()
+	for x = str-len(ws-data-directory) down to 1
+		if sub-string(ws-data-directory,x,x) in ( '/' '\' )
+			break
+		endif
+	end-for
+	// 
+	// TODO:  Add a subroutine that checks all the suot entries are defined.
+	do verify-setup returning lr-results
+	if exit-status > 0
+		exit
+	endif
+	set ws-data-area = sub-string(ws-data-directory,x + 1,str-len(ws-data-directory))
+	// Set Quick Links Path
+	set ws-ql-path = str-concat('\\bluelab-xi-01\edi-' sys-consolidation-division '\in_save\amazon\')
+	// Pre-process XML files
+	// the xml file will be processed against the xslt file ( cheers shaun )
+	// and the resulting text files placed in the edi-in-saved folder for processing
+	// as text files
+	IF MAIL-START('Amazon EDI Orders received and requiring attention') endif
+	if mail-add-line('EDI Orders have been recieved.') endif
+	if mail-add-line('Please use the EDI Order Processing screen to assess and update the following receipt numbers:') endif
+	// Pickup Any Orders Received
+	do process-edi-orders returning lf-send-mail lf-file-count lr-results
+	if lf-send-mail 
+		IF MAIL-SEND(EMAILADDR,FALSE,FALSE) endif
+		LOG(concat('Success: ' lr-results))
+	else
+		if mail-cancel() endif
+		if v-edi-receipt-number != 0
+			if mail-start("Bluelab - Amazon email did not send") endif
+			if mail-add-line('Mail did not send.') endif
+			if mail-add-line(str-concat('possibly:' str(v-edi-receipt-number))) endif
+			if mail-add-line(str-concat('Files Processed:' str(lf-file-count))) endif
+			IF MAIL-SEND(EMAILADDR,TRUE,FALSE) endif
+			LOG(concat('Something Wrong:' str(v-edi-receipt-number) ':Mail did not send'))
+		endif
+//		if mail-cancel() endif
+	end-if
+end-procedure
+
+
+procedure xml-report-heading
+	print company-name 
+		"Amazon EDI File Import" col 50
+		today() in col 80
+		tod() 
+		"Page" in col 105
+		page-no()
+		on xmlreport
+	skip
+		on xmlreport
+end-procedure
+
+procedure receipt-report-heading
+	print company-name 
+		"Amazon PO File Import" col 50
+		today() in col 80
+		tod() 
+		"Page" in col 105
+		page-no()
+		on receiptreport
+	skip
+		on receiptreport
+end-procedure
+
+procedure process-edi-orders
+local 
+	lf-loaded							type boolean
+	lf-spool							pic x(20) type string
+	lf-import-pdf-path					pic x(1024) type string
+	lf-import-pdf-file					pic x(1024) type string
+	lf-xml-file							pic x(1024) type string
+	lf-txt-file							pic x(1024) type string
+	lf-ok								type boolean
+	lf-error-message					pic x(1024) type string
+	lf-order-count						type number
+returning
+	lr-send-mail						type boolean
+	lr-file-count						type number
+	lr-results							pic x(1024) type string
+	// 
+	// Iterate across directory for xml files  This is the $PROEDI/in folder
+	//
+	set lr-send-mail = FALSE
+	set lr-file-count = 0
+	set lr-results = 'No Files to Process'
+	if start-dir-search(ws-datadir-in,INPUTPATTERN)
+		repeat
+			set lf-xml-file = next-dir-entry()
+		until lf-xml-file = spaces
+			//
+			// there is functionality below that will only send the mail if there
+			// are warnings or errors.  At present mail is sent every time.
+			// To change this, change the following line to FALSE
+			//
+			set lr-send-mail = TRUE
+			set lr-file-count += 1
+			/*
+			do clibserial-next-serial-number
+				parameters are
+					'ZEDI'
+				returning
+					lf-receipt-number
+			*/
+			// 
+			// Establish report
+			//
+			report concat("Amazon EDI Import:" lf-xml-file)
+				header is xml-report-heading
+				full-xml
+				name xmlreport
+			page on xmlreport
+			// 
+			// capture spool file for mailing purposes
+			//
+			set lf-spool = spool-file-name()
+			print "File Name:" lf-xml-file on xmlreport
+			//
+			// check text file exists
+			//
+			set lf-txt-file = lf-xml-file
+			string lf-txt-file replacing ".txt" at pattern(lf-xml-file , ".xml$")
+			if not file-exists(concat(ws-datadir-in "/" lf-txt-file),false)
+				print "Corresponding fee file " str-concat(lf-txt-file) " is missing.  Nothing processed"
+					on xmlreport
+				//    ************************************************************
+				//    *                                                          *
+				//    *    WATCHOUT : there is break out of the loop here        *
+				//    *                                                          *
+				//    ************************************************************
+				continue
+			endif
+			//
+			// Load the Text file into memory
+			//
+			do load-text-file-to-memory parameters are
+				concat(ws-datadir-in "/" lf-txt-file) 
+			if exit-status = 1
+				continue
+			endif
+			//
+			// Start the transaction and process the order
+			//
+			transaction begin
+			do load-edi-order
+				parameters are concat(ws-datadir-in "/" lf-xml-file)
+				returning lf-loaded lf-order-count
+			//
+			// Commit or rollback as necessary
+			//
+			if lf-loaded
+				transaction commit
+				//
+				// save the edi file to in save
+				//
+				do i8cmdcopy-os-call-copy
+					parameters are 
+						concat(ws-datadir-in "/" lf-xml-file) 
+						ws-datadir-in-save
+				if exit-status() != 0
+					print "EDI file was not removed from sftp folder:" exit-status()
+						on xmlreport
+				else
+					do i8cmdrm-os-call-rm parameters are
+						concat(ws-datadir-in "/" lf-xml-file) 
+					if exit-status() != 0
+						print "EDI XML file was not removed from $PROEDI/in folder:" exit-status()
+							on xmlreport
+						print "Duplicate orders could be processed!"
+							on xmlreport
+					endif
+				endif
+				//
+				// Now do the same with the txt file
+				//
+				do i8cmdcopy-os-call-copy
+					parameters are 
+						concat(ws-datadir-in "/" lf-txt-file) 
+						ws-datadir-in-save
+				if exit-status() != 0
+					print "EDI file was not removed from sftp folder:" exit-status()
+						on xmlreport
+				else
+					do i8cmdrm-os-call-rm parameters are
+						concat(ws-datadir-in "/" lf-txt-file) 
+					if exit-status() != 0
+						print "EDI txt file was not removed from $PROEDI/in folder:" exit-status()
+							on xmlreport
+						print "Duplicate orders could be processed!"
+					endif
+				endif
+				//  complete the report and add to email
+				report finished on xmlreport
+				//
+				// Establish the name and folder for a pdf of the report
+				//
+				set lf-import-pdf-file =  "REC_" 
+				string lf-import-pdf-file appending lf-xml-file
+//				string lf-import-pdf-file replacing "pdf" at (str-len(lf-import-pdf-file) - 2)
+				string lf-import-pdf-file replacing ".txt" at pattern(lf-xml-file , ".xml$")
+				set lf-import-pdf-path =  concat( DIR() "/edi/in_save/amazon/" lf-import-pdf-file)
+				do clibvpdf-create parameters are lf-spool lf-import-pdf-path
+				if exit-status != 0
+					do clibvpdf-get-last-error returning lf-error-message
+					if mail-add-line("Failed to create PDF:") endif
+					if mail-add-line(lf-error-message) endif
+				else
+					if mail-attach(lf-import-pdf-path,lf-import-pdf-file,0,0,0) endif
+				endif
+				set lr-results = concat('Trans committed.' str(lf-order-count) ' orders loaded')
+			else
+				transaction rollback
+				print "Receipt Failed to load."
+					on xmlreport
+				print "Transaction Rolled back."
+				report  finished on xmlreport
+				set lf-import-pdf-file =  "REC_" 
+				string lf-import-pdf-file appending lf-xml-file
+				string lf-import-pdf-file replacing ".txt" at pattern(lf-xml-file , ".xml$")
+				set lf-import-pdf-path =  concat( DIR() "/edi/in_save/amazon/" lf-import-pdf-file)
+				do clibvpdf-create parameters are lf-spool lf-import-pdf-path
+				if exit-status != 0
+					do clibvpdf-get-last-error returning lf-error-message
+					if mail-add-line("Failed to create PDF:") endif
+					if mail-add-line(lf-error-message) endif
+				else
+					if mail-attach(lf-import-pdf-path,lf-import-pdf-path,0,0,0) endif
+				endif
+				if mail-add-line(concat(lf-import-pdf-file "**** Failed to Load **** ORDER LOST!!! ****")) endif
+				set lr-results = 'Trans rolled Back'
+			endif
+		end-repeat
+		if finish-dir-search() endif
+	endif
+	if lr-file-count > 0
+		string lr-results appending concat(" ", str(lr-file-count) " Files processed")
+	endif
+end-procedure
+
+procedure load-edi-order
+parameters
+	lp-filename							pic x(256) type string
+returning
+	lr-loaded-ok						type boolean
+	lr-order-count						type number
+local
+	lf-doc								type XML-HANDLE
+	lf-root								type XML-HANDLE
+	//
+	set lr-loaded-ok = FALSE
+	set lf-doc = xml-parse-file(lp-filename)
+	if lf-doc
+		set lf-root = xml-get-root-node(lf-doc)
+		if lf-root = 0
+			print "ERROR:  XML import failed to locate root node of xml document"
+				on xmlreport
+			exit
+		endif
+		do process-docs parameters are lf-root 
+			returning lr-order-count
+	else
+		print "ERROR: XML import failed to parse the xml file"
+			on xmlreport
+		exit
+	endif
+	set lr-loaded-ok = TRUE
+end-procedure
+
+procedure process-docs
+parameters
+	lp-root-node						type XML-HANDLE
+returning
+	lr-doc-count						type number
+local
+	lf-message							type XML-HANDLE
+	lf-order							type XML-HANDLE
+	lf-ok								type boolean
+	lf-receipt-number					like v-edi-receipt-number
+	lf-spool							pic x(20) type string
+	lf-import-pdf-path					pic x(1024) type string
+	lf-import-pdf-file					pic x(1024) type string
+	lf-error-message					pic x(1024) type string
+//
+	if lp-root-node = 0
+		print "ERROR: There was a problem finding the documents node of the tree"
+			on xmlreport
+		exit 
+	endif
+	set lf-message = xml-get-first-child-node(lp-root-node)
+	while lf-message
+		if xml-node-name(lf-message) = "Message"
+			// find the order node
+			set lf-order = xml-get-child-by-name(lf-message,"Order",spaces)
+			if lf-order != 0
+				// Assign Next Receipt Number
+				select lf-receipt-number = max(v-edi-receipt-number)
+					from edi-order-headers
+				end-select
+				set lf-receipt-number += 1
+				report concat("Amazon EDI Import Receipt:" str(lf-receipt-number))
+					header is receipt-report-heading
+					full-xml
+					name receiptreport
+				page on receiptreport
+				set lf-spool = spool-file-name
+				set lf-import-pdf-file =  "REC_" 
+				string lf-import-pdf-file appending str(lf-receipt-number)
+				string lf-import-pdf-file appending ".pdf"
+				set lf-import-pdf-path =  concat( DIR() "/edi/in_save/amazon/" lf-import-pdf-file)
+				do process-this-po parameters are lf-order lf-receipt-number
+					returning lf-ok
+				if lf-ok
+					set lr-doc-count += 1
+				endif
+				//
+				// Quicklinks
+				//
+				set ws-ql-description = concat('Customer Order File ',str(lf-receipt-number))
+				set ws-ql-path-parameter = str-concat(ws-ql-path,lf-import-pdf-file)
+				do clibvedi-add-quick-link
+					parameters are lf-receipt-number ws-data-area ws-ql-path-parameter ws-ql-description
+				//
+				// Validate the receipt
+				//
+				do clibvedi-validate-receipt
+					parameters are lf-receipt-number
+				// If Error Free Continue And Load Into Pronto
+				get edi-order-headers
+					on index v-edi-receipt-number
+					key is lf-receipt-number
+				on error
+				else
+					print "Order loaded into EDI Orders"
+						on receiptreport
+					if v-edi-h-warning-count != ZERO or v-edi-h-error-count != ZERO
+						print "Warnings: " v-edi-h-warning-count
+							on receiptreport
+						print "Errors: " v-edi-h-error-count
+							on receiptreport
+					endif
+					if v-edi-h-warning-count = ZERO and v-edi-h-error-count = ZERO
+						print "Loading Order via m50loadso ..."
+							on receiptreport
+						do clibvedi-load-order
+							parameters are v-edi-receipt-number
+						print "Order Loaded ..."
+							on receiptreport
+					endif
+					report finished on receiptreport
+					if mail-add-line(str-concat('Customer:' v-edi-h-accountcode)) endif
+					if mail-add-line(str-concat('Errors:' str(v-edi-h-error-count)
+												' Warnings:' str(v-edi-h-warning-count))) endif
+					do clibvpdf-create parameters are lf-spool lf-import-pdf-path
+					if exit-status != 0
+						do clibvpdf-get-last-error returning lf-error-message
+						if mail-add-line("Failed to create PDF:") endif
+						if mail-add-line(lf-error-message) endif
+					else
+						if mail-attach(lf-import-pdf-path,lf-import-pdf-path,0,0,0) endif
+					endif
+				end-on
+			endif
+		else
+			if xml-node-name(lf-message) not in ("Header", "MessageType")
+				print "WARNING: There was a child node of the Documents tree that was not a 'Message' :" 
+					xml-node-name(lf-message)
+					on xmlreport
+			endif
+		endif
+		set lf-message = xml-get-next-node(lf-message)
+	end-while
+end-procedure
+
+procedure process-this-po
+parameters
+	lp-po-node							type XML-HANDLE // the order node
+	lp-receipt-number					like v-edi-receipt-number
+returning
+	lr-ok								type boolean
+local
+	lf-ok								type boolean
+	lf-po								type string
+	lf-delivery							type XML-HANDLE
+	lf-misc-node						type XML-HANDLE
+	lf-doc-date							type date
+	lf-customer							like accountcode
+	lf-datetime							type datetime
+	lf-channel							pic x(60) type string
+	//
+	set lr-ok = TRUE
+	//
+	do get-suot-currency parameters are "AMZSYS" "CUS"
+	set lf-customer = suot-alpha-20-1
+	get deb-master
+		on index accountcode
+		key is lf-customer
+	on error ENOREC
+		print "Unable to determine customer code"
+			on receiptreport
+		set lr-ok = FALSE
+		exit
+	endon
+	set lf-po = NODE_TEXT(lp-po-node,"AmazonOrderID")
+	set lf-channel = NODE_TEXT(lp-po-node,"SalesChannel")
+	do clibvdate-epoch-string-to-datetime parameters are 
+		NODE_TEXT(lp-po-node,"PurchaseDate") TRUE
+		returning lf-datetime
+	set lf-doc-date = date-from-datetime(lf-datetime,FALSE)
+	set lf-delivery = lf-doc-date
+	print "Customer:" accountcode shortname
+			on receiptreport
+	print 132"-"
+			on receiptreport
+	// add the header record
+	initialise edi-order-headers
+	set v-edi-receipt-number = lp-receipt-number
+	set v-edi-h-order-date = today()
+	set v-edi-h-delivery-date = lf-doc-date
+	set v-edi-h-cust-reference = lf-po
+	set v-edi-h-accountcode = accountcode
+	set v-edi-h-warehouse = warehouse
+	set v-edi-h-date-received = gmt()
+	set v-edi-h-addr-supplied = "N"
+// Test user supplied address
+	set v-edi-h-addr-supplied = "Y"
+	// need to the xml node for the address  --
+	// message/order/fulfillmentdata/address
+	set lf-misc-node = xml-get-child-by-name(
+			xml-get-child-by-name(lp-po-node,"FulfillmentData",spaces), 
+			"Address", spaces)
+	set v-edi-h-std-addr1 = NODE_TEXT(lf-misc-node,"City")
+	set v-edi-h-std-addr2 = NODE_TEXT(lf-misc-node,"State")
+	set v-edi-h-std-addr3 = NODE_TEXT(lf-misc-node,"Country")
+	set v-edi-h-postcode = NODE_TEXT(lf-misc-node,"PostalCode")
+	insert edi-order-headers
+	on error
+		print "Failed to add header:" error-description(file-status())
+			on receiptreport
+		set lr-ok = FALSE
+	endon
+	//
+	// process the lines
+	//
+	do process-lines parameters are lp-po-node lp-receipt-number returning lr-ok
+	//
+	//  Print the whole tree
+	//
+//	print 132"-"
+//	print "XML Tree for this order (for Velocity)"
+//	skip
+//	do traverse-xml-tree parameters are lp-po-node 1
+//	print 132"-"
+	//
+	do add-fees parameters are lf-po lp-receipt-number lf-channel returning lf-ok
+	if not lf-ok
+		set lr-ok = FALSE
+	endif
+	//
+	do process-add-one-note-line parameters 
+		concat("Amazon Order Id: " lf-po)
+		lp-receipt-number
+		returning lf-ok
+	if not lf-ok
+		set lr-ok = FALSE
+	endif
+	do process-add-one-note-line parameters 
+		concat("Channel : " lf-channel)
+		lp-receipt-number
+		returning lf-ok
+	if not lf-ok
+		set lr-ok = FALSE
+	endif
+	do get-suot-currency parameters are "AMZCHANNEL" lf-channel
+	if exit-status = 1
+		set lr-ok = FALSE
+		print "ERROR: Invalid Sales Channel:" lf-channel
+			on receiptreport
+	endif
+	//
+	do process-add-one-note-line parameters 
+		concat(
+			NODE_TEXT(lf-misc-node,"City") "/"
+			NODE_TEXT(lf-misc-node,"State") "/"
+			NODE_TEXT(lf-misc-node,"Country") "/"
+			NODE_TEXT(lf-misc-node,"PostalCode")
+		)
+		lp-receipt-number
+		returning lf-ok
+	if not lf-ok
+		set lr-ok = FALSE
+	endif
+end-procedure
+
+procedure process-lines 
+parameters
+	lp-po-node							type XML-HANDLE
+	lp-receipt-number					like v-edi-receipt-number
+returning
+	lr-ok								type boolean
+local
+	lf-line								type XML-HANDLE
+	lf-ok								type boolean
+	lf-line-seq							type number
+	//
+	set lr-ok = TRUE
+	//
+	set lf-line = xml-get-first-child-node(lp-po-node)
+	set lf-line-seq = 0
+	while lf-line
+		if xml-node-name(lf-line) = "OrderItem"
+			set lf-line-seq += 1
+			do process-one-line parameters are lf-line lp-receipt-number lf-line-seq
+				returning lf-ok
+			if not lf-ok
+				set lr-ok = FALSE
+			endif
+		endif
+		set lf-line = xml-get-next-node(lf-line)
+	end-while
+end-procedure
+
+procedure process-one-line
+parameters
+	lp-line								type XML-HANDLE
+	lp-receipt-number					like v-edi-receipt-number
+	lp-line-seq							type number
+returning
+	lr-ok								type boolean
+local
+	lf-stock-code						like stock-code
+	lf-ordered-qty						type number
+	lf-unit-price						type number
+	lf-line-no							type number
+	lf-uom								like v-edi-l-uom
+	lf-desc								like v-edi-l-description
+	lf-gtin								like v-edi-l-gtin
+	lf-sku								like v-edi-l-cust-item
+	lf-currency							pic x(10)
+	//
+	set lr-ok = TRUE
+	//
+	do find-stock-code parameters are
+		NODE_TEXT(lp-line,"SKU")
+		returning lf-stock-code
+	if lf-stock-code = spaces
+		do find-stock-code parameters are
+			NODE_TEXT(lp-line,"ASIN")
+			returning lf-stock-code
+	endif
+	if lf-stock-code = spaces
+		do find-stock-code parameters are
+			NODE_TEXT(lp-line,"AmazonOrderItemCode")
+			returning lf-stock-code
+	endif
+	set lf-ordered-qty = num(NODE_TEXT(lp-line,"Quantity"))
+	do get-amount parameters are lp-line "Principal"
+		returning lf-unit-price lf-currency
+	set lf-line-no = lp-line-seq
+	set lf-uom = "EACH" // NODE_TEXT(lp-line,"OrderedQtyUOM")
+	set lf-gtin = spaces
+	set lf-desc = stk-description
+	//
+	get stock-master
+		on index stock-code
+		key is lf-stock-code
+	on error
+		initialise stock-master leaving stock-code
+		print lf-line-no "ERROR: Invalid Item Code" lf-stock-code
+			section "err_invalid_item"
+			on receiptreport
+	endon
+	print lf-line-no pic "zz9.9" col 1
+		lf-stock-code col 10
+		stk-description col 30
+		lf-ordered-qty col 65 pic z(6).99
+		lf-uom col 75
+		lf-unit-price col 80
+		lf-currency col 95
+		section "line_detail"
+			on receiptreport
+	print lf-desc in col 10
+		str-concat(lf-gtin "/" lf-sku)
+		section "gtin_detail"
+			on receiptreport
+	if lf-currency != dr-curr-code
+		set lr-ok = FALSE
+		print "ERROR: Currency does not match customer currency code"
+		section "err_currency"
+			on receiptreport
+	endif
+	if lf-stock-code = spaces
+		set lr-ok = FALSE
+		print "ERROR: Invalid stock code"
+		section "err_stock_code"
+			on receiptreport
+	endif
+	// Add
+	initialise edi-order-lines
+	set v-edi-receipt-number = lp-receipt-number
+	set v-edi-receipt-line = lf-line-no
+	set v-edi-l-stock-code = lf-stock-code
+	set v-edi-l-qty-ordered = lf-ordered-qty
+	set v-edi-l-uom = lf-uom
+	set v-edi-l-price = lf-unit-price
+	set v-edi-l-accept-price = "N"
+	set v-edi-l-description = lf-desc
+	set v-edi-l-gtin = lf-gtin
+	set v-edi-l-cust-item = lf-sku
+	insert edi-order-lines
+	on error
+		print "Failed to insert order line" error-description(file-status())
+			on receiptreport
+		set lr-ok = false
+	endon
+	//
+	// Now deal with the tax
+	//
+ 	do get-suot-currency 
+		parameters are "AMZSYS" "TAX"
+	get stock-master
+		on index stock-code
+		key is suot-alpha-20-1
+	on error
+		print "Failed to locate stock item for tax"  suot-alpha-20-1
+			on receiptreport
+		set lr-ok = FALSE
+	else
+		initialise edi-order-lines
+		set v-edi-receipt-number = lp-receipt-number
+		set v-edi-receipt-line = lf-line-no + 1
+		set v-edi-l-stock-code = suot-alpha-20-1
+		set v-edi-l-qty-ordered = 1
+		set v-edi-l-uom = stk-unit-desc
+		do get-amount parameters are lp-line "Tax"
+			returning lf-unit-price lf-currency
+		set v-edi-l-price = lf-unit-price
+		set v-edi-l-accept-price = "N"
+		set v-edi-l-description = "Tax"
+		insert edi-order-lines
+		on error
+			print "Failed to insert order line" error-description(file-status())
+			on receiptreport
+			set lr-ok = false
+		endon
+	endon
+end-procedure
+
+procedure process-add-one-note-line
+parameters
+	lp-note								pic x(1024) type string
+	lp-receipt-number					like v-edi-receipt-number
+returning
+	lr-ok								type boolean
+local
+	lf-note								like v-edi-l-description
+	i									type number
+	//
+	set lr-ok = TRUE
+	//
+	print lp-note col 10
+			on receiptreport
+	// Add - break up into 60 char limits
+	repeat
+		if str-len(lp-note) <= size-of(v-edi-l-description)
+			set lf-note = lp-note
+			set lp-note = spaces
+		else
+			set lf-note  = lp-note
+			// look for word boundary
+			for i = str-len(lf-note) down to 1 
+				if substring(lf-note,i,i) = space
+					break
+				endif
+			endfor
+			// check for no spaces
+			if i > 1
+				string lf-note deleting i to strlen(lf-note) // off the end
+			else
+				set lf-note = lp-note
+			endif
+		endif
+		string lp-note deleting 1 to strlen(lf-note) // off the front
+		set lp-note = ltrim(lp-note)
+		//
+		initialise edi-order-lines
+		set v-edi-receipt-number = lp-receipt-number
+		select v-edi-receipt-line  // = max(v-edi-receipt-line)
+			from edi-order-lines
+			where v-edi-receipt-number = :lp-receipt-number
+		detail
+			set v-edi-l-line-type = "N"
+		end-select
+		set v-edi-receipt-line += 1
+		set v-edi-l-line-type = "N"
+		set v-edi-l-accept-price = "N"
+		set v-edi-l-description = lf-note
+		insert edi-order-lines
+		on error
+			print "Failed to insert order line" error-description(file-status())
+			on receiptreport
+			set lr-ok = false
+		endon
+	until lp-note = spaces
+	end-repeat
+end-procedure
+
+procedure traverse-xml-tree
+parameters
+	lp-node						type XML-HANDLE
+	lp-level					pic 999
+local
+	lf-this-node				type XML-HANDLE
+	lf-child-node				type XML-HANDLE
+	lf-print-line				pic x(100) type string
+	i						type number
+	set lf-this-node = lp-node
+	while lf-this-node <> 0
+		set lf-print-line = spaces
+		for i = 1 to lp-level
+			set lf-print-line = concat(lf-print-line,chr(9))
+		end-for
+		set lf-print-line = concat(lf-print-line
+			,xml-node-name(lf-this-node),":"
+			,str-concat(xml-node-text(lf-this-node)))
+		print lf-print-line
+			on receiptreport
+		set lf-child-node = xml-get-first-child-node(lf-this-node)
+		if lf-child-node <> 0 and xml-node-name(lf-child-node) != "text"
+			do traverse-xml-tree parameters are lf-child-node, lp-level + 1
+		endif
+		set lf-this-node = xml-get-next-node(lf-this-node)
+	end-while
+	if xml-free-node-handle(lf-this-node) endif
+end-procedure 
+
+procedure load-text-file-to-memory
+parameters
+	lp-xml-file							pic x(128) type string
+local
+	lf-text-file						pic x(128) type string
+	lf-rec-counter						type number
+	//
+	//
+	set lf-text-file = lp-xml-file
+	print "Loading text file for " rtrim(lp-xml-file) 
+		on xmlreport
+	if not file-exists(lf-text-file,FALSE)
+		print "No Text File for this import (" rtrim(lf-text-file) ")"
+			on xmlreport
+		exit 1
+	endif
+	open amz-trans
+		file is lf-text-file
+		read-only
+	on error
+		print "Unable to open " rtrim(lf-text-file) error-description(file-status())
+			on xmlreport
+		exit 1
+	endon
+	open amz-trans-mem temporary
+	on error
+		print "Unable to open memory file"
+			on xmlreport
+		exit 1
+	endon
+	select * from amz-trans
+	detail
+		set lf-rec-counter += 1
+		if lf-rec-counter <= 4
+			// there are foudn header records
+			continue
+		endif
+		set am-seq = lf-rec-counter - 4
+		do clibvdate-string-to-date parameters are at-date returning am-date
+		if exit-status > 0
+			set am-date = 0
+		endif
+		set am-order-id = at-order-id
+		set am-sku = at-sku
+		set am-trans-type = at-trans-type
+		set am-payment-type = at-payment-type
+		set am-payment-detail = at-payment-detail
+		set am-amount = num(at-amount)
+		set am-quantity = num(at-quantity)
+		insert amz-trans-mem
+		on error
+			print "A Problem Occurred adding the text record to the memory table"
+			on xmlreport
+		endon
+	endselect
+end-procedure
+
+
+procedure get-suot-currency
+// Get currency on the appropriate suot record
+parameters are 
+	lp-type					like suot-tbl-type
+	lp-key					like suot-tbl-code
+//
+	get system-user-only-table
+		on index suot-tbl-type suot-tbl-code
+		key is lp-type lp-key
+	on error ENOREC
+		// check for a record where the key is actually the description....
+		select * from system-user-only-table
+			where suot-tbl-type = :lp-type
+			and suot-description = :lp-key
+		detail
+			exit 0  // we found one
+		end-select
+		// we found neither a key value or a description acting as the key....
+		initialise system-user-only-table
+			leaving suot-tbl-type suot-tbl-code
+		exit 1
+	endon
+end-procedure
+
+procedure find-stock-code
+parameters
+	lp-stock-code				pic x(60)
+returning // if spaces then not found
+	lr-stock-code				like stock-code
+	//
+	set lr-stock-code = spaces
+	//
+	//Places to look
+	//
+	// 	*	stock code
+	get stock-master
+		on index stock-code
+		key is lp-stock-code
+	on error ENOREC 
+	else 
+		set lr-stock-code = stock-code
+		exit 
+	endon
+	//	*	APN
+	select stock-code
+		from stock-master
+		where stk-apn-number = :lp-stock-code
+		order by stk-apn-number,stock-code
+		database-sql
+	detail
+		set lr-stock-code  = stock-code
+		exit
+	end-select
+	// 	*	supplier master record
+	select stock-code
+		from stock-supplier
+		where sup-stock-code = :lp-stock-code
+		order by sup-stock-code, stock-code
+		database-sql
+	detail
+		do validate-stock-code parameters are stock-code returning lr-stock-code
+		if lr-stock-code != spaces
+			exit
+		endif
+	end-select
+	// 	*	gtins
+	select stock-code
+		from stock-unit-conversion
+		where suc-trade-unit-no = :lp-stock-code
+		order by suc-trade-unit-no, stock-code
+		database-sql
+	detail
+		do validate-stock-code parameters are stock-code returning lr-stock-code
+		if lr-stock-code != spaces
+			exit
+		endif
+	end-select
+	//	* Notes
+	//	Note that this is done via the KN table.
+	//  If you want lookup on Colloqial names, 
+	//  mfg parts etc - you must define the kn.
+	//  KN contains "**" to indicate colloquial names, "##" for mfg part no
+	//  or stock-note-type code.
+	select stock-code
+		from stock-key-words
+		where stock-key-word = :lp-stock-code
+		order by stock-key-word, stock-code
+		database-sql
+	detail
+		do validate-stock-code parameters are stock-code returning lr-stock-code
+		if lr-stock-code != spaces
+			exit
+		endif
+	end-select
+end-procedure
+
+procedure validate-stock-code
+parameters
+	lp-stock-code 				like stock-code
+returning
+	lr-stock-code				like stock-code
+	//
+	get stock-master
+		on index stock-code
+		key is lp-stock-code
+	on error ENOREC
+	else
+		set lr-stock-code = lp-stock-code
+	endon
+end-procedure
+
+procedure get-amount
+parameters
+	lp-line								type XML-HANDLE // OrderItem node
+	lp-type								pic x(20) // can be "Principal" or "Tax"
+returning
+	lr-price							type number
+	lr-currency							pic x(4)
+local
+	lf-itemprice						type xml-handle
+	lf-component						type xml-handle
+	lf-amount							type xml-handle
+	//
+	set lf-itemprice = xml-get-first-child-node(lp-line)
+	while lf-itemprice
+		if xml-node-name(lp-line) = "ItemPrice"
+			set lf-component = xml-get-first-child-node(lf-itemprice)
+			while lf-component
+				if NODE_TEXT(lf-component,"Type") = lp-type
+					// this is the one we want
+					set lf-amount = xml-get-child-by-name(lf-component,"Amount",spaces)
+					set lr-price = num(xml-node-text(lf-amount))
+					set lr-currency = xml-get-node-attribute(lf-amount,"currency")
+					exit
+				endif
+				set lf-component = xml-get-first-child-node(lf-component)
+			end-while
+		endif
+		set lf-itemprice = xml-get-next-node(lf-itemprice)
+	end-while
+end-procedure
+
+procedure add-fees
+parameters are
+	lp-po								type string
+	lp-receipt-number					like v-edi-receipt-number
+	lf-channel							pic x(60) type string
+returning
+	lr-ok								type boolean
+local
+	lf-found							type boolean
+	lf-fee-type							like suot-alpha-4-1
+	lf-line-no							like v-edi-receipt-line
+	//
+	set lr-ok = TRUE
+	select * 
+		from amz-trans-mem
+		where am-order-id = lp-po
+		and am-payment-type = 'Amazon fees'
+	detail
+		set lf-found = FALSE
+		print "Processing " am-payment-detail "(" str(am-amount) ")"
+			on receiptreport
+		do get-suot-currency parameters are "AMZCHANNEL" lf-channel
+		set lf-fee-type = suot-alpha-4-1
+		select * from system-user-only-table
+			where suot-tbl-type = concat('AMZORDFEE' lf-channel)
+			and suot-description = am-payment-detail
+		detail
+			// We have found a fee line and a corresponding system table entry
+			set lf-found = TRUE
+			//
+			get stock-master
+				on index stock-code
+				key is suot-alpha-20-1
+			on error
+				print "Failed to locate stock item for " suot-alpha-20-1 "(" rtrim(am-payment-detail) ")"
+					on receiptreport
+				set lr-ok = FALSE
+			else
+				select lf-line-no = max(v-edi-receipt-line)
+					from edi-order-lines
+					where v-edi-receipt-number = :lp-receipt-number
+				end-select
+				initialise edi-order-lines
+				set v-edi-receipt-number = lp-receipt-number
+				set v-edi-receipt-line = lf-line-no + 1
+				set v-edi-l-stock-code = suot-alpha-20-1
+				set v-edi-l-qty-ordered = 1
+				set v-edi-l-uom = stk-unit-desc
+				set v-edi-l-price = am-amount
+				set v-edi-l-accept-price = "N"
+				set v-edi-l-description = am-payment-detail
+				insert edi-order-lines
+				on error
+					print "Failed to insert order line" error-description(file-status())
+						on receiptreport
+					set lr-ok = false
+				endon
+			endon
+		end-select
+	end-select
+end-procedure
+
+procedure verify-setup
+returning
+	lr-message						pic x(1024) type string
+local
+	lf-count						type number
+	lf-gl-count						type number
+	//
+	do get-suot-currency parameters "AMZSYS" "CUS"
+	if exit-status() > 0
+		set lr-message = "No AMZSYS CUS SUOT record defined"
+		exit 1
+	endif
+	get deb-master
+		on index accountcode
+		key is suot-alpha-20-1
+	on error ENOREC
+		set lr-message = "Amazon Customer does not exist"
+		exit 1
+	endon
+	//
+	do get-suot-currency parameters "AMZSYS" "TAX"
+	if exit-status() > 0
+		set lr-message = "No AMZSYS TAX SUOT record defined"
+		exit 1
+	endif
+	get stock-master
+		on index stock-code
+		key is suot-alpha-20-1
+	on error ENOREC
+		set lr-message = "Amazon Tax Stock Code does not exist"
+		exit 1
+	endon
+	//
+	set lf-count = 0
+	select *
+		from system-user-only-table
+		where suot-tbl-type = "AMZTXGL"
+	detail
+		set lf-count += 1
+		get gl-master 
+			on index gl-accountcode
+			key is suot-alpha-20-1
+		on error ENOREC
+			set lr-message = concat("Amazon GL Override Code invalid"
+								"(" suot-tbl-code ")"
+								)
+			exit 1
+		endon
+	end-select
+	if lf-count = 0
+		set lr-message = "No Override GL accounts setup"
+		exit 1
+	endif
+	//
+	set lf-count = 0
+	select lf-count = count(*) 
+		from system-user-only-table
+		where suot-tbl-type = "AMZCHANNEL"
+	end-select
+	if lf-count = 0
+		set lr-message = "There are no Amazon Sales Chanells defined"
+		exit 1
+	endif
+	//
+	//
+	set lf-count = 0
+	//
+	select * from system-user-only-table
+		where suot-tbl-type = "AMZCHANNEL"
+	detail
+		set lf-count += 1
+		select *
+			from system-user-only-table
+			where suot-tbl-type = concat("AMZORDFEE", suot-alpha-4-1)
+		detail
+			get stock-master 
+				on index stock-code
+				key is suot-alpha-20-1
+			on error ENOREC
+				set lr-message = concat("Amazon Order Fee Stock Code invalid"
+									"(" suot-description ")"
+									)
+				exit 1
+			else
+				if stk-stock-status != "Z"
+					set lr-message = str-concat("Stock Code " stock-code " is not a 'Z' item")
+					exit 1
+				endif
+				if suot-alpha-20-2 != spaces
+					get gl-master
+						on index gl-accountcode
+						key is suot-alpha-20-2
+					on error
+						set lr-message = concat("Invalid GL Account for " suot-alpha-4-1
+							"/" suot-alpha-20-1)
+						exit 1
+					endon
+				endif
+				// Now check special accounts
+				select  lf-gl-count = count(*)
+					from special-accounts
+					where gl-accountcode = :suot-alpha-20-2
+				end-select
+				if lf-gl-count = 0
+					set lr-message = str-concat(suot-alpha-20-2, " does not appear in special accounts")
+					exit 1
+				endif
+			endon
+		end-select
+	end-select
+	if lf-count = 0
+		set lr-message = "No Stock Codes for Order Fees Setup"
+		exit 1
+	endif
+end-procedure
+

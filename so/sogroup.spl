@@ -1,0 +1,186 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program :  Sales Order Grouping
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2019
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: so/sogroup.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 02Jun19  rjb         written 
+// The pupose of this program is to allow grouping of sales orders for use
+// in a dashboard.  The problem is is about trying to resolve where to place a
+// status such as backorder ready to pick - is it a backorder or is it an open
+// order.  
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+
+#define SALESGROUP "SOSTGRP"
+#define POGROUP "POSTGRP"
+ 
+field
+	ws-function-title						type string
+
+mode md-populate
+	prompt "Populate"
+	help "Populate from sale order status master"
+
+mode md-remove-ignore
+	prompt "Remove Blanks"
+	help "Records not on the table do not appear in the dashboard.  Remove those with blank description"
+
+procedure main
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8secabt-check-abort
+		parameters are sys-consolidation-division login-id() "ZUSR" "R004"
+		returning ws-function-title 
+	do i8proglog-write-log
+	do mainmenu
+end-procedure
+
+menu mainmenu
+	window
+detail
+	option "Sales Order Groupings" @1,1
+		do setup parameters are SALESGROUP "Sales Order Status Groupings"
+		do maintain-groups parameters are SALESGROUP
+	option "Purchase Order Groupings" @2,1
+		do setup parameters are POGROUP "Purchase Order Status Groupings"
+		do maintain-groups parameters are  POGROUP
+end-menu
+
+procedure setup
+parameters
+	lp-type						like suot-tbl-type
+	lp-desc						like suot-description
+	// Insert if not there
+	get system-user-only-table-types
+		on index suot-tbl-type
+		key is lp-type
+		lock
+	on error ENOREC
+		initialise system-user-only-table-types
+			leaving suot-tbl-type
+		insert system-user-only-table-types
+	endon
+	// now update
+	get system-user-only-table-types
+		on index suot-tbl-type
+		key is lp-type
+		lock
+	on error ENOREC
+	else
+		set suott-description = lp-desc
+		set suott-maint-option = 2
+		set suott-min-code-size = 2
+		set suott-max-code-size = 2
+		set suott-code-format = "A"
+		set suott-title-alpha201 = "Group Code"
+		update system-user-only-table-types
+	endon
+end-procedure
+
+procedure populate
+	select *
+		from sales-order-status-desc
+		where sosd-language = spaces
+	detail
+		get system-user-only-table
+			on index suot-tbl-type suot-tbl-code
+			key is SALESGROUP sosd-status 
+		on error ENOREC
+			initialise system-user-only-table
+				leaving suot-tbl-type suot-tbl-code
+			set suot-description = sosd-description
+			insert system-user-only-table
+			on error
+			endon
+		endon
+	end-select
+	//
+	select *
+		from purchase-order-status-desc
+		where posd-language = spaces
+	detail
+		get system-user-only-table
+			on index suot-tbl-type suot-tbl-code
+			key is POGROUP posd-status 
+		on error ENOREC
+			initialise system-user-only-table
+				leaving suot-tbl-type suot-tbl-code
+			set suot-description = posd-description
+			insert system-user-only-table
+			on error
+			endon
+		endon
+	end-select
+	//
+end-procedure
+
+screen maintain-groups
+parameters 
+	lp-type						like suot-tbl-type
+	window
+		title ws-function-title
+	datagrid occurs 22
+	select *
+		from system-user-only-table
+		where suot-tbl-type = lp-type
+	allowed search entry correct remove md-populate md-remove-ignore
+detail
+	if screenmode = md-populate
+		do populate
+		refresh
+	endif
+	if screenmode = md-remove-ignore
+		sql-delete system-user-only-table
+		where suot-tbl-type = :lp-type
+			and suot-alpha-20-1 = spaces
+		refresh
+	endif
+	accept suot-tbl-code @1,1
+		title "Status Code"
+		when screenmode in { search entry }
+		show-value
+	validations
+		switch lp-type
+		case SALESGROUP
+			get sales-order-status-desc
+				on index sosd-status sosd-language
+				key is suot-tbl-code spaces
+			on error
+				message "Invalid Code"
+				re-enter
+			endon
+			set suot-description = sosd-description
+		case POGROUP
+			get purchase-order-status-desc
+				on index posd-status posd-language
+				key is suot-tbl-code spaces
+			on error
+				message "Invalid Code"
+				re-enter
+			endon
+			set suot-description = posd-description
+		end-switch
+	end-validations
+	display suot-description @1,2
+		title "Desc"
+	accept suot-alpha-20-1 @1,3
+		title "Group"
+	confirm auto
+	before
+		set suot-tbl-type = lp-type
+	confirmed
+	end-confirm
+end-screen

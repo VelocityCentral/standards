@@ -1,0 +1,168 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : 
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2023
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: sys/vglmmenutree.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 26Jan23  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+ 
+field
+	ws-function-title						type string
+	ws-seq									type number
+
+object mem-tree
+	type memory
+	record
+		mt-seq							type number
+		mt-level						type number
+		mt-module						like smf-module
+		mt-function						like smf-function
+		mt-desc							like smf-description
+		mt-type							like smf-type
+	end-record
+	key is
+		mt-seq
+		
+
+procedure main
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8secabt-check-abort
+		parameters are sys-consolidation-division login-id() "EMS" "X000"
+		returning ws-function-title 
+	do i8proglog-write-log
+	do prompt-for-root entry 
+end-procedure
+
+screen prompt-for-root
+local
+	lf-module							like smf-module
+	lf-function							like smf-function
+	lf-count							type number
+	window
+	window-position 5
+	responsive
+	no-ok-cancel
+detail
+	screen-group // ---- select root ----------------------------
+		title "Select root"  // The title is optional
+		accept lf-module // @1,1  // in col 1 (dg)
+			title "Module"
+			help "Module"
+			uppercase
+		drop-down
+			width 38
+			select distinct smf-module from system-modules-functions
+		end-drop-down
+		on change
+			// occurs AFTER validations
+		endon
+		accept lf-function
+			title "Function"
+			uppercase
+			help "Function"
+			when lf-module != spaces
+		drop-down
+			width 38
+			concat-title
+			select smf-function , smf-description
+				from system-modules-functions
+				where smf-module = :lf-module
+				and smf-type = "X"
+		end-drop-down
+	end-screen-group // ---- select root --------------------------------------
+	confirm 
+		prompt "ok to build tree"
+		default is yes
+	confirmed
+		do build-tree parameters lf-module lf-function
+		select lf-count = count(*) from mem-tree end-select
+		message lf-count " records in tree"
+		do display-tree
+		exit
+	end-confirm 
+end-screen
+
+procedure build-tree
+parameters
+	lp-module			like smf-module
+	lp-function			like smf-function
+	close mem-tree
+	open mem-tree temporary truncate
+	set ws-seq = 0
+	do add-level parameters are lp-module lp-function 1
+end-procedure
+
+procedure add-level
+parameters
+	lp-module			like smf-module
+	lp-function			like smf-function
+	lp-level			like mt-level
+local
+	lf-this-level		like mt-level
+	if ws-seq > 10000
+		exit
+	endif
+	select *
+		from system-menu-structure
+		where sms-parent-module = :lp-module
+		and sms-parent-function = :lp-function
+	detail
+		get system-modules-functions
+			on index smf-module smf-function
+			key is sms-option-module sms-option-function
+		on error
+			exit
+		endon
+		set ws-seq += 1
+		initialise mem-tree
+		set mt-seq = ws-seq
+		set mt-level = lp-level
+		set mt-module = smf-module
+		set mt-function = smf-function
+		set mt-desc = smf-description
+		set mt-type = smf-type
+		insert mem-tree
+		if smf-type = "X"
+			set lf-this-level = lp-level + 1
+			push system-menu-structure
+			do add-level parameters are smf-module smf-function  lf-this-level
+			pop system-menu-structure
+			get system-menu-structure
+		endif
+	endselect
+end-procedure
+
+screen display-tree
+	window
+	datagrid occurs 10
+	select * from mem-tree
+detail
+	accept mt-seq col 1 pic z(5)9
+		title "Seq"
+	display mt-level col 2 pic z(5) 
+		title "Level"
+	display mt-module col 3
+		title "Module"
+	display mt-function col 4
+		title "Function"
+	display mt-desc col 5
+		title "Description"
+	display mt-type col 6
+		title "Type"
+end-screen
+

@@ -1,0 +1,370 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : 
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2023
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: nan/glhist.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 25Jan23  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+ 
+#define RANDOM_BETWEEN(A,B) \
+	(((RANDOM(0) / 32767) * (B - A)) + A)
+
+field
+	ws-function-title						type string
+
+object mem-account-types
+	type is memory
+	record is
+		mat-accountcode					like gl-accountcode
+		mat-type						like gl-account-type
+	end-record
+	key is mat-accountcode
+
+
+object posting-jnls
+	type is external
+	record is
+		pj-acct							like gl-accountcode
+		pj-subledger					like gl-subledger-code
+		pj-otherside					like gl-other-side
+		pj-trans-type					like gl-trans-type
+		pj-date							pic x(20) type string // yymmdd
+		pj-reference					like gl-reference
+		pj-details						like gl-details
+		pj-amount						like gl-amount
+	end-record
+
+object balancing-jnl
+	type memory
+	record is
+		bj-date					type date
+		bj-amount				like gl-amount
+	end-record
+	key is bj-date
+
+procedure main
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8secabt-check-abort
+		parameters are sys-consolidation-division login-id() "ZUSR" "T099"
+		returning ws-function-title 
+	do i8proglog-write-log
+	do mainmenu
+	//
+	// Update the year on the budget
+end-procedure
+
+#define OPTIONCOLOUR(A) colour if-then-else(A <= lf-step-completed, GREEN, RED)
+
+#define OPTION_COMPLETE(A,B) \
+	set lf-step-completed = A \
+	refresh whens \
+	message B
+
+
+menu mainmenu
+local
+	lf-chart-validated				type boolean
+	lf-step-completed				type number
+	lf-filename							pic x(128) type string
+	window
+//	tree-menu
+	no-hide
+before
+	display "Options Must be taken in the sequence listed" @1,1
+	display "Green is next step" @2,1
+detail
+	option "Validate Chart" @3,1
+		OPTIONCOLOUR(10)
+		do validate-chart
+		if exit-status > 0
+			message-box param-text("<<P1>><<BR>><<p2>>"
+				,"The Chart structure does not match the gl-master"
+				,"See attached report and fix before trying again")
+				title is ws-function-title
+				message-buttons  MSG_BOX_CANCEL
+				icon MSG_BOX_STOP
+		else
+			set lf-chart-validated = TRUE
+			OPTION_COMPLETE(10,"Chart Validation Complete")
+		endif
+	option "Update Budgets to current year" @4,1
+		when lf-chart-validated
+		OPTIONCOLOUR(20)
+		do change-budget-year
+		OPTION_COMPLETE(20,"Budgets updated to current year")
+//	option "Remember Subledger accounts" @5,1
+//		when lf-chart-validated
+//		OPTIONCOLOUR(30)
+//		do remember-account-types
+//		OPTION_COMPLETE(30,"Subledgers remembered")
+	option "Create Journal File" @6,1
+		when lf-chart-validated
+		OPTIONCOLOUR(40)
+		do prompt-and-create-journal-file entry once
+			returning lf-filename
+		OPTION_COMPLETE(40,"Journal File created (and period set to earliest date)")
+	option "Post Journals" @7,1
+		when lf-chart-validated
+		OPTIONCOLOUR(50)
+		spl "sys/m81glauto" parameters are "-pass-type" "U" lf-filename
+		OPTION_COMPLETE(50,"Journals Posted")
+	option "Reset GL History" @8,1
+		when lf-chart-validated
+		OPTIONCOLOUR(60)
+		spl "gl/m3histload" 
+		OPTION_COMPLETE(60,"Histload complete")
+//	option "DQM for GL" @9,1
+//		when lf-chart-validated
+//		OPTIONCOLOUR(70)
+//		spl "sys/m8dqm" 
+//		OPTION_COMPLETE(70,"DQM complete")
+//	option "Reset Subledgers" @10,1
+//		when lf-chart-validated
+//		OPTIONCOLOUR(80)
+//		do reset-account-types
+//		OPTION_COMPLETE(80,"Reset Subledgers complete")
+	option "Reset System Period" @11,1
+		when lf-chart-validated
+		OPTIONCOLOUR(90)
+		do reset-system-period
+		OPTION_COMPLETE(90,"System period Reset complete")
+end-menu
+
+
+screen prompt-and-create-journal-file
+returning
+	lr-filename						pic x(128) type string 
+local
+	lf-journals-per-period 			type number
+	window
+		window-position 104
+		title "Journal Create"
+		responsive
+	no-ok-cancel // to force use of confirm prompt
+detail
+	screen-group // ---- Parameters ----------------------------
+		title "Parameters"  // The title is optional
+		accept lf-journals-per-period pic z(5)
+			title "Max Journals per account per period"
+			help "Max Journals per account per period"
+			default lf-journals-per-period
+		before-accept
+			if screenmode = form-entry-defaults
+				set lf-journals-per-period = 5
+			endif
+		end-before-accept
+	end-screen-group // ---- Parameters --------------------------------------
+	confirm 
+		prompt "Ok to create journals"
+		default is yes
+	confirmed
+		do build-journal-file parameters are lf-journals-per-period
+			returning lr-filename
+	end-confirm
+end-screen
+
+procedure change-budget-year
+	sql-update all gl-multi-element-budget 
+	set glmeb-year = :sys-gl-yr
+end-procedure
+
+procedure remember-account-types
+	close mem-account-types and remove
+	open mem-account-types temporary truncate
+	select gl-accountcode
+		from gl-master
+		where gl-account-type in ("S")
+	detail
+		initialise mem-account-types
+		set mat-accountcode = gl-accountcode
+		set mat-type = gl-account-type
+		insert mem-account-types
+	end-select
+end-procedure
+
+procedure reset-account-types
+	select * from mem-account-types
+	detail
+		get gl-master
+			on index gl-accountcode
+			key is mat-accountcode
+			lock
+		on error ENOREC
+		else
+			set gl-account-type = mat-type
+			update gl-master
+		endon
+	end-select
+end-procedure
+
+procedure reset-system-period
+	get system-control first lock
+	set sys-gl-per = month(today())
+	set sys-gl-yr = year(today())
+end-procedure
+
+procedure set-subledgers-to-postable
+	sql-update gl-master
+		set gl-account-type = "E"
+		where gl-account-type = "S"
+end-procedure
+			
+
+procedure build-journal-file
+parameters
+	lp-journals-per-period 			type number
+returning
+	lr-filename						pic x(128) type string 
+local
+	lf-earliest-date			type date
+	lf-loop-date				type date
+	lf-date						type date
+	lf-jnl-counter				type number
+	j 							type number
+	lf-jnls-for-this-period		type number
+	if random(tod()) endif
+	set lr-filename = concat("/tmp/gljnl" str(pid) ".csv")
+	open posting-jnls create permanent
+		file is lr-filename
+	/*
+	Just assume that the budget is the same for every year
+	and work backwards from the current period
+
+	Note that this ONLY works when the financial year = calendar year!
+	*/
+	close balancing-jnl and remove
+	open balancing-jnl temporary truncate
+	select *
+		from gl-multi-element-budget
+		where glmeb-id = "0"
+	detail
+		// 24 months history NB lf-loop-date should always be on the first of the
+		// month.
+		set lf-loop-date = add-months(julian(1,month(today()),year(today())),-24, TRUE)
+		if glmeb-value[month(lf-loop-date)] != 0
+			repeat
+				set lf-jnls-for-this-period = RANDOM_BETWEEN(1,lp-journals-per-period)
+				for j = 1 to lf-jnls-for-this-period
+					initialise posting-jnls
+					set lf-jnl-counter += 1
+					set pj-acct	 = glmeb-pattern
+					set pj-trans-type = "JE"
+					repeat
+						set lf-date = julian(
+										RANDOM_BETWEEN(1,days-in-month(month(lf-loop-date),year(lf-loop-date))) 
+										,month(lf-loop-date)
+										,year(lf-loop-date))
+					until dow(lf-date) > 1 and dow(lf-date) < 7  // only going to have postings on week days
+					end-repeat
+					if lf-earliest-date = 0
+						set lf-earliest-date = lf-date
+					endif
+					if  lf-date < lf-earliest-date 
+						set lf-earliest-date = lf-date
+					endif
+					set pj-date = format-picture(lf-date,"yymmdd")
+					set pj-reference = str(lf-jnl-counter)
+					set pj-details = "Auto Create"
+					// make the amount the budget divided by the number of
+					// journals - randomised between 85% and 115% 
+					set pj-amount =  (glmeb-value[month(lf-loop-date)] / lf-jnls-for-this-period) * RANDOM_BETWEEN(85,115) / 100
+					insert posting-jnls
+					// keep track of the balancing journals.
+					get balancing-jnl
+						on index bj-date
+						key is lf-date
+					on error ENOREC
+						initialise balancing-jnl
+						set bj-date = lf-date
+						set bj-amount =  0 - pj-amount
+						insert balancing-jnl
+					else
+						set bj-amount += (0 - pj-amount)
+						update balancing-jnl
+					endon
+				end-for
+				//
+				// increment lf-loop-date
+				set lf-loop-date = addmonths(lf-loop-date,1,TRUE)
+				//
+			until lf-loop-date > julian(1,month(today()),year(today()))
+			end-repeat
+		endif
+	end-select
+	// balancing
+	select * from balancing-jnl
+	detail
+		initialise posting-jnls
+		set lf-jnl-counter += 1
+		set pj-acct	 = '1999999'
+		set pj-trans-type = "JE"
+		set lf-date = bj-date
+		set pj-date = format-picture(lf-date,"yymmdd")
+		set pj-reference = str(lf-jnl-counter)
+		set pj-details = "Auto Create"
+		set pj-amount = bj-amount
+		insert posting-jnls
+	end-select
+	// update system-control
+	get system-control first lock
+	set sys-gl-per = month(lf-earliest-date)
+	set sys-gl-yr = year(lf-earliest-date)
+	update system-control
+end-procedure
+
+procedure validate-chart
+local
+	lf-account				like gl-accountcode
+	lf-ok					type boolean
+	set lf-ok = TRUE
+	report "Chart validation"
+		no-xml
+	select *
+		from gl-master
+		where gl-accountcode < "Z"
+	detail
+		set lf-account = gl-accountcode
+		get gl-chart-of-accounts
+			on index gl-chart-function-sequence gl-accountcode
+			key is "1" substring(lf-account,1,1)
+		on error ENOREC
+			set lf-ok = FALSE
+			print "Missing Company" lf-account
+		endon
+		get gl-chart-of-accounts
+			on index gl-chart-function-sequence gl-accountcode
+			key is "2" substring(lf-account,2,3)
+		on error ENOREC
+			set lf-ok = FALSE
+			print "Missing Division" lf-account
+		endon
+		get gl-chart-of-accounts
+			on index gl-chart-function-sequence gl-accountcode
+			key is "3" substring(lf-account,4,7)
+		on error ENOREC
+			set lf-ok = FALSE
+			print "Missing Natural Account" lf-account
+		endon
+	end-select
+	if not lf-ok
+		exit 1
+	endif
+	report finished
+end-procedure
+
+

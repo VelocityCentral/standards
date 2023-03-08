@@ -1,0 +1,504 @@
+//NOTE: This program only for 760 version
+////////////////////////////////////////////////////////////////////////////////
+// Program : Utility Program to Fix Next ID of Sequence Tables
+//=========================================================================//
+// Copyright (C) Prometheus Software Developments Pty Ltd 1987 thru 2020
+// 
+// PRONTO is a registered trademark of Prometheus Software Developments P/L.
+//
+// All Rights Reserved. Unauthorised copying is prohibited.
+//=========================================================================//
+//
+// File : m8utilfixseqid.spl
+// NOTE: This program only for 760 version. From 770 onward, next record IDs 
+//		 will be fixed automatically
+//
+// Modification History
+// Date		Who	SDR		What
+////////////////////////////////////////////////////////////////////////////////
+
+version-number "$Header: /apps/devel/src/bms/sys/RCS/m8utilfixseqid.spl,v 1.2 2020/10/25 22:06:10 prabathd Exp $"
+
+#include "../include/bmsdef.spl"
+#include "../include/i8dictopen.spl"
+
+#define MSG_OK "All Ok with this object - no action required"
+#define MSG_CHECKED_NOT_FOUND_SO_OK "WARNING: The code has been checked.  Not found - check next upgrade"
+#define MSG_MISSING_FROM_PGM "Not handled by this Program - Program needs updating"
+#define MSG_MISSING_FROM_PGM_NO_SRC "Not handled by this Program - Not appearing in source"
+#define MSG_MISSING_FROM_DICT "Object missing from Dictionary - program needs updating"
+#define MSG_MISSING_FROM_PGM_AND_DB "Not handled by Program but not in DB so do not care"
+
+// Sequence objects this program knows about
+object known-seq-objs
+	type memory
+	record 
+		kso-obj-name							like obj-name
+		kso-message								pic x(80) // 
+		kso-status								pic x(10) 
+	end-record
+	key is kso-obj-name
+
+object source-finds
+	type memory
+	record
+		sf-obj-name								like obj-name
+		sf-source								pic x(80) type string
+	end-record
+	key is sf-obj-name
+
+object systables
+	type is indexed
+	record is
+		st_tabname						pic x(20) type string db-column-name "tabname"
+		st_owner						pic x(20) type string db-column-name "owner"
+		st_partnum						type number db-column-name "partnum"
+		st_tabid						type number db-column-name "tabid"
+		st_rowsize						type number db-column-name "rowsize"
+		st_ncols						type number db-column-name "ncols"
+		st_nindexes						type number db-column-name "nindexes"
+		st_nrows						type number db-column-name "nrows"
+		st_created						type date db-column-name "created"
+		st_version						type number db-column-name "version"
+		st_tabtype						pic x type string db-column-name "tabtype"
+		st_locklevel					pic x type string db-column-name "locklevel"
+		st_npused						type number db-column-name "npused"
+		st_fextsize						type number db-column-name "fextsize"
+		st_nextsize						type number db-column-name "nextsize"
+		st_flags						type number db-column-name "flags"
+		st_site							pic x(20) type string db-column-name "site"
+		st_dbname						pic x(20) type string db-column-name "dbname"
+		st_type_xid						type number db-column-name "type_xid"
+		st_am_id						type number db-column-name "am_id"
+		st_pagesize						type number db-column-name "pagesize"
+		st_ustlowts						type datetime db-column-name "ustlowts"
+		st_secpolicyid					type number db-column-name "secpolicyid"
+		st_protgranularity				pic x(20) type string db-column-name "protgranularity"
+		st_statchange					pic x(20) type string db-column-name "statchange"
+		st_statlevel					pic x(20) type string db-column-name "statlevel"
+	end-record
+	key is st_tabname
+	no-rowid
+
+object text-file
+	type is text
+	record is
+		tf-line							pic x(1024) type string
+	end-record
+
+mode md-source
+	prompt "Source References"
+
+procedure main
+	local
+		lf-user-is-a-dba						type boolean
+		lf-dba-file-status-desc					pic x(BMSDEF_PATHSIZE)
+	//
+	get system-control first
+	do check-if-user-is-a-dba
+		returning
+			lf-user-is-a-dba
+			lf-dba-file-status-desc
+	// Establish if there are any new objects or dropped objects
+	do check-for-known-objects
+	if exit-status > 0
+		message-box param-text("<<P1>><<BR>><<p2>>"
+			,"There is a problem with this program"
+			,"After pressing cancel, a list of objects will be shown")
+			title is "Seq Obj Check"
+			message-buttons  MSG_BOX_STOP
+			icon MSG_BOX_STOP
+			// default MSG_BOX_OK
+			// optional 
+		do error-listing
+		exit 1
+	end-if
+	//
+	if not lf-user-is-a-dba
+		message-box param-text("You do not have DBA access.<<BR>><<P1>>",lf-dba-file-status-desc)
+			title "DBA Access Required"
+			message-buttons MSG_BOX_OK
+			default MSG_BOX_OK
+			icon MSG_BOX_STOP
+	else
+		do check-and-update-unique-ids
+	endif
+endprocedure //main ---------------------------------------------------------
+
+
+procedure check-for-known-objects
+local
+	lf-ok								type boolean
+	lf-table-name						pic x(60) type string
+	lf-count							type number
+	lf-source-count						type number
+	//
+	set lf-ok = TRUE
+	close known-seq-objs
+	open known-seq-objs
+		temporary
+	open systables
+		file is str-concat(dir(),"/informix.systables")
+	on error
+		message "Can't open systables" 
+		exit 1
+	endon
+	open source-finds
+		temporary
+	// 
+	// Add in the objects that are in this program
+	//
+	do add-code-in-this-program
+	//
+	// now check
+	//
+	do i8dictopen-open-dictionary
+		parameters	
+			DICTDEF_ALL_MAIN_DICT_TABLES//M-all the main dictionary files
+			DICTDEF_BMS_DICT			//objname:dict,dict-usr,dict-distributor
+			DICTDEF_ENV_PRODICT			//dictionary and path without suffix
+			SPACES						//only used if opening individual
+			TRUE						//Display message/abort if error found!
+			TRUE						//Open files read-only
+	//
+	// from the list of known objects, check if the object is in the
+	// dictionary.  It may have been removed and therefore needs removing
+	// from this code
+	//
+	select *
+		from known-seq-objs
+	detail
+		get dict-object
+			on index obj-name
+			key is kso-obj-name
+		on error ENOREC
+			do kso-add-update parameters are kso-obj-name MSG_MISSING_FROM_DICT "Error"
+			set lf-ok = FALSE
+		endon
+	end-select
+	//
+	// From the dictionary check if there are any sequence objects not 
+	// in this program. 
+	//
+	select * from dict-object
+		where obj-type = "N"
+		and obj-name < "~"
+	detail
+		get known-seq-objs
+			on index kso-obj-name
+			key is obj-name
+		on error ENOREC
+			do get-filename parameters are obj-file obj-version
+				returning lf-table-name
+			//
+			// The object is not in this program - check if it is in the
+			// database.  If it is not there then we don't need to worry too
+			// much.
+			//
+			select lf-count = count(*) from systables
+				where st_tabname = lf-table-name
+			end-select
+			if lf-count = 0
+				do kso-add-update parameters are obj-name MSG_MISSING_FROM_PGM_AND_DB "Warning"
+				set lf-ok = False
+			else
+				//
+				// We now have an object not in this pgm but is in the
+				// database.  We need to check if it is being used.  
+				// It is often the case that an object is introduced that will
+				// be used in code in a later version
+				//
+				// Source must be loaded for this to work
+				//
+				do check-for-source-references parameters are obj-name
+					returning lf-source-count
+				if lf-source-count  = 0
+					do kso-add-update parameters are obj-name MSG_MISSING_FROM_PGM_NO_SRC "Warning"
+					set lf-ok = False
+				else
+					do kso-add-update parameters are obj-name concat(str(lf-source-count) 
+									" Source References found" 
+									MSG_MISSING_FROM_PGM ) 
+								"Error"
+					set lf-ok = FALSE
+				endif
+			endif
+		endon
+	end-select
+	if not lf-ok
+		exit 1
+	endif
+end-procedure
+
+procedure check-for-source-references
+parameters
+	lp-object-name						like kso-obj-name
+returning
+	lr-reference-count					type number
+local
+	lf-filename							pic x(500) type string
+	lf-command							pic x(500) type string
+	//
+	set lf-filename	= concat("/tmp/objlist",str(pid()),lp-object-name,".txt")
+	set lf-command = "cd $BMS;grep -ilr "
+	string lf-command appending concat(" ",lp-object-name)
+	string lf-command appending ' --include "*.spl" --exclude-dir "upgrade"'
+	string lf-command appending concat( " > " lf-filename)
+	command "sh" parameter are '-c' lf-command
+	open text-file
+		file is lf-filename
+	on error
+		exit 1
+	endon
+	select * from text-file
+	detail
+		initialise source-finds
+		set sf-obj-name = lp-object-name
+		set sf-source = tf-line
+		insert source-finds
+		set lr-reference-count += 1
+	end-select
+	close text-file and remove
+end-procedure
+//
+
+
+procedure add-code-in-this-program
+//
+// Each time this program is updated with a new sequence object,
+// this routine needs updating with the object that we have added.
+//
+	do kso-add-update parameters are "cre-next-cre-accountcode-id" MSG_OK "OK"
+	do kso-add-update parameters are "cre-change-code-seq-num" MSG_OK "Ok"
+	do kso-add-update parameters are "crm-central-account-seq-id" MSG_OK "OK"
+	do kso-add-update parameters are "crm-central-contact-seq-id" MSG_OK "OK"
+	do kso-add-update parameters are "crm-central-crm-type-nextid" MSG_OK "OK"
+	do kso-add-update parameters are "crm-central-hier-category-nxid" MSG_OK "OK"
+	do kso-add-update parameters are "crm-central-hier-class-nxid" MSG_OK "OK"
+	do kso-add-update parameters are "crm-central-hier-deptmt-nxid" MSG_OK "OK"
+	do kso-add-update parameters are "crm-central-hier-division-nxid" MSG_OK "OK"
+	do kso-add-update parameters are "crm-central-hier-group-nxid" MSG_OK "OK" 
+	do kso-add-update parameters are "crm-central-leadop-method-nxid" MSG_OK "OK"
+	do kso-add-update parameters are "crm-central-leadop-source-nxid" MSG_OK "OK"
+	do kso-add-update parameters are "crm-central-leadop-stage-nxid" MSG_OK "OK"
+	do kso-add-update parameters are "crm-central-region-nextid" MSG_OK "OK"
+	do kso-add-update parameters are "crm-central-rep-desc-next-id" MSG_OK "OK"
+	do kso-add-update parameters are "crm-central-sales-hist-next-no" MSG_OK "OK"
+	do kso-add-update parameters are "crm-central-site-seq-id" MSG_OK "OK"
+	do kso-add-update parameters are "crm-central-stock-desc-next-id" MSG_OK "OK"
+	do kso-add-update parameters are "crm-central-terr-desc-next-id" MSG_OK "OK"
+	do kso-add-update parameters are "crm-central-whse-desc-next-id" MSG_OK "OK"
+	do kso-add-update parameters are "crm-forecast-next-seq" MSG_OK "OK"
+	do kso-add-update parameters are "crm-mail-site-id-next-seq" MSG_OK "OK"
+	do kso-add-update parameters are "crm-mailer-item-no-next-seq" MSG_OK "OK"
+	do kso-add-update parameters are "crm-mailer-name-no-next-seq" MSG_OK "OK"
+	do kso-add-update parameters are "crm-message-next-seq" MSG_OK "OK"
+	do kso-add-update parameters are "deb-change-accountcode-seq-num" MSG_OK "OK"
+	do kso-add-update parameters are "deb-next-accountcode-id" MSG_OK "OK"
+	do kso-add-update parameters are "notification-next-record-id" MSG_OK "OK"
+	do kso-add-update parameters are "pos-cf-next-session-no" MSG_OK "OK"
+	do kso-add-update parameters are "repair-trans-seq" MSG_OK "OK"
+	do kso-add-update parameters are "resource-next-no" MSG_OK "OK"
+	do kso-add-update parameters are "search-central-query-id-seq" MSG_OK "OK"
+	do kso-add-update parameters are "stock-change-items-seq-num" MSG_OK "OK"
+	do kso-add-update parameters are "stock-next-stock-code-id" MSG_OK "OK"
+	do kso-add-update parameters are "stock-search-filter-next-no" MSG_OK "OK"
+end-procedure
+
+procedure get-filename
+parameters 
+	lp-filename							like obj-file
+	lp-version							like obj-version
+returning
+	lr-table-name						pic x(100) type string
+local
+	i 									type number
+	//
+	set lr-table-name = lp-filename
+	//
+	// Change underscores
+	//
+	for i = 1 to str-len(lr-table-name)
+		if sub-string(lr-table-name,i,i)  = "-"
+			string lr-table-name replacing "_" at i
+		endif
+	end-for
+	// trim off everything before last slash
+	for i = str-len(lr-table-name) down to 1
+		if substring(lr-table-name,i,i) = "/"
+			string lr-table-name deleting 1 to i
+		endif
+	end-for
+	//
+	// append version char
+	//
+	string lr-table-name appending lp-version
+	//
+	// lowercase
+	//
+	set lr-table-name = lowercase(lr-table-name)
+end-procedure
+
+screen error-listing
+	window
+	datagrid
+	title "Sequence Objects"
+	select * from known-seq-objs
+	allowed search md-source
+detail
+	if screenmode  = md-source
+		do source-references parameters are kso-obj-name
+	endif
+	accept kso-obj-name col 1
+		title "Object Name"
+		when screenmode = search
+		show-value
+	display kso-status col 2
+		title "Status"
+	display kso-message col 3
+		title "Message"
+end-screen
+
+screen source-references
+parameters lp-obj-name				like kso-obj-name
+	window
+	window-position 5
+	title "Source References"
+	datagrid
+	select * from source-finds
+		where sf-obj-name = :lp-obj-name
+	allowed search
+	no-prompt-for-search
+detail
+	accept sf-source col 1
+		title "Source"
+end-screen
+
+procedure kso-add-update
+parameters
+	lp-name						like kso-obj-name
+	lp-message					like kso-message
+	lp-status					like kso-status
+	get known-seq-objs
+		on index kso-obj-name
+		key is lp-name
+	on error ENOREC
+		initialise known-seq-objs
+		set kso-obj-name = lp-name
+		set kso-message = lp-message
+		set kso-status = lp-status
+		insert known-seq-objs
+	else
+		set kso-message = lp-message
+		set kso-status = lp-status
+		update known-seq-objs
+	endon
+end-procedure
+
+#define UPDATE_ID(OBJ,KEYOBJ,FLD,KFLD) \
+	get OBJ last\
+		on index FLD\
+	on error \
+		set lf-next-id = ZERO \
+	else\
+		set lf-next-id = FLD \
+	endon\
+	get KEYOBJ last \
+	display "OBJ" @22,55 background left \
+	if KFLD < FLD \
+		display param-text("<<p1>> >> <<P2>>",KFLD,FLD + 100) @23,55 background left \
+		set KFLD = lf-next-id + 100 \
+		insert KEYOBJ \
+	endif
+
+procedure check-and-update-unique-ids
+	local field 
+		lf-next-id						like snsci-next-id
+	//
+	window @18,44 to @23,80
+		title is "Update Progress"
+		color white
+		no-hide
+	//
+	display bitmap concat(getenv('BMS')'/images/repedge.gif') @18,44
+	display "Validating ID Tables" @20,59 prompt bold
+	display "Now at :" @22,45 background prompts left
+	//
+	// to add a new item start with the new sequence object name.  
+	// this is parameter 2.
+	// Each sequence object has a field name.  This is parameter 4
+	// You then need to search the code to find the field and object that it
+	// relates to.  The object name is parameter 1 and the field in the object
+	// that will use the sequnce number is parameters 3
+	//
+	UPDATE_ID(cre-change-code,cre-change-code-seq-num,ccc-run-id,cccsn-run-id-next-no)
+	UPDATE_ID(cre-master,cre-next-cre-accountcode-id,cr-accountcode-id,cncai-next-id)
+	UPDATE_ID(crm-central-account,crm-central-account-seq-id,cca-account-id,ccasi-crm-sequence-id)
+	UPDATE_ID(crm-central-contact,crm-central-contact-seq-id,ccc-contact-id,cccsi-contact-seq-id)
+	UPDATE_ID(crm-central-type-descriptor,crm-central-crm-type-nextid,ccctd-crm-type-id,ccctn-crm-type-id)
+	UPDATE_ID(crm-central-stk-hier-category,crm-central-hier-category-nxid,ccshc-category-id,cchctn-category-id)
+	UPDATE_ID(crm-central-stk-hier-class,crm-central-hier-class-nxid,ccshl-class-id,cchcln-class-id)
+	UPDATE_ID(crm-central-stk-hier-depart,crm-central-hier-deptmt-nxid,ccshp-department-id,cchdpn-department-id)
+	UPDATE_ID(crm-central-stk-hier-division,crm-central-hier-division-nxid,ccshd-division-id,cchdvn-division-id)
+	UPDATE_ID(crm-central-stk-hier-group,crm-central-hier-group-nxid,ccshg-group-id,cchgn-group-id)
+	UPDATE_ID(crm-central-leadop-methd-descp,crm-central-leadop-method-nxid,cclmd-method-id,cclomn-method-id)
+	UPDATE_ID(crm-central-leadop-src-descp,crm-central-leadop-source-nxid,cclsd-source-id,cclocn-source-id)
+	UPDATE_ID(crm-centrl-leadop-stage-descp,crm-central-leadop-stage-nxid,ccltd-stage-id,cclosn-stage-id)
+	UPDATE_ID(crm-central-region-descrip,crm-central-region-nextid,ccrgd-region-id,ccrgn-region-id)
+	UPDATE_ID(crm-central-rep-description,crm-central-rep-desc-next-id,ccrd-rep-id,ccrdni-rep-id)
+	UPDATE_ID(crm-central-sales-history,crm-central-sales-hist-next-no,ccsh-record-id,ccshno-record-id)
+	UPDATE_ID(crm-central-site,crm-central-site-seq-id,ccs-site-id,ccssi-site-seq-id)
+	UPDATE_ID(crm-central-stock-description,crm-central-stock-desc-next-id,ccsd-stock-id,ccsdni-stock-id)
+	UPDATE_ID(crm-central-territory-desc,crm-central-terr-desc-next-id,cctd-territory-id,cctdni-territory-id)
+	UPDATE_ID(crm-central-warehouse-desc,crm-central-whse-desc-next-id,ccwd-whse-id,ccwdni-whse-id)
+	UPDATE_ID(mailer-forecasts,crm-forecast-next-seq,mailer-forecast-no,cfns-next-seq)
+	UPDATE_ID(mailer-sites,crm-mail-site-id-next-seq,ms-site-id,cmsins-next-seq)
+	UPDATE_ID(mailer-master,crm-mailer-item-no-next-seq,mailer-item-number,cminns-next-seq)
+	UPDATE_ID(mailer-names,crm-mailer-name-no-next-seq,mailer-name-seq,cmnnns-next-seq)
+	UPDATE_ID(mailer-messages,crm-message-next-seq,mm-record-key,cmns-seq-no)
+	UPDATE_ID(deb-change-accountcode,deb-change-accountcode-seq-num,dca-run-id,dcasn-run-id-next-no)
+	UPDATE_ID(deb-master,deb-next-accountcode-id,dr-accountcode-id,dnai-next-id)
+	UPDATE_ID(notification-master,notification-next-record-id,nm-record-id,nnri-notify-next-record-id)
+	UPDATE_ID(pos-cf-next-session-details,pos-cf-next-session-no,pcfsd-session-no,pcfnsn-next-no)
+	UPDATE_ID(repair-trans,repair-trans-seq,rpt-record-id,rts-trans-next-no)
+	UPDATE_ID(resource-master,resource-next-no,resource-no,rnn-next-no)
+	UPDATE_ID(search-central-results-header,search-central-query-id-seq,scrh-query-id,scqs-query-id)
+	UPDATE_ID(stock-change-items,stock-change-items-seq-num,sci-run-id,scisn-run-id-next-no)
+	UPDATE_ID(stock-master,stock-next-stock-code-id,stk-stock-id,snsci-next-id)
+	UPDATE_ID(stock-search-list-master,stock-search-filter-next-no,sslm-search-id,ssfnn-next-no)
+	display "Update Complete" @22,55 background left 
+	clear @23,55 to @23,80
+	pause
+endprocedure //check-and-update-unique-ids -----------------------------------
+
+procedure check-if-user-is-a-dba
+	 returning 
+		lr-user-is-a-dba						type boolean
+		lr-dba-file-status-desc					pic x(BMSDEF_PATHSIZE)
+	 //
+	 set lr-user-is-a-dba = TRUE
+	 set lr-dba-file-status-desc = SPACES
+	 open system-check-if-dba
+		file is param-text('$PRONTO<<P1>>sysinfo<<P1>>CHECKIFDBA<<P2>>'
+				,ifthenelse(operating-system() = 'WINDOWS',ascii-char(92),ascii-char(47)),login-id())
+	 on error ENOENT //<-Only checking for 'file does not exist' error
+		//Does not exist, good it shouldn't.
+		open system-check-if-dba create
+			file is param-text('$PRONTO<<P1>>sysinfo<<P1>>CHECKIFDBA<<P2>>'
+					,ifthenelse(operating-system() = 'WINDOWS',ascii-char(92),ascii-char(47)),login-id())
+		 on error
+			//They can not create it.  Only a DBA can, however could be other issues. e.g. out of SPACE
+			set lr-user-is-a-dba = FALSE
+			set lr-dba-file-status-desc = error-description(file-status())
+		else
+			//Person is an DBA.  Remove the file ready for checking next time.
+			close system-check-if-dba and remove
+		endon
+	else
+		//Other reasons.  Safer to disallow until issues are resolved.
+		set lr-user-is-a-dba = FALSE
+	endon
+endprocedure //check-if-user-is-a-dba ----------------------------------------
+
+
+

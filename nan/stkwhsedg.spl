@@ -1,0 +1,164 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : 
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2020
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: nan/stkwhsedg.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 01Oct20  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+ 
+field
+	ws-function-title						type string
+
+mode md-remove
+	prompt "Remove &Multiple"
+	help "Remove by selection criteria"
+
+procedure main
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8secabt-check-abort
+		parameters are sys-consolidation-division login-id() "ZUSR" "R004"
+		returning ws-function-title 
+	do i8proglog-write-log
+	do mntstkwhse
+end-procedure
+
+screen mntstkwhse
+	window
+		title "Stock Warehouse Maint"
+	allowed search entry remove correct md-remove
+	select * from stock-warehouse-detail
+	datagrid 
+detail
+	if screenmode = md-remove
+		do remove-by-selection entry once
+		reselect
+		refresh review
+	endif
+	get stock-master
+		on index stock-code
+		key is stock-code
+	accept stock-code @1,2
+		title "stock-code"
+	accept whse-code @1,4
+		title "whse-code"
+	display whse-qty-on-hand @1,6
+		title "whse-qty-on-hand"
+	display stk-description @1,5
+		title "stk-description"
+	confirm auto
+	end-confirm
+end-screen
+
+screen remove-by-selection
+local
+	lf-start-stock-code					like stock-code
+	lf-end-stock-code					like stock-code
+	lf-start-whse						like whse-code
+	lf-end-whse							like whse-code
+	window
+	responsive
+	title "Remove by Selection"
+detail
+	screen-group // ---- Parameters ----------------------------
+		title "Parameters"
+	field-group // ---- Stock Code Range ----------------------------
+		title "Stock Code Range"
+		horizontal
+	accept lf-start-stock-code
+		title "From"
+		default lf-start-stock-code
+		before-accept
+			select lf-start-stock-code = min(stock-code)
+				from stock-master
+			end-select
+		end-before-accept
+		drop-down
+			width 38
+			concat-title
+			select stock-code, stk-description
+				from stock-master 
+		end-drop-down
+	accept lf-end-stock-code
+		title "To"
+		default lf-end-stock-code
+		before-accept
+			select lf-end-stock-code = max(stock-code)
+				from stock-master
+			end-select
+		end-before-accept
+		drop-down
+			width 38
+			concat-title
+			select stock-code, stk-description
+				from stock-master 
+				where stock-code > lf-start-stock-code
+		end-drop-down
+	end-field-group // ---- Stock Code Range --------------------------------------
+	field-group // ---- Whse Range ----------------------------
+		title "Whse Range"
+		horizontal
+	accept lf-start-whse
+		title "From"
+		default lf-start-whse
+		before-accept
+			select lf-start-whse = min(sys-tbl-code)
+				from system-table
+				where sys-tbl-type = "WH"
+			end-select
+		end-before-accept
+		drop-down
+			width 38
+			concat-title
+			select sys-tbl-code, sys-description
+				from system-table 
+				where sys-tbl-type = "WH"
+		end-drop-down
+	accept lf-end-whse
+		title "To"
+		default lf-end-whse
+		before-accept
+			select lf-end-whse = max(sys-tbl-code)
+				from system-table
+				where sys-tbl-type = "WH"
+			end-select
+		end-before-accept
+		drop-down
+			width 38
+			concat-title
+			select sys-tbl-code, sys-description
+				from system-table 
+				where sys-tbl-type = "WH"
+				and sys-tbl-code >= lf-start-whse
+		end-drop-down
+	end-field-group // ---- Whse Range --------------------------------------
+	end-screen-group // ---- Parameters --------------------------------------
+	confirm  auto
+	confirmed
+		message-box "OK to delete all these records?"
+			title is "Remove Records"
+			message-buttons  MSG_BOX_OK_CANCEL
+			icon MSG_BOX_QUESTION
+		if message-status = MSG_BOX_OK
+			sql-delete stock-warehouse-detail
+			where stock-code between :lf-start-stock-code and :lf-end-stock-code
+				and whse-code between :lf-start-whse and :lf-end-whse
+			message "Complete"
+		endif
+	end-confirm 
+end-screen
+

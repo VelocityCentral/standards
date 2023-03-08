@@ -1,0 +1,516 @@
+////////////////////////////////////////////////////////////////////////////////
+//191128160637.spl -Update Min Max Stock
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2010
+//
+// PRONTO is a registered trademark of Prometheus Software Developments P/L.
+//
+// All Rights Reserved. Unauthorised copying is prohibited.
+//=========================================================================//
+//
+// Modification History
+// Date		Who	SDR		What
+////////////////////////////////////////////////////////////////////////////////
+
+#define NO_OF_SELECTION_PARAMETERS '6'
+#define REPORT_NAME 'Update Min Max Stock'
+
+#include "../include/i8proglog.spl"
+#include "../include/i8secabt.spl"
+#include "../include/rbtchproc.spl"
+
+
+field
+	ws-function-title					pic x(80) type string
+	ws-excel-flag						pic x
+	ws-exec-start						type datetime
+	ws-exec-end							type datetime
+	ws-mail-recipients					pic x(1024) type string
+	ws-spool-id							pic x(20) type string
+	ws-start-group						pic x(4)
+	ws-end-group						pic x(4)
+	ws-start-stock-code					pic x(16)
+	ws-end-stock-code					pic x(16)
+	ws-start-whse						pic x(4)
+	ws-end-whse							pic x(4)
+	ws-last-stock-group					like stock-group
+	ws-update-min-stock					type boolean
+	ws-update-max-stock					type boolean
+
+procedure main
+	get system-control first
+	get system-user-control	
+		on index user-id											
+		key is login-id()
+	on error														
+	endon															
+	do i8secabt-check-abort parameters
+		sys-consolidation-division login-id() "ZVG" "M015"
+			returning ws-function-title
+	set ws-report-started = FALSE
+	do i8proglog-write-log
+	RBTCHPROC_RUN_PROGRAM(REPORT_NAME)
+endprocedure //main ------------------------------------------------------------
+
+screen rbtchproc-report-parameters
+//local x type number
+	allow entry
+	window @1,1 to @24,80
+	title ws-function-title
+	form-entry
+before
+	clear
+	box @1,1 to @19,80
+		title "Report Parameters"
+	box @20,1 to @23,80
+		title "Output Options"
+	set ws-start-group = min-value(ws-start-group)
+	set ws-end-group = max-value(ws-end-group)
+	set ws-start-stock-code = min-value(ws-start-stock-code)
+	set ws-end-stock-code = max-value(ws-end-stock-code)
+	set ws-start-whse = min-value(ws-start-whse)
+	set ws-end-whse = max-value(ws-end-whse)
+detail
+	accept ws-start-group @3,25
+		// add remove following lines as necessary
+		title 'Start Stock Group :'
+		optional
+		help "Start Stock Group"
+		uppercase
+		default ws-start-group
+	before-accept
+	end-before-accept
+	accept ws-end-group @4,25
+		// add remove following lines as necessary
+		title 'End Stock Group :'
+		optional
+		help "End Stock Group"
+		uppercase
+		fill with trailing '~'
+		default ws-end-group
+	before-accept
+		set ws-end-group = max-value(ws-end-group)
+		string ws-end-group replacing str-concat(ws-start-group) at 1
+	end-before-accept
+	accept ws-start-stock-code @5,25
+		// add remove following lines as necessary
+		title 'Start Stock Code :'
+		optional
+		help "Start Stock Code"
+		uppercase
+		default ws-start-stock-code
+	before-accept
+	end-before-accept
+	accept ws-end-stock-code @6,25
+		// add remove following lines as necessary
+		title 'End Stock Copde :'
+		optional
+		help "End Stock Copde"
+		uppercase
+		fill with trailing '~'
+		default ws-end-stock-code
+	before-accept
+		set ws-end-stock-code = max-value(ws-end-stock-code)
+		string ws-end-stock-code replacing str-concat(ws-start-stock-code) at 1
+	end-before-accept
+	accept ws-start-whse @7,25
+		// add remove following lines as necessary
+		title 'Start Warehouse :'
+		optional
+		help "Start Warehouse"
+		uppercase
+		default ws-start-whse
+	before-accept
+	end-before-accept
+	accept ws-end-whse @8,25
+		// add remove following lines as necessary
+		title 'End Warehouse :'
+		optional
+		help "End Warehouse"
+		uppercase
+		fill with trailing '~'
+		default ws-end-whse
+	before-accept
+		set ws-end-whse = max-value(ws-end-whse)
+		string ws-end-whse replacing str-concat(ws-start-whse) at 1
+	end-before-accept
+	check-box ws-update-min-stock		@12,25
+		values True False
+		title "Update Minimum Stock"
+		right-coordinate
+		default is FALSE
+	end-check-box 
+	check-box ws-update-max-stock		@13,25
+		values True False
+		title "Update Maximum Stock"
+		right-coordinate
+		default is FALSE
+	end-check-box 
+	radio-button ws-excel-flag
+		@21,18 NO title "No Export"
+		@21,27 "D" title "View Datagrid"
+		default "NO"
+		when not ws-update-min-stock and not ws-update-max-stock
+		help "N)o export D)isplay data as a datagrid"
+	on change
+		refresh ws-mail-recipients
+	endon
+	accept ws-mail-recipients @22,10 pic x(68)
+		title "Email:"
+		help "Enter space, comma or semi-colon separated list of email recipients"
+		when ws-excel-flag = NO
+		optional
+	confirm auto
+	confirmed
+		if ws-excel-flag = "D"
+			do display-datagrid
+		else
+			RBTCHPROC_EXECUTION
+		endif
+	endconfirm
+endscreen //rbtchproc-report-parameters --------------------------------------
+
+procedure rbtchproc-set-parameters
+	RBTCHPROC_LOAD_SET_ALPHA(ws-start-group)
+	RBTCHPROC_LOAD_SET_ALPHA(ws-end-group)
+	RBTCHPROC_LOAD_SET_ALPHA(ws-start-stock-code)
+	RBTCHPROC_LOAD_SET_ALPHA(ws-end-stock-code)
+	RBTCHPROC_LOAD_SET_ALPHA(ws-start-whse)
+	RBTCHPROC_LOAD_SET_ALPHA(ws-end-whse)
+	RBTCHPROC_LOAD_SET_NUM(ws-update-min-stock)
+	RBTCHPROC_LOAD_SET_NUM(ws-update-max-stock)
+	RBTCHPROC_LOAD_SET_ALPHA(ws-mail-recipients)
+endprocedure //rbtchproc-set-parameters --------------------------------------
+
+procedure start-report
+	set rbtchproc-report-name = REPORT_NAME
+	report rbtchproc-report-name		
+		header is skeleton-report-header
+		no-message
+		width 200
+		full-xml
+	set ws-report-started = TRUE
+	if rbtchproc-in-background
+		RBTCHPROC_MESSAGE_REPORT_STARTED
+	else
+		display 'Report :' @20,59 background right bold
+		display spool-file-name() @20,68 pic x(12) foreground prompts
+		display "Accessing Database" @21,59 background left bold
+	endif
+	set ws-exec-start = sys-time()
+	set ws-spool-id = spool-file-name()
+endprocedure //start-report ----------------------------------------------------
+
+procedure skeleton-report-header
+	if report-is-xml()
+		report section "headings_section"
+	endif
+	print company-name col 1
+		rbtchproc-report-name col 51 bold
+		"Date:" col 85
+		tod() col 110
+		today() col 91
+		"Time:" col 104
+		'Page:' col 120
+		left-justify(str(page-no)) col 126 pic x(4)
+	skip
+	print
+		"Group" in col    1
+		"Item" in col    8
+		"Item" in col   26
+		"ABC" in col   58
+		"Status" in col   65
+		"Whse" in col   73
+		right-justify("Original",15) in col   79 pic x(15) right
+		right-justify("Original",15) in col   96 pic x(15) right
+		right-justify("Min",15) in col  113 pic x(15) right
+		right-justify("Max",15) in col  130 pic x(15) right
+		right-justify("Avg",15) in col  147 pic x(15) right
+		right-justify("New",15) in col  164 pic x(15) right
+		right-justify("New",15) in col  181 pic x(15) right
+	set ws-last-stock-group = max-value(ws-last-stock-group)
+	print
+		"Code" in col    8
+		"Description" in col   26
+		"Class" in col   58
+		right-justify("Minimum",15) in col   79 pic x(15) right
+		right-justify("Maximum",15) in col   96 pic x(15) right
+		right-justify("Days",15) in col  113 pic x(15) right
+		right-justify("Days",15) in col  130 pic x(15) right
+		right-justify("Mth",15) in col  147 pic x(15) right
+		right-justify("Min",15) in col  164 pic x(15) right
+		right-justify("Max",15) in col  181 pic x(15) right
+	print
+		right-justify("Stock",15) in col   79 pic x(15) right
+		right-justify("Stock",15) in col   96 pic x(15) right
+		right-justify("Cover",15) in col  113 pic x(15) right
+		right-justify("Cover",15) in col  130 pic x(15) right
+		right-justify("Demand",15) in col  147 pic x(15) right
+		right-justify("Stock",15) in col  164 pic x(15) right
+		right-justify("Stock",15) in col  181 pic x(15) right
+	if report-is-xml()
+		report section finished
+	endif
+endprocedure //skeleton-report-header ------------------------------------------
+
+// Your main processing routine must be named as follows
+procedure rbtchproc-report-detail
+local
+	lf-rec-counter						type number
+	lf-commit							type boolean
+	window @19,44 to @24,80
+	    title is "Report Progress"
+	    color white
+	    no-hide
+	if not rbtchproc-in-background
+		display bitmap concat(getenv('BMS')'/images/repedge.gif') @19,44
+	endif
+	//
+	// PIC clauses are set in the print statement to enable
+	// later use of the pronto report layout tool
+	//
+	if ws-update-min-stock
+	or ws-update-max-stock
+		set lf-commit = TRUE
+		transaction begin
+	endif
+	do start-report
+	page
+	select
+		stock-master.stk-abc-class
+		stock-master.stk-description
+		stock-master.stk-stock-status
+		stock-master.stock-group
+		stock-warehouse-detail.stock-code
+		stock-warehouse-detail.whse-avg-monthly-demand
+		stock-warehouse-detail.whse-code
+		stock-warehouse-detail.whse-max-days-cover
+		stock-warehouse-detail.whse-max-stock
+		stock-warehouse-detail.whse-min-days-cover
+		stock-warehouse-detail.whse-min-stock
+	from
+		stock-warehouse-detail
+		INNER JOIN stock-master
+			ON
+				stock-master.stock-code = stock-warehouse-detail.stock-code
+	WHERE stock-master.stock-group >= :ws-start-group
+		AND stock-master.stock-group <= :ws-end-group
+		AND stock-warehouse-detail.stock-code >= :ws-start-stock-code
+		AND stock-warehouse-detail.stock-code <= :ws-end-stock-code
+		and stock-warehouse-detail.whse-code >= :ws-start-whse
+		and stock-warehouse-detail.whse-code <= :ws-end-whse
+	ORDER BY
+		stock-master.stock-group,
+		stock-warehouse-detail.stock-code
+	detail
+	BEFORE stock-master.stock-group
+	BEFORE stock-master.stock-group stock-warehouse-detail.stock-code
+	detail
+		report section 'detail_line'
+		print
+			if-then-else(ws-last-stock-group = stock-group ,spaces,stock-group) in col   1 pic x(4)
+				tag is 'stock_group'
+			stock-code  in col   8 pic x(16)
+				tag is 'stock_code'
+			stk-description  in col  26 pic x(30)
+				tag is 'stk_description'
+			stk-abc-class  in col  58 pic x(1)
+				tag is 'stk_abc_class'
+			stk-stock-status  in col  65 pic x(1)
+				tag is 'stk_stock_status'
+			whse-code  in col  73 pic x(4)
+				tag is 'whse_code'
+			whse-min-stock  in col  79 pic -s(9).9999
+				tag is 'whse_min_stock'
+			whse-max-stock  in col  96 pic -s(9).9999
+				tag is 'whse_max_stock'
+			whse-min-days-cover  in col 113 pic -s(9).9999
+				tag is 'whse_min_days_cover'
+			whse-max-days-cover  in col 130 pic -s(9).9999
+				tag is 'whse_max_days_cover'
+			whse-avg-monthly-demand  in col 147 pic -s(9).9999
+				tag is 'whse_avg_monthly_demand'
+			whse-min-days-cover * (whse-avg-monthly-demand / 30) in col 164 pic -s(9).9999
+				tag is "new_min"
+			whse-max-days-cover * (whse-avg-monthly-demand / 30) in col 181 pic -s(9).9999
+				tag is "new_max"
+		// update if selected
+		if ws-update-min-stock
+		or ws-update-max-stock
+			get stock-warehouse-detail
+				on index stock-code whse-code
+				key is stock-code whse-code
+				lock
+			on error
+				set lf-commit = FALSE
+				print "ERROR: Unable to get lock for update"
+			else
+				if ws-update-min-stock
+					set whse-min-stock = whse-min-days-cover * (whse-avg-monthly-demand / 30) 
+				endif
+				if ws-update-max-stock
+					set whse-max-stock = whse-max-days-cover * (whse-avg-monthly-demand / 30) 
+				endif
+				update stock-warehouse-detail
+				on error
+					set lf-commit = False
+					print "ERROR: Unable to update record"
+				endon
+			endon
+		endif
+		report section finished
+		set ws-last-stock-group = stock-group
+		set lf-rec-counter += 1
+		if not rbtchproc-in-background
+		and time-elapsed(1000,1)
+			display "Printing Report" @21,59 background left bold
+			display "Now at :" @23,45 background prompts left
+			display stock-group @23,54 foreground prompts
+		endif
+	end-select
+	if ws-update-min-stock
+	or ws-update-max-stock
+		if lf-commit 
+			transaction commit
+		else
+			transaction rollback
+			print "There were errors - all changes have been reversed."
+		endif
+	endif
+	do start-report
+	do finish-report
+endprocedure //rbtchproc-report-detail ---------------------------------------
+
+
+procedure finish-report
+	set ws-exec-end = sys-time()
+	if report-is-xml()
+		page
+		report section "options_page"
+	endif
+	if ws-report-started
+		skip 2
+		print 'Options selected : ' col 2 no-newline
+			tag  'options_print'
+		print 'Start Stock Group             >= : ' in col 22
+			 tag is 'prompt_ws_start_group'
+			ws-start-group                 tag is 'ws_start_group'
+		print 'End Stock Group               <= : ' in col 22
+			 tag is 'prompt_ws_end_group'
+			ws-end-group                   tag is 'ws_end_group'
+		print 'Start Stock Code              >= : ' in col 22
+			 tag is 'prompt_ws_start_stock_code'
+			ws-start-stock-code            tag is 'ws_start_stock_code'
+		print 'End Stock Copde               <= : ' in col 22
+			 tag is 'prompt_ws_end_stock_code'
+			ws-end-stock-code              tag is 'ws_end_stock_code'
+		print 'Start Warehouse               >= : ' in col 22
+			 tag is 'prompt_ws_start_whse'
+			ws-start-whse                  tag is 'ws_start_whse'
+		print 'End Warehouse                 <= : ' in col 22
+			 tag is 'prompt_ws_end_whse'
+			ws-end-whse                    tag is 'ws_end_whse'
+			tag  'options_print'
+		print 'Execution Time Start           = : ' in col 22
+			 tag is 'prompt_ws_start_time'
+			ws-exec-start                 tag is 'ws_start_time'
+		print 'Execution Time End             = : ' in col 22
+			 tag is 'prompt_ws_end_time'
+			ws-exec-end                   tag is 'ws_end_time'
+		skip
+		if ws-update-min-stock
+			print "UPDATE of Minimum Stock Selected " in col 22
+		endif
+		if ws-update-max-stock
+			print "UPDATE of Maximum Stock Selected " in col 22
+		endif
+	endif
+	if report-is-xml()
+		report section finished
+	endif
+	RBTCHPROC_SCREEN_FINISH_MESSAGE(ws-report-started,23,45)
+	if ws-mail-recipients <> spaces
+		do mail-spool-file
+	endif
+endprocedure //finish-report ---------------------------------------------------
+
+screen display-datagrid
+	window @1,1 to @24,80
+	title REPORT_NAME
+	datagrid occurs 22
+	// SQL Generated from DI Project:191128160637:Set Min/Max Stock
+	select
+		stock-master.stk-abc-class
+		stock-master.stk-description
+		stock-master.stk-stock-status
+		stock-master.stock-group
+		stock-warehouse-detail.stock-code
+		stock-warehouse-detail.whse-avg-monthly-demand
+		stock-warehouse-detail.whse-code
+		stock-warehouse-detail.whse-max-days-cover
+		stock-warehouse-detail.whse-max-stock
+		stock-warehouse-detail.whse-min-days-cover
+		stock-warehouse-detail.whse-min-stock
+	from
+		stock-warehouse-detail
+		INNER JOIN stock-master
+			ON
+				stock-master.stock-code = stock-warehouse-detail.stock-code
+	WHERE stock-master.stock-group >= :ws-start-group
+		AND stock-master.stock-group <= :ws-end-group
+		AND stock-warehouse-detail.stock-code >= :ws-start-stock-code
+		AND stock-warehouse-detail.stock-code <= :ws-end-stock-code
+	ORDER BY
+		stock-master.stock-group,
+		stock-warehouse-detail.stock-code
+	allowed search
+detail
+	display stock-group  @1,1
+		Title "Group  "
+	display stock-code  @1,2
+		Title "Item Code "
+	display stk-description  @1,3
+		Title "Item Description "
+	display stk-abc-class  @1,4
+		Title "ABC Class "
+	display stk-stock-status  @1,5
+		Title "Status  "
+	display whse-code  @1,6
+		Title "Whse  "
+	display whse-min-stock  @1,7 pic -s(9).9999
+		Title "Original Minimum Stock"
+	display whse-max-stock  @1,8 pic -s(9).9999
+		Title "Original Maximum Stock"
+	display whse-min-days-cover  @1,9 pic -s(9).9999
+		Title "Min Days Cover"
+	display whse-max-days-cover  @1,10 pic -s(9).9999
+		Title "Max Days Cover"
+	display whse-avg-monthly-demand  @1,11 pic -s(9).9999
+		Title "Avg Mth Demand"
+end-screen
+
+procedure mail-spool-file
+local
+	lf-address				pic x(256) type string
+	//
+	if mail-start(REPORT_NAME) endif
+	if mail-add-line("Here is the content of the report") endif
+	if mail-attach(ws-spool-id,str-concat(REPORT_NAME,".html"),0,1,1) endif
+	while ws-mail-recipients <> spaces
+		if lf-address <> spaces and substring(ws-mail-recipients,1,1) in { space "," ";" }
+			// someone to email
+			if mail-send(lf-address,FALSE,FALSE) endif
+			set lf-address = spaces
+		else
+			string lf-address appending substring(ws-mail-recipients,1,1)
+		endif
+		string ws-mail-recipients deleting 1
+	end-while
+	// at the end there may be one more address left over
+	if lf-address <> spaces
+		// someone to email
+		if mail-send(lf-address,FALSE,FALSE) endif
+	endif
+	if mail-cancel() endif
+end-procedure
+

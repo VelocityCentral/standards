@@ -1,0 +1,40 @@
+-- Sql for determining number of extents for a database
+database sysmaster;
+
+select t.tabname as Table, 
+	v.tabname as View,
+	t.rowsize as RowSize, 
+	t.nrows as RowCount,
+	round(t.rowsize * t.nrows * 1.2 / 1024,0) space_kb,
+	t0.num_ext,
+	t0.pages,
+	t0.ext_size,
+	t0.next_size
+
+from 
+vgl:systables t,
+vgl:sysdepend d, vgl:systables v, 
+
+	(select trim(dbsname) dbs,
+        trim(tabname) tabname,
+        count(*) num_of_extents,
+        sum (pe_size ) pages_used,
+        round (sum (pe_size )
+                * 4 { Your systems page size in KB }
+                * 1.2 { Add 20% Growth factor })
+                ext_size, { First Extent Size in KB }
+        round (sum (pe_size )
+                * 4 { Your systems page size in KB }
+                * .2 { Estimated 20% Yearly Growth })
+                next_size { Next Extent Size in KB }
+from systabnames, sysptnext
+where partnum = pe_partnum
+and dbsname = 'vgl'
+group by 1, 2
+order by 3 desc, 4 desc) as t0(dbs,tabname,num_ext,pages,ext_size,next_size)
+
+where t.tabid = d.btabid and t.tabtype = d.btype
+ and d.dtabid = v.tabid and d.dtype = v.tabtype
+ and t.owner = 'pronto'
+ and t.tabname = t0.tabname
+order by t0.ext_size desc

@@ -1,0 +1,1030 @@
+////////////////////////////////////////////////////////////////////////////////
+//woprint.spl -Work Order Print
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2010
+//
+// PRONTO is a registered trademark of Prometheus Software Developments P/L.
+//
+// All Rights Reserved. Unauthorised copying is prohibited.
+//=========================================================================//
+//
+// Modification History
+// Date		Who	SDR		What
+// 7Sep15	Rjb	Log 11	Written
+//
+//    ****************************************************************
+//    *                                                              *
+//    * change PR entry "JOBCARDS" to bom/woprint                    *
+//    *                                                              *
+//    ****************************************************************
+//
+////////////////////////////////////////////////////////////////////////////////
+
+#define NO_OF_SELECTION_PARAMETERS '2'
+#define REPORT_NAME 'Work Order Print'
+#define HRSPIC pic z(5).9999
+
+#include "../include/i8proglog.spl"
+#include "../include/i8secabt.spl"
+#include "../include/rbtchproc.spl"
+#include "../include/i9status.spl"
+
+#define FIRSTDETAILLINE 15
+
+link 'clib/clib403'
+
+field
+	ws-function-title					pic x(80) type string
+	ws-excel-flag						pic x
+	ws-exec-start						type datetime
+	ws-exec-end							type datetime
+	ws-mail-recipients					pic x(1024) type string
+	ws-spool-id							pic x(20) type string
+	ws-start-work-order					pic x(10)
+	ws-end-work-order					pic x(10)
+
+object required-materials
+	type is memory
+	record is
+		rm-stock-code					like stock-code
+		rm-qty							type number
+		rm-whse							like whse-code
+		rm-level						type number
+		rm-available					type number
+	end-record
+	key is rm-stock-code
+
+object required-routings
+	type is memory
+	record is
+		rr-int-seq						type number
+		rr-stock-code					like stock-code
+		rr-seq							like wor-seq-no	
+		rr-op-code						like wor-op-code
+		rr-work-centre					like wor-work-centre
+		rr-setup-hrs					like wor-setup-hours
+		rr-run-hrs						like wor-run-hours
+		rr-cleanup-hrs					like wor-cleanup-hours
+		rr-l-setup-hrs					like wor-setup-hours
+		rr-l-run-hrs					like wor-run-hours
+		rr-l-cleanup-hrs				like wor-cleanup-hours
+		rr-note							pic x(60) type string
+	end-record
+	key is rr-int-seq
+
+object required-routing-notes
+	type is memory
+	record is 
+		rr-int-seq
+		rr-note-type					like prn-note-type
+		rr-note-seq						like prn-note-seq
+		rr-note-text					like prn-note-text
+	end-record
+	key is rr-int-seq rr-note-type rr-note-text
+
+procedure main
+	get system-control first
+	get system-user-control	
+		on index user-id											
+		key is login-id()
+	on error														
+	endon															
+//	do i8secabt-check-abort parameters
+//		sys-consolidation-division login-id() "ZUSR" "R001"
+//			returning ws-function-title
+	set ws-report-started = FALSE
+	do i8proglog-write-log
+	if get-param(1) = "-p"
+		set ws-start-work-order = get-param(2)
+		set ws-end-work-order = get-param(2)
+		do rbtchproc-report-detail
+	else
+		RBTCHPROC_RUN_PROGRAM(REPORT_NAME)
+	endif
+endprocedure //main ------------------------------------------------------------
+
+screen rbtchproc-report-parameters
+	allow entry
+	window @1,1 to @24,80
+	title ws-function-title
+	form-entry
+before
+	clear
+	box @1,1 to @19,80
+		title "Report Parameters"
+	box @20,1 to @23,80
+		title "Output Options"
+	set ws-start-work-order = min-value(ws-start-work-order)
+	set ws-end-work-order = max-value(ws-end-work-order)
+detail
+	accept ws-start-work-order @3,25
+		// add remove following lines as necessary
+		title 'Start Work Order :'
+		optional
+		help "Start Work Order"
+		uppercase
+		default ws-start-work-order
+		fill with leading spaces
+		right
+	before-accept
+	end-before-accept
+	accept ws-end-work-order @4,25
+		// add remove following lines as necessary
+		title 'End Work Order :'
+		optional
+		help "End Work Order"
+		uppercase
+//		fill with trailing '~'
+		fill with leading spaces
+		default ws-end-work-order
+		right
+	before-accept
+		set ws-end-work-order =  str-concat(ws-start-work-order)
+	end-before-accept
+	radio-button ws-excel-flag
+		@21,18 NO title "No Export"
+		@21,27 "D" title "View Datagrid"
+		default "NO"
+		help "N)o export D)isplay data as a datagrid"
+	on change
+		refresh ws-mail-recipients
+	endon
+	accept ws-mail-recipients @22,10 pic x(68)
+		title "Email:"
+		help "Enter space, comma or semi-colon separated list of email recipients"
+		when ws-excel-flag = NO
+		optional
+	confirm auto
+	confirmed
+		if ws-excel-flag = "D"
+			do display-datagrid
+		else
+			RBTCHPROC_EXECUTION
+		endif
+	endconfirm
+endscreen //rbtchproc-report-parameters --------------------------------------
+
+procedure rbtchproc-set-parameters
+	RBTCHPROC_LOAD_SET_ALPHA(ws-start-work-order)
+	RBTCHPROC_LOAD_SET_ALPHA(ws-end-work-order)
+	RBTCHPROC_LOAD_SET_ALPHA(ws-mail-recipients)
+endprocedure //rbtchproc-set-parameters --------------------------------------
+
+procedure start-report
+	set rbtchproc-report-name = REPORT_NAME
+	report rbtchproc-report-name		
+		header is skeleton-report-header
+		no-message
+		form "workorder"
+		width 1024
+		no-xml
+	set ws-report-started = TRUE
+	if rbtchproc-in-background
+		RBTCHPROC_MESSAGE_REPORT_STARTED
+	else
+		display 'Report :' @20,59 background right bold
+		display spool-file-name() @20,68 pic x(12) foreground prompts
+	endif
+	set ws-exec-start = sys-time()
+	set ws-spool-id = spool-file-name()
+endprocedure //start-report ----------------------------------------------------
+
+procedure skeleton-report-header
+	if report-is-xml()
+		report section "headings_section"
+	endif
+	print "vglwop" col 1
+		"vglwop" col 11
+		rbtchproc-report-name col 51 bold
+		"Date:" col 85
+		tod() col 110
+		today() col 91
+		"Time:" col 104
+		'Page:' col 120
+		left-justify(str(page-no)) col 126 pic x(4)
+	skip
+	print "Barcode" col 1
+		str-concat(
+			work-order
+			";"
+			stock-code
+			";"
+			str(wo-qty-ordered)
+			";"
+			format-picture(wo-expected-finish-date,"yymmdd")
+			)
+	print "Work Order:"  col 1
+		work-order col 30
+		"Stock Code"  col 60
+		stock-code col 80
+	print "Qty" col 1
+		wo-qty-ordered col 30	
+		"Desc" col 60
+		stk-description col 80
+	print "Due:" col 1
+		wo-expected-finish-date col 30 pic dd/mm/yyyy
+	if wo-pegging-document-type = "SO"
+		get sales-order
+			on index so-order-no so-bo-suffix
+			key is num(wo-pegging-document-no) wo-pegging-document-suffix
+		on error
+		else
+			get deb-master
+				on index accountcode
+				key is so-cust-code
+			on error
+				initialise deb-master leaving accountcode
+			endon
+			print "Sales:" col 1
+				concat(str(so-order-no) so-bo-suffix) col 30
+				"Customer:" col 60
+				so-cust-code col 80
+				shortname col 90
+		endon
+	endif
+	skip to FIRSTDETAILLINE
+	/*
+	print
+		"Work" in col    1
+		"Product" in col   13
+		"Status" in col   31
+		right-justify("Ordered",15) in col   39 pic x(15) right
+		right-justify("Due",9) in col   56 pic x(9) right
+		right-justify("Finish",9) in col   67 pic x(9) right
+		"Factory" in col   78
+		right-justify("Bom",10) in col   87 pic x(10) right
+		right-justify("Route",10) in col   99 pic x(10) right
+	print
+		"Order" in col    1
+		right-justify("Date",9) in col   56 pic x(9) right
+		right-justify("Id",10) in col   87 pic x(10) right
+		right-justify("Id",10) in col   99 pic x(10) right
+	*/
+	if report-is-xml()
+		report section finished
+	endif
+endprocedure //skeleton-report-header ------------------------------------------
+
+// Your main processing routine must be named as follows
+procedure rbtchproc-report-detail
+local
+	x							type number
+	window @19,44 to @24,80
+	    title is "Report Progress"
+	    color white
+	    no-hide
+	if not rbtchproc-in-background
+		display bitmap concat(getenv('BMS')'/images/repedge.gif') @19,44
+		display spool-file-name() @20,68 pic x(12) foreground prompts
+		display "Now at :" @23,45 background prompts left
+	endif
+	//
+	// PIC clauses are set in the print statement to enable
+	// later use of the pronto report layout tool
+	//
+	set x = 0 // to avoid warning error
+	do start-report
+	// SQL Generated from DI Project:woprint:Work Order Listing
+	select
+		*
+	from
+		bom-work-order
+	WHERE bom-work-order.work-order >= :ws-start-work-order
+		AND bom-work-order.work-order <= :ws-end-work-order
+	ORDER BY
+		bom-work-order.work-order
+	DATABASE-SQL
+	BEFORE bom-work-order.work-order
+		do build-work-files
+		get stock-master
+			on index stock-code
+			key is wo-parent
+		on error
+			initialise stock-master leaving stock-code
+		endon
+		page
+	detail
+		print "MATH" col 1
+			"Materials Heading" col 10
+		do print-materials
+		print "RTGH" col 1
+			"Routings Heading" col 10
+		do print-routing
+		do print-batches
+		if not rbtchproc-in-background
+			display "Printing Report" @20,59 background left bold
+			display work-order @23,54 foreground prompts
+		endif
+	end-select
+	do finish-report
+endprocedure //rbtchproc-report-detail ---------------------------------------
+
+//--------------------------------------------------------------------------------
+//
+//  All routines assume currency on bom-work-order
+//
+//--------------------------------------------------------------------------------
+
+procedure build-work-files
+	// assumes currency on bom-work-order
+	close required-materials
+	open required-materials
+		temporary
+	close required-routings
+	open required-routings
+		temporary
+	close required-routing-notes
+	open required-routing-notes
+		temporary
+	if wo-status in { I9STATUS_WO_PLANNED, I9STATUS_WO_FIRM_PLANNED }
+		do build-req-from-bom 
+	else
+		do build-req-from-trans 
+	endif
+end-procedure
+	
+
+procedure build-req-from-bom
+	get bill-of-materials-header
+		on index bomh-id
+		key is wo-bom-id
+	on error
+		exit 1
+	endon
+	do traverse-bom
+		parameters are wo-parent wo-bom-id wo-route-id wo-qty-ordered wo-warehouse-code  0
+endprocedure
+
+procedure traverse-bom
+parameters
+	lp-comp-code 							like stock-code
+	lp-bom-id								like bomh-id
+	lp-route-id								like prh-route-id
+	lp-qty									type number
+	lp-whse									like whse-code
+	lp-level								type number
+local
+	lf-current-bomh-id						like bomh-id
+	lf-current-bom-seq-no					like bom-seq-no
+	lf-current-comp-code					like comp-code
+	//
+	get stock-master
+		on index stock-code 
+		key is lp-comp-code
+	on error
+		exit 1
+	else
+		if stk-stock-status = "M"
+			//  We have a node through which we must traverse
+			// get the bomid to use - we need it from the warehouse header
+			// because there is nowhere else for phantoms
+			if lp-whse = spaces
+				set lp-whse = wo-warehouse-code
+			endif
+			// need the formulation qty & default route from BOMH
+			// Note that first time in the bom id comes from the work order
+			// from then on it is from the stock-warehouse-details costing id
+			get bom-formulation-qty
+				bomh-default-route-id
+				from bill-of-materials-header
+				on index bomh-id 
+				key is lp-bom-id
+			on error
+				exit 1
+			endon
+			// Now step through each item and traverse the bom for that item
+			// Note that if the particular item is a leaf node, then it is
+			// written to the work file via  the recursed iteration of the
+			// procedure (not the current iteration).
+			select *
+				from bill-of-materials-detail
+				where bomh-id = :lp-bom-id
+			DATABASE-SQL
+			detail
+				set lf-current-bomh-id = bomh-id 
+				set lf-current-bom-seq-no = bom-seq-no
+				set lf-current-comp-code = comp-code
+				// now we need to get the default bomid and route id for the
+				// child item
+				// care needs to be taken here; we want the the bom details of
+				// the child but the formulation qty for the parent
+				get stock-master
+					on index stock-code
+					key is comp-code
+				on error
+					exit 1
+				endon
+				if stk-stock-status = "M"
+					get whse-costing-bom-id from stock-warehouse-detail 
+						on index stock-code whse-code
+						key is comp-code lp-whse
+					on error
+						exit 1
+					endon
+					set lp-bom-id = whse-costing-bom-id
+					get bomh-default-route-id
+						from bill-of-materials-header
+						on index bomh-id
+						key is whse-costing-bom-id
+					on error
+						// find the first one
+						select lp-bom-id = min(bomh-id)
+							from bill-of-materials-header
+							where stock-code = :comp-code
+							and bom-authorised-flag = YES
+							and today() between bomh-authorised-start-date and bomh-authorised-end-date
+						end-select
+						if file-status() = 111 // nothing in select
+							exit 1
+						endif
+					endon
+				endif
+				if bom-def-whse <> spaces
+					set lp-whse = bom-def-whse
+				endif
+				do traverse-bom parameters
+					comp-code lp-bom-id bomh-default-route-id
+					bom-quantity / bom-formulation-qty * lp-qty
+					lp-whse
+					lp-level + 1
+				position bill-of-materials-detail
+					on index bomh-id bom-seq-no comp-code
+					key is lf-current-bomh-id lf-current-bom-seq-no lf-current-comp-code
+			end-select
+			//
+			// Routing steps are a little different because they are a
+			// function of the BOM header, and therefore cannot be traversed
+			// further.  So we write these out at this stage.
+			// Note also that there is a rule in the software that says the 
+			// step numbers must be unique
+			//
+			do add-routings-for-bom parameters are lp-route-id lp-comp-code lp-qty
+			//
+		else
+			// then we have a leaf node so write and exit
+			set rm-stock-code = lp-comp-code
+			set rm-qty = lp-qty
+			set rm-whse = lp-whse
+			set rm-level = lp-level
+			do clib403-calculate-available
+				parameters are lp-comp-code lp-whse
+				returning rm-available
+			insert required-materials
+			on error
+			endon
+		end-if
+	endon
+end-procedure
+
+procedure add-routings-for-bom
+parameters 
+	lp-route-id							like prh-route-id
+	lp-stock-code						like stock-code
+	lp-qty								type number
+local
+	lf-max-int-seq						like rr-int-seq
+	lf-time-divisor						type number
+	//
+	select lf-max-int-seq = max(rr-int-seq) 
+		from required-routings
+	end-select
+	set rr-int-seq = lf-max-int-seq + 1
+	select * from production-routing
+		where prh-route-id = :lp-route-id
+		order by prod-op-sequence-no
+		DATABASE-SQL
+	detail
+		get production-operations
+			on index prod-op-code
+			key is prod-op-code
+		on error
+			set lf-time-divisor = 1
+		else 
+			switch prod-op-units
+			case "HRS" "SET"
+				set lf-time-divisor = 1
+			case "DAYS"
+				set lf-time-divisor = 1 / 24
+			case "MINS"
+				set lf-time-divisor = 60
+			case "SECS"
+				set lf-time-divisor = 3600
+			end-switch
+		endon
+		initialise required-routings
+			leaving rr-int-seq
+		set rr-seq = prod-op-sequence-no
+		set rr-stock-code = lp-stock-code
+		set rr-op-code = prod-op-code
+		set rr-work-centre = main-work-centre
+		set rr-setup-hrs = prod-setup-time / lf-time-divisor
+		set rr-run-hrs = prod-op-duration-main * lp-qty / prod-qty-produced-per-duration / lf-time-divisor
+		set rr-cleanup-hrs = prod-cleanup-time / lf-time-divisor 
+		set rr-l-setup-hrs = prod-setup-labour / lf-time-divisor
+		set rr-l-run-hrs = prod-labour-time-reqd * lp-qty / prod-qty-produced-per-duration / lf-time-divisor
+		set rr-l-cleanup-hrs = prod-cleanup-labour / lf-time-divisor
+		insert required-routings
+		on error
+			message "screw up"
+		endon
+		do add-route-notes
+			parameters are lp-route-id rr-seq
+		set rr-int-seq += 1
+	end-select
+end-procedure
+
+procedure add-route-notes
+parameters
+	lp-route-id							like bomh-default-route-id
+	lp-op-seq-no						like prod-op-sequence-no
+	select * from production-routing-notes
+		where prh-route-id = :lp-route-id
+		and prn-op-seq = :lp-op-seq-no
+		DATABASE-SQL
+	detail
+		initialise required-routing-notes
+			leaving rr-int-seq
+		set rr-note-type =  prn-note-type
+		set rr-note-seq =  prn-note-seq
+		set rr-note-text =  prn-note-text
+		insert required-routing-notes	
+		on error
+		endon
+	end-select
+end-procedure
+
+procedure build-req-from-trans
+local
+	lf-next-seq							like rr-int-seq
+	lf-trans-to-select					like trn-code
+	// depending the on the status of the work order, we will want different
+	// bom-word-order-trans
+	get bom-work-order
+		on index work-order
+		key is work-order
+	on error
+	endon
+	// 
+	if wo-status = I9STATUS_WO_COMMITTED			
+		set lf-trans-to-select = I9STATUS_TRN_QTY_PER			
+	else
+		set lf-trans-to-select = I9STATUS_ISSUED					
+	endif
+	//
+	select *
+		from bom-work-order-trans
+		where work-order = :work-order
+		and trn-code = :lf-trans-to-select
+		DATABASE-SQL
+	detail
+		set rm-stock-code = comp-code
+		if trn-code = I9STATUS_TRN_QTY_PER
+			set rm-qty = trn-qty * wo-qty-ordered
+		else
+			set rm-qty = trn-qty
+		endif
+		set rm-whse = trn-whse
+		if rm-whse = spaces
+			// this can occur if we have Z items. (like water)
+			set rm-whse = wo-warehouse-code
+		endif
+		do clib403-calculate-available
+			parameters are comp-code trn-whse
+			returning rm-available
+		insert required-materials
+		on error
+		endon
+	end-select
+	//
+	set lf-next-seq = 0
+	select *
+		from production-work-order-route
+		where work-order = :work-order
+		DATABASE-SQL
+	detail
+		set lf-next-seq += 1
+		initialise required-routings
+		set rr-int-seq = lf-next-seq
+		set rr-seq = wor-seq-no
+		set rr-op-code = wor-op-code
+		set rr-work-centre = wor-work-centre
+		set rr-setup-hrs =  wor-setup-hours
+		set rr-run-hrs =  wor-run-hours
+		set rr-cleanup-hrs =  wor-cleanup-hours
+		set rr-l-setup-hrs =  wor-setup-hours
+		set rr-l-run-hrs =  wor-run-hours
+		set rr-l-cleanup-hrs =  wor-cleanup-hours
+		set rr-stock-code = wo-parent
+		insert required-routings
+		on error
+			message "screw up in rouints"
+		endon
+		do add-route-notes
+			parameters are wo-route-id rr-seq
+	end-select
+endprocedure
+
+//********************************************************************************
+//		PRINT ROUTINES
+//********************************************************************************
+
+procedure print-materials
+	select * 
+		from required-materials
+	detail
+		get stock-master
+			on index stock-code
+			key is rm-stock-code
+		on error
+			initialise stock-master leaving stock-code
+		endon
+		print "MATD" col 1
+			rm-stock-code col 5
+			stk-description col 25
+			rm-qty col 55
+			rm-whse col 85
+			rm-level col 95 pic zz
+		do print-stock-notes parameters are rm-stock-code
+	end-select
+end-procedure
+
+procedure print-routing
+local
+	lf-route-note-desc					pic x(40) type string
+	lf-first-note						type boolean
+	select *
+		from required-routings
+	detail
+		print "RTGD" col 1
+			rr-int-seq 			col 5 pic z(5)
+			rr-seq 				col 10 pic z(5)
+			rr-op-code 			col 15
+			rr-work-centre 		col 25
+			rr-setup-hrs 		col 40 HRSPIC
+			rr-l-setup-hrs 		col 55 HRSPIC
+			rr-run-hrs 			col 70 HRSPIC
+			rr-l-run-hrs 		col 85 HRSPIC
+			rr-cleanup-hrs 		col 100 HRSPIC
+			rr-l-cleanup-hrs 	col 115 HRSPIC
+			rr-stock-code		col 130
+		select * from required-routing-notes
+			where rr-int-seq = :rr-int-seq
+			order by rr-note-type rr-note-seq
+		before rr-note-type
+			do get-route-note-desc
+				parameters are rr-note-type
+				returning lf-route-note-desc
+			print "RNTH" col 1
+				rr-note-type
+				lf-route-note-desc
+			set lf-first-note = TRUE
+		detail
+			if lf-first-note // or line-no = FIRSTDETAILLINE
+				print "RNTD" col 1
+					rr-note-text col 10
+			else
+				print rr-note-text col 10
+			endif
+			set lf-first-note = FALSE
+		end-select
+	end-select
+end-procedure
+
+procedure print-batches
+local
+	lf-tot-qty						type number
+	lf-tot-avail					type number
+	select 
+		rm-whse,
+		rm-stock-code,
+		lf-tot-qty = sum(rm-qty)
+		lf-tot-avail = sum(rm-available)
+		from required-materials
+		group by rm-whse rm-stock-code
+		order by rm-whse rm-stock-code
+	before rm-whse
+		get system-table 
+			on index sys-tbl-type sys-tbl-code
+			key is "WH" rm-whse
+		on error
+			set sys-description = spaces
+		endon
+		print "WBH" col 1
+			"Warehouse batch heading " col 10
+			rm-whse col 40
+			sys-description col 50
+	detail
+		get stock-master
+			on index stock-code
+			key is rm-stock-code
+		on error
+			initialise stock-master leaving stock-code
+		endon
+		print "WBD" col 1
+			rm-stock-code col 10
+			stk-description col 30
+			lf-tot-qty col 60
+			lf-tot-avail - lf-tot-qty pic s(8).99 col 75
+//		do print-stock-notes parameters are rm-stock-code
+		// we want the lots that have some less any committed
+		// we include stuff on hold because we just want to know that
+		// we exclude qty due in
+		select 
+			stock-location.*
+			stock-lot-master.*
+			from stock-location
+			left join stock-lot-master on stock-location.sl-reference-lot = stock-lot-master.slm-lot-number
+			where 
+				stock-location.stock-code = :rm-stock-code and 
+				stock-location.whse-code = :rm-whse and
+				stock-location.sl-reference-lot <> spaces and
+				stock-location.sl-qty-on-hand - stock-location.sl-qty-due-out > 0
+			order by stock-location.whse-code
+				stock-location.stock-code
+				stock-location.sl-receipt-date
+				stock-location.sl-reference-lot
+		DATABASE-SQL
+		before 
+			print "WLH" col 1
+				"Lot Heading" col 10
+		detail
+			print "WBDL" col 1
+				sl-reference-lot col 10
+				sl-receipt-date pic dd/mm/yyyy col 35
+				sl-qty-on-hand  pic z(5).9999 col 50
+				sl-qty-due-out  pic z(5).9999 col 60
+				sl-qty-on-hold  pic z(5).9999 col 70
+				sl-qty-on-hand - sl-qty-due-out  pic z(5).9999 col 80
+				slm-use-by-date pic dd/mm/yyyy col 95
+		end-select
+	end-select
+end-procedure
+
+procedure print-stock-notes
+parameters
+	lp-stock-code							like stock-code
+local
+	lf-note-desc							pic x(40) type string
+	lf-first								type boolean
+	//
+	// Note that a record identifier in position one is not used for
+	// subsequent lines because we want to use expandable sections in truforms
+	// to make the paramgraphs look tidy.
+	//
+	// find cut instructions first.... (for sales configurator items)
+	select *
+		from bill-of-materials-notes
+		where bomh-id = :wo-bom-id
+		and comp-code = lp-stock-code
+		and bom-note-type = "c"
+		order by bom-note-line-seq-no
+	before
+		print "SNH" col 1 
+			"CT" col 10
+			"Cut Instruction" col 20
+		set lf-first = TRUE
+	detail
+		if lf-first //or line-no = FIRSTDETAILLINE 
+			print "SND" col 1
+			bom-note col 10
+		else
+			print bom-note col 10
+		endif
+		set lf-first = FALSE
+	end-select
+	// process normal stock notes
+	select *
+		from stock-notes
+		where stock-code = :lp-stock-code
+		and stock-note-type in ( "DG" "EP" "H" "ME" "MI" "QI" "SD" "W" )
+		order by stock-code stock-note-type stock-note-sequence
+		DATABASE-SQL
+	before stock-code stock-note-type
+		do get-note-desc
+			parameters are stock-note-type
+			returning lf-note-desc
+		print "SNH" col 1 
+			stock-note-type col 10
+			lf-note-desc col 20
+		set lf-first = TRUE
+	detail
+		if lf-first //or line-no = FIRSTDETAILLINE 
+			print "SND" col 1
+			stock-note col 10
+		else
+			print stock-note col 10
+		endif
+		set lf-first = FALSE
+	end-select
+end-procedure
+
+
+//********************************************************************************
+//		END OF PRINT ROUTINES
+//********************************************************************************
+
+
+procedure finish-report
+	set ws-exec-end = sys-time()
+	if report-is-xml()
+		page
+		report section "options_page"
+	endif
+	if ws-report-started
+		skip 2
+		print 'Options selected : ' col 2 no-newline
+		print 'Start Work Order              >= : ' in col 22
+			ws-start-work-order            
+		print 'End Work Order                <= : ' in col 22
+			ws-end-work-order             
+		print 'Execution Time Start           = : ' in col 22
+			ws-exec-start                
+		print 'Execution Time End             = : ' in col 22
+			ws-exec-end                   
+		skip
+	endif
+	if report-is-xml()
+		report section finished
+	endif
+	RBTCHPROC_SCREEN_FINISH_MESSAGE(ws-report-started,23,45)
+	if ws-mail-recipients <> spaces
+		do mail-spool-file
+	endif
+endprocedure //finish-report ---------------------------------------------------
+
+screen display-datagrid
+	window @1,1 to @24,80
+	title REPORT_NAME
+	datagrid occurs 22
+	// SQL Generated from DI Project:woprint:Work Order Listing
+	select
+		bom-work-order.wo-bom-id
+		bom-work-order.wo-date
+		bom-work-order.wo-expected-finish-date
+		bom-work-order.wo-factory-whse
+		bom-work-order.wo-parent
+		bom-work-order.wo-qty-ordered
+		bom-work-order.wo-route-id
+		bom-work-order.wo-status
+		bom-work-order.work-order
+	from
+		bom-work-order
+	WHERE bom-work-order.work-order >= :ws-start-work-order
+		AND bom-work-order.work-order <= :ws-end-work-order
+	ORDER BY
+		bom-work-order.work-order
+	DATABASE-SQL
+	allowed search
+detail
+	display work-order  @1,1
+		Title "Work Order "
+	display wo-parent  @1,2
+		Title "Product  "
+	display wo-status  @1,3
+		Title "Status  "
+	display wo-qty-ordered  @1,4
+		Title "Ordered  "
+	display wo-date  @1,5
+		Title "Due Date "
+	display wo-expected-finish-date  @1,6
+		Title "Finish  "
+	display wo-factory-whse  @1,7
+		Title "Factory  "
+	display wo-bom-id  @1,8
+		Title "Bom Id "
+	display wo-route-id  @1,9
+		Title "Route Id "
+end-screen
+
+procedure mail-spool-file
+local
+	lf-address				pic x(256) type string
+	//
+	if mail-start(REPORT_NAME) endif
+	if mail-add-line("Here is the content of the report") endif
+	if mail-attach(ws-spool-id,str-concat(REPORT_NAME,".html"),0,1,1) endif
+	while ws-mail-recipients <> spaces
+		if lf-address <> spaces and substring(ws-mail-recipients,1,1) in { space "," ";" }
+			// someone to email
+			if mail-send(lf-address,FALSE,FALSE) endif
+			set lf-address = spaces
+		else
+			string lf-address appending substring(ws-mail-recipients,1,1)
+		endif
+		string ws-mail-recipients deleting 1
+	end-while
+	// at the end there may be one more address left over
+	if lf-address <> spaces
+		// someone to email
+		if mail-send(lf-address,FALSE,FALSE) endif
+	endif
+	if mail-cancel() endif
+end-procedure
+
+procedure get-note-desc
+parameters
+	lp-note-type					like stock-note-type
+returning
+	lr-note-desc					pic x(40) type string
+	//
+	switch on lp-note-type
+	case "  " 
+		set lr-note-desc = translate "General Information"	
+	case "BR" 
+		set lr-note-desc = translate "Balancing Req"	
+	case "C " 
+		set lr-note-desc = translate "Complaint History"
+	case "DG" 
+		set lr-note-desc = translate "Dangerous Goods Document"
+	case "DP" 
+		set lr-note-desc = translate "Dressing/Profiling"	
+	case "EH" 
+		set lr-note-desc = translate "Extrusion History"
+	case "EP" 
+		set lr-note-desc = translate "Emergency Procedure Guide"
+	case "FC" 
+		set lr-note-desc = translate "Forecasting Notes"	
+	case "H " 
+		set lr-note-desc = translate "Hazardous Material Handling Notes"
+	case "HT" 
+		set lr-note-desc = translate "Hydro Test Req?"	
+	case "LE" 
+		set lr-note-desc = translate "English Item Description "	
+	case "LF" 
+		set lr-note-desc = translate "French Item Description "	
+	case "LG" 
+		set lr-note-desc = translate "German Item Description "	
+	case "LI" 
+		set lr-note-desc = translate "Italian Item Description "	
+	case "LS" 
+		set lr-note-desc = translate "Spanish Item Description "	
+	case "MC" 
+		set lr-note-desc = translate "Material Cert Req?"	
+	case "MI" 
+		set lr-note-desc = translate "Manufacturing Information"
+	case "ME" 
+		set lr-note-desc = translate "Manufacturing Exception Messages"
+	case "P " 
+		set lr-note-desc = translate "Purchase Order Notes"
+	case "PA" 
+		set lr-note-desc = translate "Painting?"	
+	case "PE" 
+		set lr-note-desc = translate "Published / External"		
+	case "PK" 
+		set lr-note-desc = translate "Packing?"	
+	case "PM" 
+		set lr-note-desc = translate "Scanpack Packing Material"	
+	case "PR" 
+		set lr-note-desc = translate "Preservation?"	
+	case "PT" 
+		set lr-note-desc = translate "Perf Test Req?"	
+	case "QI" 
+		set lr-note-desc = translate "Quality Inspection Procedure"
+	case "R " 
+		set lr-note-desc = translate "Purchase Reorder Notes"
+	case "S " 
+		set lr-note-desc = translate "Sales Specification Notes"
+	case "SD" 
+		set lr-note-desc = translate "Stock Notes"
+	case "SP" 
+		set lr-note-desc = translate "Specification"	
+	case "T " 
+		set lr-note-desc = translate "Telemarketing Notes"
+	case "TM" 
+		set lr-note-desc = translate "Telemarketing (Mandatory) Notes"
+	case "TR" 
+		set lr-note-desc = translate "Transport?"	
+	case "TW" 
+		set lr-note-desc = translate "Telemarketing Warning Note"
+	case "W " 
+		set lr-note-desc = translate "Hazardous Material Warning Notes"
+	case "WA" 
+		set lr-note-desc = translate "Web Image Path"			
+	case "WN" 
+		set lr-note-desc = translate "Web Details & Notes"		
+	case "GL"
+		set lr-note-desc = translate "Global GL Account"
+	else
+		set lr-note-desc = translate "Unknown"
+	endswitch
+endprocedure 
+
+
+procedure get-route-note-desc
+parameters are
+	lp-route-note-type					like prn-note-type
+returning
+	lr-note-desc						pic x(40) type string
+	switch lp-route-note-type
+	case "O"
+		set lr-note-desc = "Operation"
+	case "T"
+		set lr-note-desc = "Tooling"
+	case "G"
+		set lr-note-desc = "Guage"
+	case "Q"
+		set lr-note-desc = "QA"
+	else
+		set lr-note-desc = "Unknown"
+	end-switch
+end-procedure

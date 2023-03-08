@@ -1,0 +1,205 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : Locan enquiry by Warehouse
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2018
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: stk/locnenq.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 23Aug18  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+#include "../include/iwgetwhse.spl"
+
+link "clib/clibwhse"
+ 
+field
+	ws-function-title						type string
+
+mode md-calc-cap
+	prompt "Cap Calc"
+	help "Calculate capacity of this location for a new item"
+
+
+procedure main
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8secabt-check-abort
+		parameters are sys-consolidation-division login-id() "ZUSR" "E002"
+		returning ws-function-title 
+	do i8proglog-write-log
+	do iwgetwhse-get-whse-code
+	do whse-locn-detail parameters are iwgetwhse-valid-whse
+end-procedure
+
+screen whse-locn-detail
+parameters
+	lp-warehouse							like whse-code
+local
+	lf-max-qty								type number
+	window
+	title ws-function-title
+	datagrid occurs 22
+	select 
+		t0.whse-code
+		t0.sl-location-code
+		t1.stock-code
+		t1.sl-reference-lot
+		t0.location-type
+		t1.sl-qty-on-hand
+		t0.wvl-aisle
+		t0.wvl-rack
+		t0.wvl-shelf
+		t0.wvl-position
+		t2.slm-use-by-date
+		from warehouse-valid-locations   as t0
+		left outer join stock-location as t1
+			on t0.sl-location-code  = t1.sl-location-code
+		left outer join stock-lot-master as t2
+			on t1.sl-reference-lot = t2.slm-lot-number and t1.stock-code = t2.stock-code
+		where t0.whse-code = :lp-warehouse
+		database-sql
+	allowed search md-calc-cap
+detail
+	if stock-code != spaces
+		do clibwhse-determine-max-storage-for-item-location
+			parameters are lp-warehouse, stock-code, sl-location-code spaces
+			returning lf-max-qty
+	else
+		set lf-max-qty = 0
+	endif
+	if screenmode = md-calc-cap
+		do show-capacity-for-new-item  entry 
+			parameters lp-warehouse sl-location-code
+	endif
+	accept  sl-location-code @1,1
+		title "Loc"
+		when screenmode = search
+		show-value
+	display lf-max-qty @1,2 pic z(6)
+		title "Cap"
+	display stock-code @1,3
+		title "Stock"
+	display sl-reference-lot @1,4
+		title "Lot"
+	display slm-use-by-date @1,5
+		title "Use By"
+	display location-type @1,6
+		title "Type"
+	display sl-qty-on-hand @1,7
+		title "Qoh"
+	display wvl-aisle @1,8
+		title "Aisle"
+	display wvl-rack @1,9
+		title "Rack"
+	display wvl-shelf @1,10
+		title "Shelf"
+	display wvl-position @1,11
+		title "Position"
+end-screen
+
+screen show-capacity-for-new-item
+parameters
+	lp-whse								like whse-code
+	lp-location							like sl-location-code
+local
+	lf-stock-code						like stock-code
+	lf-max-qty							type number
+	lf-replen-level						type number
+	lf-max-pick							type number
+//
+	window @1,1 to @7,40
+		window-position 5
+	no-ok-cancel
+	title "Capacity Calculator"
+	form-entry
+before
+	get stock-master first
+	set lf-stock-code = stock-code
+detail
+	display lp-location @1,20
+		title "Location"
+	accept lf-stock-code @2,20
+		title "Stock Code"
+		default lf-stock-code
+		uppercase
+	on up-arrow
+		get stock-master previous
+		set lf-stock-code = stock-code
+		do get-calc-data parameters are lp-whse lp-location lf-stock-code
+			returning lf-max-qty lf-replen-level lf-max-pick
+		refresh data
+		re-enter optional
+	endon
+	on down-arrow
+		get stock-master next
+		set lf-stock-code = stock-code
+		do get-calc-data parameters are lp-whse lp-location lf-stock-code
+			returning lf-max-qty lf-replen-level lf-max-pick
+		refresh data
+		re-enter optional
+	endon
+	validations
+		get stock-master
+			on index stock-code
+			key is lf-stock-code
+		on error ENOREC
+			message-box param-text("<<P1>><<BR>><<p2>>"
+				,"Invalid Stock Code"
+				,"Please Re-enter")
+				title is ws-function-title
+				message-buttons MSG_BOX_CANCEL
+				icon MSG_BOX_STOP
+			re-enter
+		endon
+	end-validations
+	on change
+		do get-calc-data parameters are lp-whse lp-location lf-stock-code
+			returning lf-max-qty lf-replen-level lf-max-pick
+		refresh data
+	endon
+	display  lf-max-qty @3,20 pic z(5)
+		title "Max Qty"
+	display  lf-replen-level @4,20 pic z(5)
+		title "Replenishment Qty"
+	display  lf-max-pick @5,20 pic z(5)
+		title "Max Pick"
+	confirm auto
+	confirmed
+	end-confirm
+end-screen
+
+procedure get-calc-data
+parameters
+	lp-whse								like whse-code
+	lp-location							like sl-location-code
+	lp-stock-code						like stock-code
+returning
+	lr-max-qty							type number
+	lr-replen-level						type number
+	lr-max-pick							type number
+	//
+	do clibwhse-determine-max-storage-for-item-location
+		parameters are lp-whse lp-stock-code lp-location spaces
+		returning lr-max-qty
+	do clibwhse-determine-replen-level-for-item-location
+		parameters are lp-whse lp-stock-code lp-location spaces lr-max-qty
+		returning lr-replen-level
+	do clibwhse-determine-max-pick-percentage-for-location
+		parameters are lp-whse lp-location spaces 
+		returning lr-max-pick
+	set lr-max-pick = lr-max-qty / 100 * lr-max-pick
+end-procedure
+
+
+

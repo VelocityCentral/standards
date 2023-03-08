@@ -1,0 +1,257 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : This is a generalised routine to allow maintenance of generalised
+// notes
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2015
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: clib/clibvdocnotes.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 11Jun15  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+/*
+	This documentation is in RST format.  To view this as a nice pdf goto
+	https://overbits.herokuapp.com/rsteditor/ or rst.ninjs.org and paste this content.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|           |           |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+
+	Alternatively
+
+	 =========== =========== ======================================================== 
+	  Direction   Data Type   Description                                             
+	 =========== =========== ======================================================== 
+	 =========== =========== ======================================================== 
+
+=============
+clibvdocnotes
+=============
+
+	This routine provides a generalised way of adding notes to any object in pronto.
+	It is dependant on the distributor only table v-document-notes.
+	The table has the intention of providing the same document tracking function as standard
+	pronto (i.e. down to the line level.)
+
+Table Layout
+~~~~~~~~~~~~
+	This table has the following format:
+
+	Table Name : v-document-notes
+
+	Table Description : Document Notes
+
+	Table Name:docnotes0
+
+
+	Indexes
+
+	+-----+------+-----------------+
+	|Index|Unique|Fields           |
+	+=====+======+=================+
+	|1    |YES   |v-document-type  |
+	+-----+------+-----------------+
+	|     |      |v-document-no    |
+	+-----+------+-----------------+
+	|     |      |v-document-suffix|
+	+-----+------+-----------------+
+	|     |      |v-document-line  |
+	+-----+------+-----------------+
+	|     |      |v-note-type      |
+	+-----+------+-----------------+
+	|     |      |v-note-seq-no    |
+	+-----+------+-----------------+
+
+	Field List
+
+	+-----------------+---------------+---------+-------+------+
+	|Field            |Description    |Data Type|Pic    |Occurs|
+	+=================+===============+=========+=======+======+
+	|v-document-type  |Document Type  |Alpha    |x(4)   |      |
+	+-----------------+---------------+---------+-------+------+
+	|v-document-no    |Document No    |Numeric  |9(12)  |      |
+	+-----------------+---------------+---------+-------+------+
+	|v-document-suffix|Document Suffix|Alpha    |x(2)   |      |
+	+-----------------+---------------+---------+-------+------+
+	|v-document-line  |Document Line  |Numeric  |9(6).99|      |
+	+-----------------+---------------+---------+-------+------+
+	|v-note-type      |Note Type      |Alpha    |x(4)   |      |
+	+-----------------+---------------+---------+-------+------+
+	|v-note-seq-no    |Note Seq No    |Numeric  |9(6).99|      |
+	+-----------------+---------------+---------+-------+------+
+	|v-note-text      |Note Text      |Alpha    |x(60)  |      |
+	+-----------------+---------------+---------+-------+------+
+
+clibvdocnotes-get-first-line 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	For a given key to the document notes table return the first line of the notes
+	This is useful when only a single note line is very common.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 4   |Like v-document-type                                    |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |Numeric    |Like v-document-no                                      |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |String 2   |Like v-document-suffix                                  |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |numeric    |Like v-document-line                                    |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |String 4   |Like v-note-type                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |String 60  |Like v-note-text                                        |
+	+-----------+-----------+--------------------------------------------------------+
+
+
+clibvdocnotes-maintain-via-wp 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	Edit the document notes via prowp
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 4   |Like v-document-type                                    |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |Numeric    |Like v-document-no                                      |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |String 2   |Like v-document-suffix                                  |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |numeric    |Like v-document-line                                    |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |String 4   |Like v-note-type                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |String 60  |Like v-note-text                                        |
+	+-----------+-----------+--------------------------------------------------------+
+
+*/
+ 
+#include "../include/i8proglogparam.spl"
+#define NOTELEN 60
+
+object temp-description
+	type text
+	record
+		temp-desc						pic x(NOTELEN)
+	endrecord
+
+field
+	ws-last-error						pic x(1024) type string
+ 
+procedure library-init
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8proglogparam-write-log parameters are "clibvdocnotes"
+	open v-document-notes
+	on error  ENOENT
+		open v-document-notes create permanent
+		on error
+			set ws-last-error = "Unable to create file"
+		endon
+	endon
+end-procedure
+
+procedure clibvdocnotes-get-first-line export
+parameters
+	lp-doc-type					like v-document-type
+	lp-doc-no					like v-document-no
+	lp-doc-suffix				like v-document-suffix
+	lp-doc-line					like v-document-line
+	lp-note-type				like v-note-type
+	//
+returning
+	lr-first-line					pic x(NOTELEN)
+	//
+	select * from v-document-notes
+		where v-document-type = lp-doc-type
+		and	v-document-no = :lp-doc-no
+		and v-document-suffix = :lp-doc-suffix
+		and v-document-line = :lp-doc-line
+		and v-note-type = :lp-note-type
+		order by v-document-type v-document-no v-document-suffix v-document-line 
+	detail								
+		set lr-first-line = v-note-text
+		exit
+	endselect
+end-procedure
+
+procedure clibvdocnotes-get-last-error export
+returning
+	lr-message							like ws-last-error
+	set lr-message = ws-last-error
+end-procedure
+
+
+procedure clibvdocnotes-maintain-via-wp export
+	auto-transaction
+parameters
+	lp-doc-type					like v-document-type
+	lp-doc-no					like v-document-no
+	lp-doc-suffix				like v-document-suffix
+	lp-doc-line					like v-document-line
+	lp-note-type				like v-note-type
+	//
+returning
+	lr-first-line					pic x(NOTELEN)
+local
+	lf-seq							like sol-line-seq
+//
+	window @5,15 to @23,80
+//
+	open temp-description temporary local		
+	select * from v-document-notes
+		where v-document-type = lp-doc-type
+		and	v-document-no = :lp-doc-no
+		and v-document-suffix = :lp-doc-suffix
+		and v-document-line = :lp-doc-line
+		and v-note-type = :lp-note-type
+		order by v-document-type v-document-no v-document-suffix v-document-line 
+	detail								
+		set temp-desc = v-note-text
+		insert temp-description								
+	endselect
+	command "prowp" parameters are
+		"-h" str-concat("Description for:" lp-doc-type str(lp-doc-no) lp-doc-suffix 
+			if-then-else(lp-doc-line <> 0, "-"," ") str(lp-doc-line))
+		"-b" "18" "60" "5" "10"
+		"-t" "10"  
+		file-name(temp-description)
+	sql-delete v-document-notes
+		where v-document-type = :lp-doc-type
+		and v-document-no = :lp-doc-no
+		and v-document-suffix = :lp-doc-suffix
+		and v-document-line = :lp-doc-line
+		and v-note-type = :lp-note-type
+	set lf-seq = 1
+	select  * from temp-description
+	detail
+		if lr-first-line = spaces
+			set lr-first-line = temp-desc
+		endif
+		initialise v-document-notes
+		set v-document-type = lp-doc-type
+		set v-document-no = lp-doc-no
+		set v-document-suffix = lp-doc-suffix
+		set v-document-line = lp-doc-line
+		set v-note-type = lp-note-type
+		set v-note-seq-no = lf-seq
+		set v-note-text = temp-desc
+		insert v-document-notes
+		on error
+		endon
+		set lf-seq += 1
+	end-select
+end-procedure
+

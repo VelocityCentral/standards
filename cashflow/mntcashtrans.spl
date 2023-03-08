@@ -1,0 +1,632 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program :  Maintain Cashflow Transactions
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2018
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: cashflow/mntcashtrans.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 24Mar18  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/bmsdef.spl"
+#include "../include/i8dictopen.spl"
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+#include "../include/m3enqgl.spl"
+
+#define DEBUG(A) str-concat(A ":" get-field-value(A))
+
+// TODO:  Automatically write pcs file
+// TODO:  Link to field defintions (or maintain ourselves)
+
+field
+	ws-function-title						type string
+
+mode md-paste
+	prompt "Paste"
+	help "Paste from Spreadsheet"
+	process entry
+mode md-duplicate
+	prompt "Duplicate"
+	help "Duplicate this item"
+mode md-detail
+	prompt "Detail"
+	help "Detail view of transaction"
+mode md-entry
+	prompt "Entry"
+	help "Enter a new record"
+mode md-correct
+	prompt "Correct"
+	help "Correct these Details"
+mode md-date
+	prompt "Date"
+	help "Change the Date basis"
+mode md-amount
+	prompt "Amount"
+	help "Change the amount"
+
+procedure main
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8secabt-check-abort
+		parameters are sys-consolidation-division login-id() "ZVG" "M012"
+		returning ws-function-title 
+	do i8proglog-write-log
+	do open-files
+//	do maintain-trans-detail correct parameters are 1
+	do maintain-trans
+end-procedure
+
+procedure open-files
+	open cashflow-trans
+	on error ENOENT
+		open cashflow-trans create permanent
+		on error
+			abort "Cannot create files"
+		endon
+	endon
+end-procedure
+
+screen maintain-trans
+local
+	lf-id								like cf-id
+	lf-escape							type boolean
+	window
+	title ws-function-title
+	datagrid occurs 20
+	select *
+		from cashflow-trans
+	allow search md-entry md-paste md-correct remove md-duplicate 
+detail
+	if screenmode = md-correct
+		do maintain-trans-detail parameters are cf-id
+	endif
+	if screenmode = md-entry
+		select lf-id = max(cf-id) from cashflow-trans end-select
+		set lf-id += 1
+		initialise cashflow-trans
+		set cf-id = lf-id 
+		insert cashflow-trans
+		on error
+			message "failed"
+			exit
+		endon
+		do maintain-trans-detail correct parameters are cf-id returning lf-escape
+		if lf-escape
+			message "del;eting"
+			sql-delete cashflow-trans where cf-id = :lf-id
+		endif
+	endif
+	if screenmode = md-paste
+		do paste-trans
+	endif
+	accept cf-id @1,1
+		title "Id"
+		when screenmode in (search)
+		show-value
+	display cf-desc @1,2 pic x(30)
+		title "Description"
+	display cf-repeat-desc @1,6
+		title "Date"
+	display cf-amount-desc @1,7
+		title "Amount"
+	confirm auto
+	before
+		if cf-date-type = spaces
+			set cf-date-type = "C"
+		endif
+	end-confirm
+end-screen
+
+screen paste-trans
+local
+	lf-id								like cf-id
+	window
+	title ws-function-title
+	datagrid occurs 20
+	select *
+		from cashflow-trans
+	allow search entry md-paste correct remove md-duplicate md-detail
+detail
+	if screenmode = md-detail
+		if cf-id = 0 // (first time?)
+			do maintain-trans-detail entry parameters are 0
+		else
+			do maintain-trans-detail parameters are cf-id
+		endif
+	endif
+	accept cf-id @1,1
+		title "Id"
+		when screenmode in (search)
+		show-value
+	accept cf-desc @1,2 pic x(30)
+		title "Description"
+	accept cf-date @1,3 
+		title "Date"
+	accept cf-amount @1,4
+		title "Amount"
+	accept cf-cfpi-uonum @1,5
+		title "Field"
+	confirm auto
+	before
+		if cf-id = 0
+			select lf-id = max(cf-id) from cashflow-trans end-select
+			set cf-id = lf-id + 1
+		endif
+		if cf-date-type = spaces
+			set cf-date-type = "C"
+		endif
+	end-confirm
+end-screen
+
+screen maintain-trans-detail
+parameters
+	lp-id								type number
+returning
+	lr-escape							type boolean
+local
+	lf-fld-name							pic x(100) type string occurs 6
+	window
+	title ws-function-title
+	primary cashflow-trans
+	allowed correct md-date md-amount
+	form-entry
+before
+	get cashflow-trans 
+		on index cf-id
+		key is lp-id
+	on error
+		message "no record"
+		exit 1
+	endon
+	set lr-escape = TRUE
+	box @1,1 to @3,90
+		title "Id"
+	box @4,1 to @6,90
+		title "Date"
+	box @7,1 to @9,90
+		title "Amount"
+	do get-user-only-fields returning lf-fld-name
+	// i now contains the number of non-space entries
+	box @10,1 to @14,90
+		title "Field"
+	set lr-escape = TRUE
+detail
+	if screenmode = md-date
+		do date-parameters correct parameters are lp-id
+	end-if
+	if screenmode = md-amount
+		do amount-parameters correct parameters are lp-id
+	end-if
+	display cf-id @2,11 
+		title "ID"
+	accept cf-desc @2,40 pic x(30) 
+		title "Description"
+	display cf-repeat-desc @5,20
+		foreground prompts
+	display cf-amount-desc @8,20
+		foreground prompts
+	radio-button cf-cfpi-uonum
+		@11,20 1 title lf-fld-name[1]
+		button-when lf-fld-name[1] != "Unused"
+		@11,40 2 title lf-fld-name[2]
+		button-when lf-fld-name[2] != "Unused"
+		@12,20 3 title lf-fld-name[3]
+		button-when lf-fld-name[3] != "Unused"
+		@12,40 4 title lf-fld-name[4]
+		button-when lf-fld-name[4] != "Unused"
+		@13,20 4 title lf-fld-name[5]
+		button-when lf-fld-name[5] != "Unused"
+		@13,40 4 title lf-fld-name[6]
+		button-when lf-fld-name[6] != "Unused"
+		right-coordinate
+		default 1
+		before-radio-button
+			if cf-cfpi-uonum < 1 or cf-cfpi-uonum > 6
+				set cf-cfpi-uonum = 1
+			endif
+		end-before-radio-button
+		validations
+			//
+		end-validations
+		on change
+			//
+		end-on
+	end-radio-button 
+	confirm auto
+	confirmed
+		set lr-escape = FALSE
+	end-confirm
+end-screen
+
+screen date-parameters
+parameters
+	lp-id								like cf-id
+local
+	lf-escape							type boolean
+	window @1,1 to @6,60
+	title "Date"
+	no-ok-cancel
+	primary cashflow-trans
+	window-position 5
+	form-entry
+before
+	get cashflow-trans 
+		on index cf-id
+		key is lp-id
+	on error
+		message "Invalid Transaction"
+		exit
+	endon
+	box @1,1 to @5,60
+detail
+	radio-button cf-date-type
+		@2,20 "A" title  "Fixed Date"
+		@2,40 "C" title  "Calendar Function"
+		right-coordinate
+		before-radio-button
+			if cf-date-type = spaces
+				set cf-date-type = "A"
+			endif
+			refresh cf-date-type
+			refresh cf-date
+		end-before-radio-button
+		validations
+			//
+		end-validations
+		on change
+			if cf-date-type = "A"
+				refresh cf-date
+			else
+				set cf-date = 0
+				refresh cf-date
+			endif
+			//
+		end-on
+	end-radio-button 
+	accept cf-date @4,20
+		title "Date"
+		when cf-date-type = "A"
+		no-warning
+	confirm auto
+	before
+		if cf-date-type = "C"
+			save cashflow-trans
+			do set-repeat correct returning lf-escape
+			if lf-escape
+				restore cashflow-trans
+			endif
+		endif
+		do get-repeat-desc returning cf-repeat-desc
+	confirmed
+	end-confirm
+end-screen
+
+screen set-repeat
+returning 
+	lr-escape							type boolean
+// assumes currency on cashflow-trans 
+// Changes cashflow-trans values
+	//
+	window @1,1 to @10,60
+	title "Repeat"
+	window-position 5
+	// no window!!
+	form-entry
+before
+	set lr-escape = TRUE
+	box @1,1 to @3,60
+		title "Basis"
+	box @4,1 to @6,60
+		title "Day of Week"
+	box @7,1 to @9,60
+		title "Day of Month"
+detail
+	radio-button cf-repeat-basis
+		@2,20 "DAY" title "Daily"
+		@2,30 "WEEK" title "Weekly"
+		@2,40 "MTH" title "Monthly"
+//		@2,50 "YEAR" title "Yearly"
+		right-coordinate
+		on change
+			switch cf-repeat-basis 
+			case  "DAY" "YEAR" 
+				set cf-repeat-freq = 1
+			case "WEEK" "MTH"
+				refresh cf-repeat-freq
+			end-switch
+		endon
+	end-radio-button
+	radio-button cf-repeat-freq
+		@5,20 1 title "Sun"
+		@5,25 2 title "Mon"
+		@5,30 3 title "Tue"
+		@5,35 4 title "Wed"
+		@5,40 5 title "Thr"
+		@5,45 6 title "Fri"
+		@5,50 7 title "Sat"
+		right-coordinate
+		default 1
+		when cf-repeat-basis = "WEEK"
+		before-radio-button
+			//
+		end-before-radio-button
+		validations
+			//
+		end-validations
+		on change
+			//
+		end-on
+	end-radio-button 
+	accept cf-repeat-freq @8,20
+		title "Day of Month"
+		when cf-repeat-basis = "MTH"
+		no-warning
+	validations
+		if cf-repeat-freq not between 1 and 31
+			message "Invalid Days"
+			re-enter 
+		end-if
+	end-validations
+	confirm auto
+	confirmed
+		set lr-escape = FALSE
+	end-confirm
+end-screen
+
+
+screen amount-parameters
+parameters
+	lp-id								like cf-id
+local
+	lf-escape							type boolean
+	lf-amount-type						pic x
+	window @1,1 to @6,60
+	title "Amount"
+	no-ok-cancel
+	primary cashflow-trans
+	window-position 5
+	form-entry
+before
+	get cashflow-trans 
+		on index cf-id
+		key is lp-id
+	on error
+		message "Invalid Transaction"
+		exit
+	endon
+	box @1,1 to @5,60
+	if cf-amount-type not in { "F" "M" "B" }
+		set cf-amount-type = "F"
+	endif
+detail
+	radio-button lf-amount-type
+		@2,20 "F" title  "Fixed Amount"
+		@2,40 "X" title  "GL Function"
+		right-coordinate
+		default lf-amount-type
+		before-radio-button
+			set lf-amount-type = cf-amount-type
+			if lf-amount-type = spaces
+				set lf-amount-type = "F"
+			endif
+			if lf-amount-type != "F"
+				set lf-amount-type = "X"
+			endif
+			refresh lf-amount-type
+			refresh cf-amount
+		end-before-radio-button
+		validations
+			//
+		end-validations
+		on change
+			if lf-amount-type = "F"
+				set cf-amount-type = "F"
+			else
+				set cf-amount = 0
+			endif
+			refresh cf-amount
+			//
+		end-on
+	end-radio-button 
+	accept cf-amount @4,20
+		title "Amount"
+		when lf-amount-type = "F"
+		no-warning
+	validations
+		set cf-amount-type = "F"
+	end-validations
+	confirm auto
+	before
+//	message DEBUG("cf-amount-type")
+		if lf-amount-type != "F"
+			set cf-amount = 0
+			save cashflow-trans
+			do set-amount correct returning lf-escape
+			if lf-escape
+				restore cashflow-trans
+			endif
+		endif
+		do get-amount-desc returning cf-amount-desc
+		message cf-amount-desc
+	confirmed
+	end-confirm
+end-screen
+
+screen set-amount
+returning 
+	lr-escape							type boolean
+// assumes currency on cashflow-trans 
+// Changes cashflow-trans values
+	//
+	window @1,1 to @8,60
+	title "Amount"
+	window-position 5
+	// no window!!
+	form-entry
+before
+	set lr-escape = TRUE
+	box @1,1 to @8,60
+		title "Basis"
+detail
+	radio-button cf-amount-type
+		@2,20 "M" title "Current Movement"
+		@2,40 "B" title "Closing Balance"
+		right-coordinate
+	before-radio-button
+		if cf-amount-type not in {"M" "B"}
+			set cf-amount-type = "M"
+		endif
+	end-before-radio-button
+	end-radio-button
+	accept cf-gl-account @4,20
+		title "Gl Account"
+	on help-key
+		do m3enqgl-enquire-on-general-ledger
+			parameters cf-gl-account SPACES SPACES
+			returning cf-gl-account
+		reenter optional
+	endon
+	validations
+		get gl-master lookup
+			on index gl-accountcode
+			key is cf-gl-account
+		on error ENOREC
+			message-box param-text("<<P1>><<BR>><<p2>>"
+				,"Invalid GL Account"
+				,"Try help")
+				title is ws-function-title
+				message-buttons MSG_BOX_RETRY
+				icon MSG_BOX_STOP
+			re-enter cf-gl-account
+		endon
+	end-validations
+	check-box cf-negate-sign @6,20
+		values TRUE FALSE
+		title "Negate Value"
+		help "This will subtract the value from zero, thereby flipping the sign.  Typically used for P&L accounts"
+		right-coordinate
+		default is FALSE
+		before-check-box
+			//
+		end-before-check-box
+		validations
+			//
+		end-validations
+		on change
+			//
+		endon
+	end-check-box 
+	confirm auto
+	confirmed
+		set lr-escape = FALSE
+	end-confirm
+end-screen
+
+procedure get-amount-desc 
+// assumes currency on cashflow-trans
+returning
+	lr-desc								like cf-amount-desc
+	//
+	if cf-amount-type = "F"
+		set lr-desc = concat("Fixed amount of " ltrim(format-picture(cf-amount,"($$$,$$$,$$$.99)")))
+		exit 0
+	end-if
+	switch cf-amount-type
+	case "M"
+		set lr-desc = "Movement of "
+	case "B"
+		set lr-desc = "Closing Balance of "
+	end-switch
+	string lr-desc appending concat(" " cf-gl-account)
+	if cf-negate-sign
+		string lr-desc appending " (negated)"
+	endif
+end-procedure
+
+procedure get-repeat-desc
+//  Assumes currency on cashflow-trans
+returning 
+	lr-desc								like cf-repeat-desc
+	if cf-date-type = "A"
+		set lr-desc  = concat("Occurs on " format-picture(cf-date,"dd/mmm/yyyy"))
+		exit
+	endif
+	set lr-desc = "Repeats"
+	switch cf-repeat-basis
+	case  "DAY"
+		string lr-desc appending " Daily"
+	case  "WEEK"
+		string lr-desc appending " Weekly on "
+		string lr-desc appending concat(" " idx(cf-repeat-freq,"Sunday","Monday","Tuesday",
+							"Wednesday", "Thursday","Friday","Saturday"))
+	case  "MTH"
+		switch cf-repeat-freq
+		case 1
+			string lr-desc appending " Monthly on 1st"
+		case 2
+			string lr-desc appending " Monthly on 2nd"
+		else
+			string lr-desc appending concat(" Monthly on " str(cf-repeat-freq) "th" )
+		end-switch
+	case  "YEAR"
+		string lr-desc appending " Yearly"
+	end-switch
+end-procedure
+
+procedure get-user-only-fields
+returning
+	lr-fld-name							pic x(40) type string  occurs 6
+local 
+	i									type number
+	lf-fld-name							like fld-name
+	//
+	do open-dictionary
+	set lr-fld-name[*] = "Unused"
+	for i = 1 to 6
+		set lf-fld-name = concat("cfpi-user-only-num", str(i))
+		select *
+			from dict-field
+			where fld-name = :lf-fld-name
+		detail
+			select *
+				from dict-usr-documentation
+				where doc-id-type = "F"
+				and doc-id = :fld-id
+				and doc-type = 91
+			detail
+				set lr-fld-name[i] = doc-line
+				break
+			end-select
+		end-select
+	end-for
+end-procedure
+
+procedure open-dictionary
+	do i8dictopen-open-dictionary
+		parameters	
+			DICTDEF_ALL_MAIN_DICT_TABLES//M-all the main dictionary files
+			DICTDEF_BMS_DICT			//objname:dict,dict-usr,dict-distributor
+			DICTDEF_ENV_PRODICT			//dictionary and path without suffix
+			SPACES						//only used if opening individual
+			TRUE						//Display message/abort if error found!
+			TRUE						//Open files read-only
+	//
+	do i8dictopen-open-dictionary
+		parameters	
+			DICTDEF_INDIVIDUAL_TABLES//individual
+			DICTDEF_USR_DICT		//objname:dict,dict-usr,dict-distributor
+			DICTDEF_ENV_PROUSRDICT	//dictionary and path without suffix
+			DICTDEF_DICT_DOCUMENTATION	//only used if opening individual
+			TRUE					//Display message/abort if error found!
+			FALSE					//Open files read-only
+endprocedure //open-dictionary -----------------------------------------------

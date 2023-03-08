@@ -1,0 +1,275 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : 
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2020
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: rayb/fixseqs.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 12Oct20  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+/*
+
+SELECT *
+FROM bill_of_materials_detail
+WHERE bomh_id IN (SELECT bomh_id FROM bill_of_materials_header
+			WHERE stock_code NOT IN (SELECT stock_code FROM stock_master))
+			
+			
+SELECT * FROM bill_of_materials_header_notes
+WHERE bomh_id IN (SELECT bomh_id FROM bill_of_materials_header
+			WHERE stock_code NOT IN (SELECT stock_code FROM stock_master))
+			
+SELECT max(stk_stock_id) FROM stock_master;
+
+SELECT * FROM systables 
+WHERE tabid > 100
+AND tabtype = 'Q'
+
+SELECT stknextid0.currval FROM system_control
+
+SELECT tabname, t0.* FROM syssequences t0
+JOIN systables t1 ON t0.tabid = t1.tabid
+
+SELECT * FROM systables WHERE tabname LIKE 'cre_next%'
+
+ALTER SEQUENCE stknextid0 RESTART 352
+
+
+
+DELETE FROM
+stock_warehouse_detail
+WHERE stock_code NOT IN (SELECT stock_code FROM stock_master);
+DELETE FROM
+stock_attributes
+WHERE stock_code NOT IN (SELECT stock_code FROM stock_master);
+DELETE FROM
+stock_notes
+WHERE stock_code NOT IN (SELECT stock_code FROM stock_master);
+DELETE FROM
+stock_unit_conversion
+WHERE stock_code NOT IN (SELECT stock_code FROM stock_master);
+DELETE FROM
+stock_master_process
+WHERE smpr_stock_code NOT IN (SELECT stock_code FROM stock_master);
+DELETE FROM
+warehouse_stock_master
+WHERE stock_code NOT IN (SELECT stock_code FROM stock_master);
+DELETE FROM
+stock_supplier
+WHERE stock_code NOT IN (SELECT stock_code FROM stock_master);
+DELETE FROM
+stock_price
+WHERE stock_code NOT IN (SELECT stock_code FROM stock_master);
+DELETE
+FROM bill_of_materials_header
+WHERE stock_code NOT IN (SELECT stock_code FROM stock_master);
+DELETE 
+FROM bill_of_materials_detail
+WHERE bomh_id IN (SELECT bomh_id FROM bill_of_materials_header
+			WHERE stock_code NOT IN (SELECT stock_code FROM stock_master));
+delete
+		FROM bill_of_materials_notes
+WHERE bomh_id IN (SELECT bomh_id FROM bill_of_materials_header
+			WHERE stock_code NOT IN (SELECT stock_code FROM stock_master));			
+
+*/
+ 
+procedure main
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do open-files
+	if exit-status = 0
+		do fix-stk
+		do fix-cre
+		do fix-deb
+		do fix-resource
+		do fix-mailer-item-number
+		do fix-mailer-name-number
+		do fix-mailer-site-number
+	else
+		message "File errors need to be fixed first"
+	endif
+end-procedure
+
+procedure open-files
+local 
+	lf-err							type boolean
+	set lf-err = FALSE
+	open stock-next-stock-code-id
+	on error
+		open stock-next-stock-code-id create
+		on error
+			message "No Next Stock Code id"
+			set lf-err = true
+		endon
+	endon
+	open cre-next-cre-accountcode-id
+	on error
+		open cre-next-cre-accountcode-id create
+		on error
+			message "No Next creditor Code id"
+			set lf-err = true
+		endon
+	endon
+	open deb-next-accountcode-id
+	on error
+		open deb-next-accountcode-id create
+		on error
+			message "No Next Deb Code id"
+			set lf-err = true
+		endon
+	endon
+	//
+	open resource-next-no
+	on error
+		open resource-next-no create
+		on error
+			message "No Next Stock Code id"
+			set lf-err = true
+		endon
+	endon
+	open crm-mailer-item-no-next-seq
+	on error
+		open crm-mailer-item-no-next-seq create
+		on error
+			message "No Next Stock Code id"
+			set lf-err = true
+		endon
+	endon
+	open crm-mailer-name-no-next-seq
+	on error
+		open crm-mailer-name-no-next-seq create
+		on error
+			message "No Next Stock Code id"
+			set lf-err = true
+		endon
+	endon
+	open crm-mail-site-id-next-seq
+	on error
+		open crm-mail-site-id-next-seq create
+		on error
+			message "No Next Stock Code id"
+			set lf-err = true
+		endon
+	endon
+
+	if lf-err
+		exit 1
+	endif
+endprocedure
+
+procedure fix-stk
+local field 
+	lf-next-id like snsci-next-id
+	//
+	select lf-next-id = max(stk-stock-id)
+		from stock-master
+	endselect
+	get stock-next-stock-code-id last
+	message "Largest Stock master id is " lf-next-id ",Seq table next value:" snsci-next-id
+	if snsci-next-id < lf-next-id
+		set snsci-next-id = lf-next-id + 100
+		insert stock-next-stock-code-id
+		message " stock-next-stock-code-id updated"
+	endif
+end-procedure
+
+procedure fix-cre
+local
+	lf-id								like cr-accountcode-id
+	select  lf-id = max(cr-accountcode-id)
+		from cre-master
+	end-select
+	get cre-next-cre-accountcode-id last
+	message "Largest Cre master id is" lf-id " seq table next value : " cncai-next-id
+	if cncai-next-id < lf-id
+		set cncai-next-id = lf-id + 100
+		insert cre-next-cre-accountcode-id
+		message " cre-next-cre-accountcode-id updated"
+	endif
+end-procedure
+
+procedure fix-deb
+local
+	lf-id								like dr-accountcode-id
+	select  lf-id = max(dr-accountcode-id)
+		from deb-master
+	end-select
+	get deb-next-accountcode-id last
+	message "Largest deb master id is" lf-id ", seq table next value : " dnai-next-id
+	if dnai-next-id < lf-id
+		set dnai-next-id = lf-id + 100
+		insert deb-next-accountcode-id
+		message " deb-next-accountcode-id updated"
+	endif
+end-procedure
+
+procedure fix-mailer-item-number
+local
+	lf-id								like mailer-item-number
+	select  lf-id = max(mailer-item-number)
+		from mailer-master
+	end-select
+	get crm-mailer-item-no-next-seq last
+	message "Largest crm master id is " lf-id ", seq table next value: " cminns-next-seq
+	if cminns-next-seq < lf-id
+		set cminns-next-seq = lf-id + 100
+		insert crm-mailer-item-no-next-seq 
+		message "crm-mailer-item-no-next-seq updated"
+	endif
+end-procedure
+
+procedure fix-mailer-name-number
+local
+	lf-id								like mailer-name-seq
+	select lf-id = max(mailer-name-seq)
+		from mailer-names
+	end-select
+	get crm-mailer-name-no-next-seq last
+	message "Largest crm mailer name id is " lf-id ", seq table next value: " cmnnns-next-seq
+	if cmnnns-next-seq < lf-id
+		set cmnnns-next-seq = lf-id + 100
+		insert crm-mailer-name-no-next-seq 
+		message "crm-mailer-name-no-next-seq updated"
+	endif
+end-procedure
+
+procedure fix-mailer-site-number
+local
+	lf-id								like ms-site-id
+	select lf-id = max(ms-site-id)
+		from mailer-sites
+	end-select
+	get crm-mail-site-id-next-seq last
+	message "Largest crm mailer site id is " lf-id ", seq table next value: " cmsins-next-seq
+	if cmsins-next-seq < lf-id
+		set cmsins-next-seq = lf-id + 100
+		insert crm-mail-site-id-next-seq
+		message "crm-mail-site-id-next-seq updted"
+	endif
+end-procedure
+
+procedure fix-resource
+local
+	lf-id								like dr-accountcode-id
+	select  lf-id = max(resource-no)
+		from resource-master
+	end-select
+	get resource-next-no last
+	message "Largest resource master id is " lf-id ", seq table next value: " rnn-next-no
+	if rnn-next-no < lf-id
+		set rnn-next-no = lf-id + 100
+		insert resource-next-no
+		message " resource-next-no updated"
+	endif
+end-procedure
+

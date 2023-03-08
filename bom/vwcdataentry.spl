@@ -1,0 +1,863 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : Manufacturing Work Centre Data Capture
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2022
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: bom/vwcdataentry.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 24Feb22  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+//#include "../include/i85codes.spl"
+#include "../include/i8secok.spl"
+#include "../include/i9status.spl"
+//#define I8DATENEW_COMPLETE_BATCH_NOT_REQUIRED
+//#include "../include/i8datenew.spl"
+ 
+field
+	ws-function-title					type string
+	ws-work-centre						like work-centre-code
+	ws-employee-no						like employee-no
+	ws-last-error						pic x(1024) type string
+	ws-ZVG-S001							type boolean		
+//	ws-update-batch-ref					like batch-code
+
+procedure main
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8secabt-check-abort
+		parameters are sys-consolidation-division login-id() "ZVG" "T001"
+		returning ws-function-title 
+	do i8secok-check-ok parameters
+		sys-consolidation-division login-id() "ZVG" "S001"
+		returning ws-ZVG-S001 
+	do i8proglog-write-log
+	do initialise-session
+	do trans-loop
+end-procedure
+
+
+procedure trans-loop
+local
+	lf-employee-code						like employee-no
+	lf-work-order							like work-order
+	lf-wor-seq-no							like wor-seq-no	
+	lf-start-dt								type datetime
+	lf-end-dt								type datetime
+	lf-complete								type boolean
+	lf-rework								type boolean
+	lf-exit									type boolean
+	lf-work-centre							like wc-code
+	lf-commit								type boolean
+	set lf-work-centre = ws-work-centre
+	set lf-employee-code  = ws-employee-no
+	repeat
+		do get-one-trans entry-once parameters are lf-work-centre lf-employee-code lf-work-order
+			returning
+				lf-employee-code
+				lf-work-order
+				lf-wor-seq-no
+				lf-start-dt	
+				lf-end-dt
+				lf-complete
+				lf-rework
+				lf-exit
+				lf-work-centre  // in case the user changed it in the screen
+	until lf-exit
+		if not escape()
+			set lf-commit = TRUE
+			// get current on operation
+			//
+			// get the next routing step
+			//
+			get production-work-order-route
+				on index work-order wor-seq-no
+				key is lf-work-order lf-wor-seq-no
+			on error ENOREC
+				set ws-last-error = concat("Invalid Operation Seq for Work Order", 
+					ltrim(lf-work-order),"/",str(lf-wor-seq-no))
+				set lf-commit = FALSE
+			endon
+			transaction begin
+			do add-labour-trans
+				parameters
+					lf-work-order
+					lf-wor-seq-no
+					lf-employee-code
+					lf-start-dt
+					lf-end-dt
+					lf-rework
+			if lf-complete
+				do add-production-trans
+					parameters 
+						lf-work-order
+						lf-wor-seq-no
+						lf-employee-code
+			endif
+			if exit-status != 0
+				set lf-commit = FALSE
+			endif
+			if lf-commit
+				transaction commit
+				do update-dockets parameters are lf-work-order 
+				if exit-status = 0
+					message-box param-text("<<P1>><<BR>>Work Order :<<P2>><<BR>>Work Centre :<<P3>>",
+							"Transaction Posted", lf-work-order , wor-work-centre)
+						title ws-function-title
+						message-buttons  MSG_BOX_OK
+						icon MSG_BOX_INFORMATION
+				else
+					message-box param-text("<<P1>><<BR>><<p2>>"
+						,"The transaction has been added to the database but the work order is not yet updated."
+						,ws-last-error)
+						title is ws-function-title
+						message-buttons  MSG_BOX_CANCEL
+						icon MSG_BOX_WARNING
+				endif
+			else
+				transaction rollback
+				message-box param-text("<<P1>><<BR>><<p2>>"
+					,"An error occurred with this transaction.  The database has not been updated."
+					,ws-last-error)
+					title is ws-function-title
+					message-buttons  MSG_BOX_CANCEL
+					icon MSG_BOX_STOP
+			endif
+		endif
+	end-repeat
+end-procedure
+
+procedure initialise-session
+//
+// Look for a file with the same name as the workcentre in the pronto folder.
+// This tells us what workcentre we are at.  Set global variable to know
+// workcentre
+//
+// TODO: replace the following with code as per above.
+	get production-work-centre first
+	on error
+		abort "No work centres defined"
+	endon
+	set ws-work-centre = wc-code
+//
+// Get default employee no
+//
+	get resource-master
+		on index rms-user-id
+		key is login-id
+	on error ENOREC
+	else
+		get payroll-employee-master
+			on index employee-no
+			key is rms-employee-no
+		on error ENOREC
+		else
+			set ws-employee-no = employee-no
+		endon
+	endon
+//
+// Look for an XML in the data directory that tells us where we are at in case
+// of a power outage.
+//
+end-procedure
+
+screen get-one-trans
+parameters
+	lp-work-centre							like wc-code
+	lp-employee-code						like employee-no
+	lp-work-order							like work-order
+returning
+	lr-employee-code						like employee-no
+	lr-work-order							like work-order
+	lr-wor-seq-no							like wor-seq-no	
+	lr-start-dt								type datetime
+	lr-end-dt								type datetime
+	lr-complete								type boolean
+	lr-rework								type boolean
+	lr-exit									type boolean
+	lr-work-centre							like wc-code
+	window
+	window-position 5
+	responsive
+	title wc-desc
+	no-ok-cancel
+before
+	repeat
+		get production-work-centre
+			on index wc-code
+			key is lp-work-centre
+		on error ENOREC
+		else
+			refresh title
+		endon
+	until file-status() = 0
+		do select-work-centre entry once returning lp-work-centre
+		set lr-work-centre = lp-work-centre
+	end-repeat
+	//
+	// Set first time defaults
+	//
+	set lr-work-order = lp-work-order
+	get bom-work-order
+		on index work-order
+		key is lr-work-order
+	on error ENOREC
+		select t0.work-order 
+			from production-work-order-route  as t0
+			inner join bom-work-order as t1 on t0.work-order = t1.work-order
+			inner join production-operations as t2 on t2.prod-op-code = t0.wor-op-code
+			where t1.wo-status = I9STATUS_WO_IN_PROGRESS
+			and t0.wor-work-centre = lr-work-centre
+			and t0.wor-qty-to-process != 0 
+		detail
+			// select the first one
+			set lr-work-order = work-order
+			break
+		end-select
+	endon
+	// Get the operation code
+	select t0.wor-seq-no, 
+		from production-work-order-route  as t0
+		inner join bom-work-order as t1 on t0.work-order = t1.work-order
+		where t0.work-order = :lr-work-order
+		and t0.wor-qty-to-process != 0
+	detail
+		// select the first one
+		set lr-wor-seq-no  = wor-seq-no
+		break
+	end-select
+detail
+	screen-group // ---- Work Centre Transaction ----------------------------
+		title "Transaction Details"   
+		accept lr-employee-code 
+			title "Employee Code"
+			help "Scan your employee code"
+			uppercase
+			default lp-employee-code
+			drop-down
+				width 38
+				concat-title
+				select employee-no, concat(rtrim(em-initials)," ",em-surname), 0 , 
+							,if-then-else(em-termination-date = ZERO_DATE,TRUE,FALSE)
+					from payroll-employee-master 
+			end-drop-down
+		accept lr-work-order
+			title "Work Order"
+			help "Select work order"
+			uppercase
+			default lr-work-order
+			drop-down
+				width 38
+				concat-title
+				dynamic
+				select t0.work-order, concat(rtrim(t1.wo-parent) "/" t3.wc-desc), 0 , 
+							,if-then-else(t0.wor-qty-to-process > ZERO,TRUE,FALSE)
+					from production-work-order-route  as t0
+					inner join bom-work-order as t1 on t0.work-order = t1.work-order
+					inner join production-operations as t2 on t2.prod-op-code = t0.wor-op-code
+					inner join production-work-centre as t3 on t0.wor-work-centre = t3.wc-code
+					where t1.wo-status = I9STATUS_WO_IN_PROGRESS
+					and t0.wor-work-centre = lr-work-centre
+			end-drop-down
+			on change
+				refresh lr-wor-seq-no
+			endon
+		accept lr-wor-seq-no
+			title "Operation "
+			help "Select Operation"
+			uppercase
+			default lr-wor-seq-no
+			drop-down
+				width 38
+				dynamic
+				concat-title
+				select t0.wor-seq-no, concat(rtrim(t0.wor-op-code), ":",t3.wc-desc), 0 , 
+						,if-then-else(t0.wor-qty-to-process != ZERO,TRUE,FALSE)
+					from production-work-order-route  as t0
+					inner join bom-work-order as t1 on t0.work-order = t1.work-order
+					inner join production-operations as t2 on t2.prod-op-code = t0.wor-op-code
+					inner join production-work-centre as t3 on t0.wor-work-centre = t3.wc-code
+					where t0.work-order = :lr-work-order
+					order by t0.wor-seq-no
+			end-drop-down
+		field-group // ----Timing ----------------------------
+			title "Timing"  
+			Option if-then-else(lr-start-dt = ZERODATETIME,"Start",
+				concat("Started at ",format-picture(lr-start-dt, "hh:mm")))
+				colour if-then-else(lr-start-dt = ZERODATETIME,0,Green)
+				rows 3 columns 35
+				help is "Press to Start time recording from now"
+				scale is 200
+				button-style STANDARD_BUTTON_STYLE
+				text-position 5
+				set lr-start-dt = gmt()
+				refresh data
+			end-option
+			Option if-then-else(lr-end-dt = ZERODATETIME,"End",
+				concat("Ended at ",format-picture(lr-end-dt, "hh:mm")))
+				colour if-then-else(lr-end-dt = ZERODATETIME,0,Red)
+				rows 3 columns 35
+				help is "Press to End time recording from now"
+				scale is 200
+				button-style STANDARD_BUTTON_STYLE
+				text-position 5
+				set lr-end-dt = gmt()
+				refresh data
+			end-option
+		end-field-group // ---- Timing --------------------------------------
+		field-group // ---- Status ----------------------------
+			title "Status"  // Title is optional
+			Option if-then-else(lr-complete,"Completed","Mark as Complete")
+				colour if-then-else(lr-complete, RED, BLACK) on if-then-else(lr-complete,YELLOW,WHITE)
+				rows 3 columns 35
+				help is "Press to Mark task as complete"
+				scale is 200
+				button-style STANDARD_BUTTON_STYLE
+				text-position 5
+				if lr-complete
+					set lr-complete = FALSE
+				else
+					set lr-complete = TRUE
+				endif
+				refresh data
+			end-option
+			Option if-then-else(lr-rework,"REWORK","Mark as Rework")
+				colour if-then-else(lr-rework, RED, BLACK) on if-then-else(lr-rework,YELLOW,WHITE)
+				rows 3 columns 35
+				help is "Press to Mark task as Rework"
+				scale is 200
+				button-style STANDARD_BUTTON_STYLE
+				text-position 5
+				if lr-rework
+					set lr-rework = FALSE
+				else
+					set lr-rework = TRUE
+				endif
+				refresh data
+			end-option
+		end-field-group // ---- Status --------------------------------------
+		field-group // ---- Actionn ----------------------------
+			title "Action"  // Title is optional
+			option "OK"
+				rows 3 columns 35
+				help "Press to Record Transaction"
+				when lr-start-dt != ZERODATETIME and lr-end-dt != ZERODATETIME
+				scale is 200
+				button-style STANDARD_BUTTON_STYLE
+				text-position 5
+				exit
+			end-option
+			option "EXIT"
+				rows 3 columns 35
+				help "Press to Exit - No Transaction"
+				scale is 200
+				button-style STANDARD_BUTTON_STYLE
+				text-position 5
+				set lr-exit = TRUE
+				exit
+			end-option
+		end-field-group // ---- Actionn --------------------------------------
+	end-screen-group // ---- Work Centre Transaction --------------------------------------
+	screen-group // ---- Parameters ----------------------------
+		title "Parameters"  
+		next row
+		Option "Change Work Centre"
+			rows 2 
+			help is "Select to Change Work Centre"
+			icon ADMIN-ICON
+			text-position 5
+			do select-work-centre entry once returning lp-work-centre
+			set lr-work-centre = lp-work-centre
+			refresh prompts
+			refresh lr-work-order
+			refresh lr-wor-seq-no
+		end-option
+		option "Supervisor"
+			rows 2
+			help is "Select to access Supervisor Options"
+			icon admin-icon
+			text-position 5
+			when ws-ZVG-S001
+			do supervisor-options  entry once
+				parameters lr-start-dt lr-end-dt lr-work-order lr-wor-seq-no
+				returning lr-start-dt lr-end-dt lr-wor-seq-no
+			refresh data
+		end-option
+	end-screen-group // ---- Parameters --------------------------------------
+	confirm auto
+	confirmed
+		// can only exit via EXIT or OK button
+		re-enter lr-employee-code 
+	end-confirm
+end-screen
+
+screen select-work-centre
+returning
+	lr-work-centre						like wc-code
+	title "Select Work Centre"
+	window
+	window-position 5
+	responsive
+detail
+	// todo: trap workcentres if no outstanding tasks in WC.
+	screen-group // ---- Select Work Centre ----------------------------
+	accept lr-work-centre // @1,1  // in col 1 (dg)
+		title "Work Centre"
+		help "Select Current Work Centre"
+		uppercase
+		default lr-work-centre
+	drop-down
+		width 38
+		concat-title
+		select wc-code, wc-desc
+			from production-work-centre 
+	end-drop-down
+	end-screen-group // ---- Select Work Centre --------------------------------------
+end-screen
+
+screen supervisor-options
+/*
+	TODO:  this is currently controlled by ROLE,
+	but a lower security user is logged in so we need to prompt
+	for a higher level user and their password.
+	Like POS price override.
+*/
+parameters
+	lp-start-dt							type datetime
+	lp-end-dt							type datetime
+	lp-work-order						like work-order
+	lp-wor-seq-no						like wor-seq-no
+returning
+	lp-start-dt							
+	lp-end-dt						
+	lp-wor-seq-no				
+local
+	lf-updatemff						type boolean
+	lf-updatescm						type boolean
+	window 
+	title ws-function-title 
+	responsive
+before
+	get system-control first lock
+	get system-control-manufacturing first lock
+detail
+	screen-group // ---- Override Details ----------------------------
+		title "Override Details"  // The title is optional
+		accept  lp-start-dt
+			title "Start Date"
+			default lp-start-dt
+		accept lp-end-dt
+			title "End Date"
+			default lp-end-dt
+		accept lp-wor-seq-no  
+			title "Work order sequence"
+			default lp-wor-seq-no
+			help "Select Work Order Sequence"
+			drop-down
+				width 38
+				dynamic
+				concat-title
+				select t0.wor-seq-no, concat(rtrim(t0.wor-op-code), ":",t2.prod-op-desc)
+					from production-work-order-route  as t0
+					inner join bom-work-order as t1 on t0.work-order = t1.work-order
+					inner join production-operations as t2 on t2.prod-op-code = t0.wor-op-code
+					where t0.work-order = :lp-work-order
+					order by t0.wor-seq-no
+			end-drop-down
+	end-screen-group // ---- Override Details --------------------------------------
+	screen-group // ---- System Parameters ----------------------------
+		// TODO:  This section is a bit HAIRY.  We shouldn't really let
+		// supervisors do this.  I really only added it for demo purposes
+		title "System Parameters"  // The title is optional
+		when sys-consolidation-division in ("SAT", "SAB", "SAS")
+		accept sys-work-centre-costs 
+			title "Work Centre Costs and Posting"
+			default sys-work-centre-costs
+		on change
+			set lf-updatemff = TRUE
+		endon
+		accept sys-man-use-labour-rate-from 
+			title "Select Labour Rate from"
+			default sys-man-use-labour-rate-from
+		on change
+			set lf-updatemff = TRUE
+		endon
+		accept scm-prod-costing-method 
+			title "Production Costing Method"
+			show-value
+			default scm-prod-costing-method
+			when sys-work-centre-costs in {'1' '2' '3'}
+		on change
+			set lf-updatescm = TRUE
+		endon
+	end-screen-group // ---- System Parameters --------------------------------------
+	confirm
+		when lf-updatemff or lf-updatescm
+		prompt "OK to Update Major Function Flags"
+	confirmed
+		if lf-updatemff
+			update system-control
+		endif
+		if lf-updatescm
+			update system-control-manufacturing
+		endif
+	end-confirm
+end-screen // supervisor-options ------------------------------------------
+
+procedure add-labour-trans
+parameters
+	lp-work-order							like work-order
+	lp-wor-seq-no							like wor-seq-no
+	lp-employee-no							like prod-employee-code
+	lp-start-dt								type datetime
+	lp-end-dt								type datetime
+	lp-rework								type boolean
+	//
+	// ---------------Validations -------------------------------
+	get bom-work-order
+		on index work-order
+		key is lp-work-order
+	on error ENOREC
+		set ws-last-error = concat("Work Order No " str-concat(lp-work-order) " Invalid")
+		exit 1
+	endon
+	//
+	if wo-status != I9STATUS_WO_IN_PROGRESS
+		set ws-last-error  = concat("Work Order " str-concat(lp-work-order) " not in progress")
+		exit 1
+	endif
+	//
+	get payroll-employee-master
+		on index employee-no
+		key is lp-employee-no
+	on error ENOREC
+		set ws-last-error  = concat("Employee No Invalid (" lp-employee-no ")")
+		exit 1
+	endon
+	//
+	if lp-start-dt > lp-end-dt
+		set ws-last-error = "The start time is before the end time"
+		exit 1
+	endif
+	//
+	// get the next routing step
+	//
+	get production-work-order-route
+		on index work-order wor-seq-no
+		key is lp-work-order lp-wor-seq-no
+	on error ENOREC
+		set ws-last-error = concat("Invalid Operation Seq for Work Order", ltrim(lp-work-order),"/",str(lp-wor-seq-no))
+		exit 1
+	endon
+	//
+	//  -----------------Record Processing ------------------------------
+	//
+	initialise production-entry-dockets
+	set prod-entry-date = today()
+	set prod-entry-status = "E"
+	set prod-entry-type = "L"
+	set prod-entry-docket-number = lp-work-order
+	set prod-whse-code =  wo-warehouse-code 
+	set prod-entry-shift = "1"
+	set prod-employee-code = lp-employee-no
+	set stock-code = wo-parent
+	set prod-entry-qty = round(((lp-end-dt - lp-start-dt) / 3600),1) // elapsed time in hours
+	set work-centre-code = wor-work-centre // from production-work-order-route
+	set prod-entry-op-code = wor-op-code
+	set prod-entry-seq-num = lp-wor-seq-no
+	set prod-entry-start-time = time-from-date-time(lp-start-dt,FALSE)
+	set prod-entry-finish-time = time-from-date-time(lp-end-dt,FALSE)
+	set prod-entry-finish-flag = "W"
+	set prod-entry-date-time = gmt()
+	set prod-entry-user-id = login-id()
+	if lp-rework 
+		set ped-user-only-alpha4-1 = "RW"
+	endif
+	insert production-entry-dockets
+	on error
+		set ws-last-error = str-concat("Failed to add Record (" error-description(file-status()) ")")
+		exit 1
+	endon
+end-procedure
+
+procedure add-production-trans
+parameters
+	lp-work-order							like work-order
+	lp-wor-seq-no							like wor-seq-no
+	lp-employee-no							like prod-employee-code
+	//
+	// ---------------Validations -------------------------------
+	get bom-work-order
+		on index work-order
+		key is lp-work-order
+	on error ENOREC
+		set ws-last-error = concat("Work Order No " str-concat(lp-work-order) " Invalid")
+		exit 1
+	endon
+	//
+	if wo-status != I9STATUS_WO_IN_PROGRESS
+		set ws-last-error  = concat("Work Order " str-concat(lp-work-order) " not in progress")
+		exit 1
+	endif
+	//
+	// get the next routing step
+	//
+	get production-work-order-route
+		on index work-order wor-seq-no
+		key is lp-work-order lp-wor-seq-no
+	on error ENOREC
+		set ws-last-error = concat("Invalid Operation Seq for Work Order", ltrim(lp-work-order),"/",str(lp-wor-seq-no))
+		exit 1
+	endon
+	//
+	//  -----------------Record Processing ------------------------------
+	//
+	initialise production-entry-dockets
+	set prod-entry-date = today()
+	set prod-entry-status = "E"
+	set prod-entry-type = "P"
+	set prod-entry-docket-number = lp-work-order
+	set prod-whse-code =  wo-warehouse-code 
+	set prod-comp-whse-code = wo-warehouse-code
+	set prod-entry-shift = "1"
+	set prod-employee-code = lp-employee-no
+	set stock-code = wo-parent
+	set prod-entry-qty = wor-qty-to-process - wor-qty-processed
+	set work-centre-code = wor-work-centre // from production-work-order-route
+	set prod-entry-op-code = wor-op-code
+	set prod-entry-seq-num = lp-wor-seq-no
+	set prod-entry-finish-flag = "W"
+	set prod-entry-date-time = gmt()
+	set prod-entry-user-id = login-id()
+	insert production-entry-dockets
+	on error
+		set ws-last-error = str-concat("Failed to add Record (" error-description(file-status()) ")")
+		exit 1
+	endon
+end-procedure
+
+procedure update-dockets
+parameter														
+	lp-work-order						like work-order
+	//
+	// Validate
+	//
+	get bom-work-order
+		on index work-order
+		key is lp-work-order
+	on error ENOREC
+		set ws-last-error = "Invalid Work Order"
+		exit 1
+	endon
+	if wo-status !=  I9STATUS_WO_IN_PROGRESS
+		set ws-last-error = "Work order not in correct status"
+		exit 1
+	endif
+	//
+	spl "appservices" parameters are '-on-demand-execute' 1016
+end-procedure
+
+/*
+procedure update-dockets
+parameter														
+	lp-work-order						like work-order
+	lp-work-centre						like wc-code
+local
+	lf-update-in-quiet-mode				pic x
+	//
+	// Validate
+	//
+	get bom-work-order
+		on index work-order
+		key is lp-work-order
+	on error ENOREC
+		set ws-last-error = "Invalid Work Order"
+		exit 1
+	endon
+	if wo-status !=  I9STATUS_WO_IN_PROGRESS
+		set ws-last-error = "Work order not in correct status"
+		exit 1
+	endif
+	//
+	// Post
+	//
+	set lf-update-in-quiet-mode = "F"
+	spl "bom/m95update" parameters are "-b" 14
+		concat('Y' 'Y' 'Y' 'Y' 'Y' 
+				lf-update-in-quiet-mode
+			   ' ' ' '	)
+		lp-work-order lp-work-order
+		lp-work-centre lp-work-centre
+		'E' julian2date(today()) julian2date(today())
+		'Y' // putaway
+		'000000' // byp location
+		'N' // finish work order
+		'N' // release stock to bo
+		'N' // check planned
+		' ' // login id
+		'~~~~~~~~~~~~' // end login id
+	if exit-status != 0
+		set ws-last-error = "There was a problem calling bom/m95update"
+		exit 1
+	endif
+end-procedure
+
+procedure update-dockets
+parameter														
+	lp-work-order						like work-order
+	lp-work-centre						like wc-code
+	//
+	// Validate
+	//
+	get bom-work-order
+		on index work-order
+		key is lp-work-order
+	on error ENOREC
+		set ws-last-error = "Invalid Work Order"
+		exit 1
+	endon
+	if wo-status !=  I9STATUS_WO_IN_PROGRESS
+		set ws-last-error = "Work order not in correct status"
+		exit 1
+	endif
+	//
+	// Post
+	//
+	spl "bom/m95update" parameters are "-b" 14
+		'Y' // para 3
+		'Y'
+		'Y' // para 5
+		'Y'
+		'Y' // para 7
+		'N'
+		' ' // para 9
+		' '
+		' ' '~~~~~' // lp-work-order lp-work-order  // paras 11 & 12
+		' ' '~~~~~~' // lp-work-centre lp-work-centre // paras 13 & 14
+		'E' julian2date(today()) julian2date(today()) // paras 15 & 16 & 17
+		'N' 
+		' ' // para 19
+		'N'
+		'N' // para 21
+		'N'
+		' ' // login-id() // para 23
+		'~~~~~' // login-id() // para 24
+	if exit-status != 0
+		set ws-last-error = "There was a problem calling bom/m95update"
+		exit 1
+	endif
+end-procedure
+
+
+
+Just too hard.  Added m95update to batch job and created application service to run every two minutes.
+
+procedure update-dockets
+parameter														
+	lp-work-order						like work-order
+	lp-work-centre						like wc-code
+local
+	lf-work-order						like prod-entry-docket-number
+	lf-docket-screen-type				like prod-entry-screen-type	
+	lf-prod-entry-date					type date
+	window @2,1 to @2,1
+//
+	get bom-work-order
+		on index work-order
+		key is lp-work-order
+	on error ENOREC
+		set ws-last-error = "Invalid Work Order"
+		exit 1
+	endon
+	if wo-status !=  I9STATUS_WO_IN_PROGRESS
+		set ws-last-error = "Work order not in correct status"
+		exit 1
+	endif
+	// check if we have a batch-ref
+	if ws-update-batch-ref = spaces
+		do get-batch-ref returning ws-update-batch-ref
+		if exit-status != 0 
+			set ws-last-error = "Trouble getting a batch reference"
+			exit 1
+		endif
+	endif
+	// I think if we set it to spaces it will update everything.
+	set lf-docket-screen-type = spaces
+	set lf-work-order = right-justify(lp-work-order,size-of(prod-entry-docket-number))
+	set lf-prod-entry-date = today()
+	spl "bom/m95update" parameters are "-b" 14
+		concat('Y' 'Y' 'Y' 'Y' 'N' 'F'
+			   ' ' lf-docket-screen-type	 						
+			   )
+		lf-work-order lf-work-order
+		lp-work-centre lp-work-centre
+		'E' julian2date(lf-prod-entry-date) julian2date(lf-prod-entry-date)
+		'Y' '000000' 'N' 'N' 'N'							
+		julian2date(lf-prod-entry-date) ws-update-batch-ref
+		spaces
+endprocedure //update-production-fast ----------------------------------------
+
+procedure get-batch-ref
+returning 
+	lr-batch-ref						like gl-batch-ref
+local
+	lf-ledger-status					pic s99
+	lf-period-date						type date
+	lf-ok								type boolean
+	//
+	// can't work out what this is for
+	// do clibperiod-get-period-offset-from-year-period
+	// 	parameters	today()
+	// 				sys-stk-yr
+	// 				sys-stk-per
+	// 	returning	stk-month-status
+	do call-i8date-new 
+		parameters are "S" I8BGRPTYPE_MAN_STK  "X" "B"
+		returning
+			lf-period-date
+			lr-batch-ref
+			lf-ledger-status
+			lf-ok
+	if not lf-ok
+		exit 1
+	endif
+end-procedure
+
+procedure call-i8date-new
+// I wrote this mainly to untangle which parameters are input and which are
+// output.
+parameters
+	lp-ledger-type						pic xx
+	lp-group							pic xx
+	lp-window							pic x
+	lp-fields							pic x
+returning
+	lr-date								type date
+	lr-batch-ref						like gl-batch-ref
+	lr-ledger-status					pic s99
+	lr-gl-status						pic s99
+	lr-ok								type boolean
+	I8DATENEW_DO_GET_DATE_AND_BATCH(lp-ledger-type,
+									lr-date,
+									lr-batch-ref,
+									lr-ledger-status,
+									lr-gl-status,
+									lp-group,
+									lp-window,
+									lp-fields,
+									lr-ok)
+end-procedure
+
+
+*/

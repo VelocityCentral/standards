@@ -1,0 +1,1806 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : validate and set default values for import routines
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2021
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: utility/clibvimport.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 15Jul21  rjb         written 
+// The purpose of this routine is that it allows for installer to write
+// customer specific validation and defaults.  When a new table is required
+// the programmer should add the routines as specified in the skeleton shown
+// below.
+// As can be seen some standard validations are provided.  If you write a new
+// table import that has not been done before and you think tthe validations
+// are standard, follow the process below and then pass to ray for inclusion
+// in the standard.  Please put these in the std-validation / std-default
+// and leave the clib code for customer/site specific default/validation.
+//
+// For documentation see crtimportpgm.spl
+//
+////////////////////////////////////////////////////////////////////////////////
+
+/*
+
+Here is the skeletons.  Copy these and replace <filename> with the right table.
+
+//------------------------------------------------------------
+//  <filename>
+//------------------------------------------------------------
+
+procedure clibvimport-validate-<filename> export
+parameters
+	<filename>.*			global
+returning
+	lr-status							pic x
+	lr-message							pic x(500)
+	do std-validate-<filename> 
+		parameters <filename>.*
+		returning lr-status lr-message
+end-procedure
+
+procedure std-validate-<filename> 
+parameters
+	<filename>.*			global
+returning
+	lr-status							pic x
+	lr-message							pic x(500)
+end-procedure
+
+procedure clibvimport-default-<filename> export
+parameters
+	<filename>.*			global
+returning
+	<filename>.*						
+	do std-default-<filename> 
+		parameters <filename>.*
+		returning <filename>.*
+end-procedure
+
+procedure std-default-<filename> 
+parameters
+	<filename>.*			global
+returning
+	<filename>.*						
+end-procedure
+
+*/
+ 
+#include "../include/i8proglogparam.spl"
+
+// The following is done again and again and again - so make it a bit easier
+// for us.
+
+#define VALIDATESYSTBL(A,B,C) \
+	do validate-system-table  \
+		parameters are A,B, C \
+	returning  \
+		lr-status lr-message \
+	if lr-status = "E" \
+		exit 1 \
+	endif
+
+#define VALIDATESTOCK(A) \
+	get stock-master lookup \
+		on index stock-code \
+		key is A \
+	on error ENOREC \
+		set lr-status  = "E" \
+		set lr-message = "Invalid Stock Code" \
+		exit 1  \
+	endon
+
+#define VALIDATECUST(A) \
+	get deb-master lookup \
+		on index accountcode \
+		key is A \
+	on error ENOREC \
+		set lr-status  = "E" \
+		set lr-message = "Invalid Customer Code" \
+		exit 1  \
+	endon
+
+#define VALIDATESUPP(A) \
+	get cre-master lookup \
+		on index cre-accountcode \
+		key is A \
+	on error ENOREC \
+		set lr-status  = "E" \
+		set lr-message = "Invalid Creditor Code" \
+		exit 1  \
+	endon
+
+#define EXITERR(A) \
+	set lr-message = A \
+	set lr-status = "E" \
+	exit 1
+
+#define SETDEFAULT(A,B,C) \
+	if A = B \
+		set A = C \
+	endif
+
+field
+	ws-last-error						pic x(1024) type string
+	ws-lang								type string
+ 
+procedure main
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	set ws-lang	= getenv("PROLANGUAGE")
+	// change for correct think below
+	do i8proglogparam-write-log parameters are "clibvimport"
+	// get current on the date record for today
+	get system-control-time-dimension
+		on index sctd-type sctd-date
+		key is spaces today()
+	on error ENOREC
+		initialise system-control-time-dimension
+	endon
+end-procedure
+
+/*
+	Note that while the get-last-error routine is provided
+	the is likely to be used only when setting defaults.
+	It is not used in the validate routine as the whole purpose
+	of the validate routine is to return a status.  Using a get-last-error
+	for the validate routine will make the calling code uncessarily verbose.
+*/
+
+procedure clibvimport-get-last-error export
+returning
+	lr-last-error							like ws-last-error
+	set lr-last-error = ws-last-error
+end-procedure
+
+
+procedure validate-system-table
+// This is such a common task in this code that basic version is here
+// and there is #define to call it as a function above.
+// Note that you can pass it an error message to return if you wish.
+// If you don't pass the error message it will build one from the description
+// of the system table held in the ZZ records.
+parameters are 
+	lp-type								like sys-tbl-type
+	lp-code								like sys-tbl-code
+	lp-message							pic x(1024) type string
+returning
+	lr-status							pic x
+	lr-message							pic x(1024) type string
+	get system-table
+		on index sys-tbl-type sys-tbl-code
+		key is lp-type lp-code
+	on error ENOREC
+		if lp-message != spaces
+			set lr-message = lp-message
+		else
+			// build the error message
+			get system-table
+				on index sys-tbl-type sys-tbl-code
+				key is "ZZ" lp-type
+			on error ENOREC
+				set lr-message = "Invalid System Table entry"
+			else
+				set lr-message = concat("Invalid " sys-description)
+			endon
+		endif
+		string lr-message appending concat("(" lp-code ")")
+		set lr-status = "E"
+		exit 1
+	endon
+end-procedure
+
+//*------------------------------------------------------------
+//  System user only table
+//*------------------------------------------------------------
+
+procedure clibvimport-validate-system-user-only-table export
+parameters
+	system-user-only-table.*			global
+returning
+	lr-status							pic x
+	lr-message							pic x(500)
+	//
+	if suot-tbl-type = 'TEST'
+		if suot-numeric1 < 50
+			set lr-status = "E"
+			set lr-message = param-text("Numeric must be less than 50.(<<p1>>/<<p2>>/<<p3>>)",
+				suot-numeric1, suot-tbl-type, suot-tbl-code)
+		endif
+	endif
+end-procedure
+
+procedure clibvimport-default-system-user-only-table export
+parameters
+	system-user-only-table.*			global
+returning
+	system-user-only-table.*						
+	//
+	if suot-tbl-type = 'TEST'
+		set suot-alpha-4-1 = "ABCD"
+	endif
+end-procedure
+
+//*------------------------------------------------------------
+//  stock-master
+//*------------------------------------------------------------
+
+procedure clibvimport-validate-stock-master export
+parameters
+	stock-master.*			global
+returning
+	lr-status							pic x
+	lr-message							pic x(500)
+	do std-validation-stock-master 
+		parameters stock-master.*
+		returning lr-status lr-message
+end-procedure
+
+procedure std-validation-stock-master
+parameters
+	stock-master.*			global
+returning
+	lr-status							pic x
+	lr-message							pic x(500)
+	//
+	VALIDATESYSTBL("PG", stock-group,spaces)
+	if stk-stock-status not in ( "S" "I" "K" "L" "M" "R" "X" "Z")
+		EXITERR("Invalid Stock Status")
+	endif
+	if pattern(stk-condition-code,"[A-G I-VYZ]") = 0
+		EXITERR( "Invalid Condition Code")
+	endif
+	VALIDATESYSTBL("IA", stk-abc-class, spaces)
+	get stock-issue-ctrl-desc
+		on index sicd-issue-control-code sicd-language
+		key is stk-issue-control-code ws-lang
+	on error ENOREC
+		EXITERR("Invalid Stock Issue Control Code")
+	endon
+	VALIDATESYSTBL("WA",stk-warranty-type-flag,spaces)
+	VALIDATESYSTBL("ST",stk-cyclic-code,spaces)
+	if stk-movement-code not in ("H" "M" "S" "N" "T" spaces)
+		EXITERR("Invalid Stock Movement Code")
+	endif
+	// special case - 0
+	if stk-shelf-life-days = 0
+		VALIDATESYSTBL("SU","00",spaces)
+	else
+		VALIDATESYSTBL("SU",str(stk-shelf-life-days),spaces)
+	endif
+	VALIDATESYSTBL("SY",stk-user-group[1],spaces)
+	VALIDATESYSTBL("SZ",stk-user-group[2],spaces)
+	VALIDATESYSTBL("SS",stk-sales-type-code,spaces)
+	VALIDATESYSTBL("E0",stk-storage-type-flag,spaces)
+	if stk-serialized-flag not in ( "P" "L" "Y" "N" "W" )
+		EXITERR("Invalid Traceability Code")
+	endif
+	VALIDATESYSTBL("SX",stk-sort-analysis-code,spaces)
+	VALIDATESYSTBL("B6",stk-brand,spaces)
+	VALIDATESYSTBL("UM",stk-unit-desc,spaces)
+	VALIDATESYSTBL("UM",stk-alt-unit-desc,spaces)
+	VALIDATESYSTBL("UM",stk-pack-desc,spaces)
+	VALIDATESYSTBL("UM",stk-pack-desc,spaces)
+	VALIDATESYSTBL("DY",stk-import-tariff-code,spaces)
+	VALIDATESYSTBL("DY",stk-import-tariff-code,spaces)
+	if pattern(stk-reorder-policy,"[NYDMXICKLH1234]") = 0
+		EXITERR("Invalid Reorder Policy")
+	endif
+	// there is a bit to the reorder review code
+	if stk-reorder-review not in ("D" "W" "M" "Y" "L" "F" "A")
+	and pattern(stk-reorder-review,"D[1-7]") != 1
+	and pattern(stk-reorder-review,"W[1-4]") != 1
+		EXITERR("Invalid Planning Policy (stk-reorder-review)")
+	endif
+	//
+	VALIDATESYSTBL("RR",stk-reorder-buyer,spaces)
+	if stk-allocation-code != spaces
+		get store-allocation-master
+			on index sam-allocation-code
+			key is stk-allocation-code
+		on error ENOREC
+			EXITERR("Invalid Allocation Code")
+		endon
+	endif
+end-procedure
+
+procedure clibvimport-default-stock-master export
+parameters
+	stock-master.*			global
+returning
+	stock-master.*						
+	do std-default-stock-master 
+		parameters stock-master.*
+		returning stock-master.*
+end-procedure
+
+procedure std-default-stock-master export
+parameters
+	stock-master.*			global
+returning
+	stock-master.*						
+	SETDEFAULT(stk-stock-status,spaces,"S")
+	SETDEFAULT(stk-serialized-flag,spaces,"N")
+	SETDEFAULT(stk-unit-desc,spaces,"EACH")
+	SETDEFAULT(stk-pack-qty,0,1)
+	SETDEFAULT(stk-price-per,0,1)
+	SETDEFAULT(stk-reorder-policy,spaces,"Y")
+	SETDEFAULT(stk-reorder-review,spaces,"D")
+	SETDEFAULT(stk-price-protection,spaces,"Y")
+end-procedure
+
+//*------------------------------------------------------------
+//  deb-master
+//*------------------------------------------------------------
+
+procedure clibvimport-validate-deb-master export
+parameters
+	deb-master.*			global
+returning
+	lr-status							pic x
+	lr-message							pic x(500)
+	do std-validation-deb-master 
+		parameters deb-master.*
+		returning lr-status lr-message
+end-procedure
+
+procedure std-validation-deb-master
+parameters
+	deb-master.*			global
+returning
+	lr-status							pic x
+	lr-message							pic x(500)
+	// Bill to not validated - it depends a bit on sequence.
+	// Let DQM sort that out.
+	VALIDATESYSTBL("CK",credit-limit,spaces)
+	if dr-clearflag not in ("W" "F" "O" "M")
+		EXITERR("Invalid Housekeeping Flag")
+	endif
+	if price-code not in ("I" "F" "C" "0" "1" "2" "3" "4" "R0" "R1" "R2" "R3" "R4")
+	and pattern(price-code,"[A-Z][A-Z]") != 1
+		EXITERR("Invalid Price Code")
+	endif
+	VALIDATESYSTBL("WH",warehouse,spaces)
+	get rep-master
+		on index rep-code
+		key is rep-code
+	on error ENOREC
+		EXITERR("Invalid Rep Code")
+	endon
+	VALIDATESYSTBL("TC",territory,spaces)
+	VALIDATESYSTBL("DD",terms-disc,spaces)
+	VALIDATESYSTBL("CT",dr-cust-type,spaces)
+	VALIDATESYSTBL("CI",dr-industry-code,spaces)
+	VALIDATESYSTBL("CM",dr-marketing-flag,spaces)
+	VALIDATESYSTBL("BC",dr-company-mask,spaces)
+	VALIDATESYSTBL("PE",dr-pricing-category,spaces)
+	get currency-code-master
+		on index ccm-currency-code
+		key is dr-curr-code
+	on error ENOREC
+		EXITERR("Invalid Currency Code")
+	endon
+	get system-carrier
+		on index carrier-code
+		key is dr-delivery-route-code
+	on error ENOREC
+		EXITERR("Invalid Delivery Code")
+	endon
+	VALIDATESYSTBL("DE",dr-credit-id-no,spaces)
+	if pattern(dr-part-shipment-allowed,"[YNWZBCDX]") != 1
+		EXITERR("Invalid Part Shipment Flag")
+	endif
+	if dr-order-priority < 0 or dr-order-priority > 9
+		EXITERR("Invalid Order Priority")
+	endif
+	if pattern(dr-price-disc-by-bill-to,"[YNBD]") != 1
+		EXITERR("Invalid Price By Bill To Flag")
+	endif
+	if pattern(dr-credit-letter-status,"[YNX]") != 1
+		EXITERR("Invalid Customer Signed Application Form (dr-credit-letter-status)")
+	endif
+	if pattern(dr-billing-control-code,"[ BNLDSEZF]") != 1
+		EXITERR("Invalid Customer Signed Application Form (dr-credit-letter-status)")
+	endif
+	if pattern(dr-mail-control-code,"[ BNIJSDL123456789CFR]") != 1
+		EXITERR("Invalid Mailing Control Code") 
+	endif
+	VALIDATESYSTBL("CG",dr-industry-sub-group,spaces)
+	if pattern(dr-tax-calc-level,"[OL]") != 1
+		EXITERR("Invalid tax calc level Code") 
+	endif
+end-procedure
+
+procedure clibvimport-default-deb-master export
+parameters
+	deb-master.*			global
+returning
+	deb-master.*						
+	do std-default-deb-master 
+		parameters deb-master.*
+		returning deb-master.*
+end-procedure
+
+procedure std-default-deb-master export
+parameters
+	deb-master.*			global
+returning
+	deb-master.*						
+	SETDEFAULT(bill-to,spaces,accountcode)
+	SETDEFAULT(credit-limit,spaces,"0")
+	SETDEFAULT(dr-clearflag,spaces,"O")
+	SETDEFAULT(dr-part-shipment-allowed,spaces,"Y")
+	SETDEFAULT(dr-order-priority,0,5)
+	SETDEFAULT(dr-price-disc-by-bill-to,spaces,"Y")
+	SETDEFAULT(dr-credit-letter-status,spaces,"N")
+end-procedure
+
+//*------------------------------------------------------------
+//  trueform-document-map
+//*------------------------------------------------------------
+
+procedure clibvimport-validate-trueform-document-map export
+parameters
+	trueform-document-map.*			global
+returning
+	lr-status							pic x
+	lr-message							pic x(500)
+	do std-validation-trueform-document-map 
+		parameters trueform-document-map.*
+		returning lr-status lr-message
+end-procedure
+
+procedure std-validation-trueform-document-map 
+parameters
+	trueform-document-map.*			global
+returning
+	lr-status							pic x
+	lr-message							pic x(500)
+	if pattern(tdm-type,"[CS]") != 1
+		EXITERR("Invalid tdm-type - should be 'C''or 'S' (Customer/Supplier)")
+	endif
+	if tdm-type = "C"
+		get deb-master
+			on index accountcode
+			key is tdm-account
+		on error ENOREC
+			EXITERR("Invalid Account")
+		endon
+	endif
+	if tdm-type = "S"
+		get cre-master
+			on index cre-accountcode
+			key is tdm-account
+		on error ENOREC
+			EXITERR("Invalid Account")
+		endon
+	endif
+	//
+	get trueform-document-types
+		on index tdt-document
+		key is tdm-document
+	on error  ENOREC
+		EXITERR("Invalid Document type")
+	endon
+	//
+	if pattern(tdm-output-type,"T[A-K]") != 1 
+		EXITERR("Invalid Output type")
+	endif
+	//
+	if pattern(tdm-contact-type,"[ ABDCRM]") != 1 
+		EXITERR("Invalid Contact type")
+	endif
+end-procedure
+
+procedure clibvimport-default-trueform-document-map export
+parameters
+	trueform-document-map.*			global
+returning
+	trueform-document-map.*						
+	do std-default-trueform-document-map 
+		parameters trueform-document-map.*
+		returning trueform-document-map.*
+end-procedure
+
+procedure std-default-trueform-document-map 
+parameters
+	trueform-document-map.*			global
+returning
+	trueform-document-map.*						
+	SETDEFAULT(tdm-type,spaces,"C")
+end-procedure
+
+//------------------------------------------------------------
+//  stock-conversion-procedure
+//------------------------------------------------------------
+	/*
++-------+-------------------------------------------------------------+-------------------+
+|Code   | Desc                                                        | pgms              |
++-------+-------------------------------------------------------------+-------------------+
+|spaces | Item alternate.  needs source and target product codes      |                   |
+|       |Customer part no if scp-accountcode specified                |                   |
+|       |                                                             |                   |
++-------+-------------------------------------------------------------+-------------------+
+|IS     | Item Substitution customer code, stock code component       |AR X035            |
++-------+-------------------------------------------------------------+-------------------+
+|IT     |  Item substitution by cutomer type, customer = customer type|AR x035            |
+|       |  (CT)  code, component                                      |                   |
++-------+-------------------------------------------------------------+-------------------+
+|IM     | Item substitution by company mask (BC)                      |ar x035            |
++-------+-------------------------------------------------------------+-------------------+
+|ZZ     |Relates to Z code in customer invoice format                 |                   |
++-------+-------------------------------------------------------------+-------------------+
+|^^     |Bonus/Companion Items - requires stock code and component    |                   |
++-------+-------------------------------------------------------------+-------------------+
+|@@     |Telemarketing alternative requires stock code and component  |                   |
++-------+-------------------------------------------------------------+-------------------+
+|!!     |Availability Alternate - requires stock code and component   |                   |
++-------+-------------------------------------------------------------+-------------------+
+|##     |Part no by manufacturer                                      |                   |
++-------+-------------------------------------------------------------+-------------------+
+|**     |Colloquial names                                             |                   |
++-------+-------------------------------------------------------------+-------------------+
+|OI     | inners and outers                                           |                   |
++-------+-------------------------------------------------------------+-------------------+
+|SI,SM, |Customer inclusion rules                                     |                   |
+|GI,GM, | (Moved to deb-stock-restrictions)                           |                   |
+|SE,GE  |                                                             |                   |
++-------+-------------------------------------------------------------+-------------------+
+|X      |                                                             |                   |
++-------+-------------------------------------------------------------+-------------------+
+|1      |                                                             |                   |
++-------+-------------------------------------------------------------+-------------------+
+|@K     |deb-supply-rule-items                                        |m52sruleex         |
++-------+-------------------------------------------------------------+-------------------+
+|TH     |Customer Pallet configuration                                |m4stockid          |
++-------+-------------------------------------------------------------+-------------------+
+|$$     |Some kind of UOM conv by customer                            |m4tunconv          |
++-------+-------------------------------------------------------------+-------------------+
+|ZP     |Plant Item Number (by Customer)                              |                   |
++-------+-------------------------------------------------------------+-------------------+
+|HI     |Customer Pallet Config                                       |                   |
++-------+-------------------------------------------------------------+-------------------+
+|~W     |Edi Override warehouse                                       |                   |
++-------+-------------------------------------------------------------+-------------------+
+|~R     |Customer retail price                                        |                   |
++-------+-------------------------------------------------------------+-------------------+
+|UM	    |Unit of measure                                              |                   |
++-------+-------------------------------------------------------------+-------------------+
+|\      |Alternate unit and price                                     |                   |
++-------+-------------------------------------------------------------+-------------------+
+|/      |Alternate unit and base                                      |                   |
++-------+-------------------------------------------------------------+-------------------+
+|       |                                                             |                   |
++-------+-------------------------------------------------------------+-------------------+
+	
+	*/
+
+procedure clibvimport-validate-stock-conversion-procedure export
+parameters
+	stock-conversion-procedure.*			global
+returning
+	lr-status							pic x
+	lr-message							pic x(500)
+	do std-validate-stock-conversion-procedure 
+		parameters stock-conversion-procedure.*
+		returning lr-status lr-message
+end-procedure
+
+procedure std-validate-stock-conversion-procedure 
+parameters
+	stock-conversion-procedure.*			global
+returning
+	lr-status							pic x
+	lr-message							pic x(500)
+	if scp-accountcode != spaces
+		switch on scp-conversion-rule
+		case "IM"
+			VALIDATESYSTBL("BC",scp-accountcode,spaces)
+		case "IT"
+			VALIDATESYSTBL("CT",scp-accountcode,spaces)
+		else
+			get deb-master
+				on index accountcode 
+				key is scp-accountcode
+			on error ENOREC
+				EXITERR("Invalid customer code")
+			endon
+		end-switch
+	endif
+	get stock-master
+		on index stock-code
+		key is scp-stock-code
+	on error ENOREC
+		EXITERR("Invalid Stock Code")
+	endon
+	if scp-accountcode != spaces
+		if scp-conversion-rule !=  "ZP"  // Plant item number
+		and scp-conversion-rule !=  "PP"  // Part pack surchrage
+		and scp-conversion-rule !=  "TH"  // Customer Pallett config
+		and scp-conversion-rule !=  "HI"  // Customer Pallett config
+		and scp-conversion-rule !=  "~W"  // edi override wshe
+		and scp-conversion-rule !=  "~R"  // customer retail price
+		and scp-conversion-rule !=  "UM"  // EDI UOM conversion
+		and scp-conversion-rule !=  "OI"  // EDI Outers and Inners
+		and scp-conversion-rule != "ZZ"    // customer item code
+			EXITERR("Invalid Stock Conversion Rule (customer)")
+		endif
+	else
+		if scp-conversion-rule !=  spaces
+		and scp-conversion-rule !=  "$$" // gtins
+		and scp-conversion-rule !=  "##" // manufacturer
+		and scp-conversion-rule !=  "**" // Colloquial names
+		and scp-conversion-rule !=  "!!" // Out of stock suggested alternates
+		and scp-conversion-rule !=  "@@" // suggested alternate
+		and scp-conversion-rule !=  "^^" // Companion Bonus items
+		and scp-conversion-rule !=  "\" // alternate uom and alternate price
+		and scp-conversion-rule !=  "/"  // aternate unit and base
+			EXITERR("Invalid Conversion Rule (No cust)")
+		endif
+	endif
+	if scp-conversion-rule not in ( spaces
+		"ZP"  "PP"  "TH"  "HI"  "~W"  "~R"  "UM"  "OI"  
+		"ZZ"    "$$" "##" "**" "!!" "@@" "^^" "\" "/"  
+		)
+		get system-table 
+			on index sys-tbl-type sys-tbl-code
+			key is "SR" scp-conversion-rule
+		on error ENOREC
+			EXITERR("Invalid conversion rule")
+		endon
+	endif
+	if scp-stock-group != spaces
+		if scp-conversion-rule =  'PS'
+			VALIDATESYSTBL("PS",scp-stock-group,spaces)
+		else
+			VALIDATESYSTBL("PG",scp-stock-group,spaces)
+		endif
+	endif
+	if scp-stk-unit-desc != spaces
+		VALIDATESYSTBL("UM",scp-stk-unit-desc,spaces)
+	endif
+	if scp-conversion-rule != spaces and scp-accountcode != spaces  // customer part no
+		// not doing this if customer part no specified
+		if scp-conversion-rule not in ("OI", "PP", "UM", "ZZ", "ZP", "TH", "~W" )
+			if scp-component-code != spaces
+				VALIDATESTOCK(scp-component-code)
+			endif
+		endif
+	endif
+	if scp-conversion-rule = "~W"
+		VALIDATESYSTBL("WH",scp-stk-unit-desc,spaces)
+	endif
+end-procedure
+
+procedure clibvimport-default-stock-conversion-procedure export
+parameters
+	stock-conversion-procedure.*			global
+returning
+	stock-conversion-procedure.*						
+	do std-default-stock-conversion-procedure 
+		parameters stock-conversion-procedure.*
+		returning stock-conversion-procedure.*
+end-procedure
+
+procedure std-default-stock-conversion-procedure 
+parameters
+	stock-conversion-procedure.*			global
+returning
+	stock-conversion-procedure.*						
+end-procedure
+
+//------------------------------------------------------------
+//  production-stock-specification
+//------------------------------------------------------------
+
+procedure clibvimport-validate-production-stock-specification export
+parameters
+	production-stock-specification.*			global
+returning
+	lr-status							pic x
+	lr-message							pic x(500)
+	do std-validate-production-stock-specification 
+		parameters production-stock-specification.*
+		returning lr-status lr-message
+end-procedure
+
+procedure std-validate-production-stock-specification 
+parameters
+	production-stock-specification.*			global
+returning
+	lr-status							pic x
+	lr-message							pic x(500)
+	//
+	VALIDATESYSTBL("PC",spec-property-code,spaces)
+	VALIDATESTOCK(stock-code)
+	if spec-in-batch-test not in ( YES NO)
+		set lr-status = "E"
+		set lr-message = "Invalid 'in batch test' flag"
+		exit 1
+	endif
+	if spec-in-std-datasheet not in ( YES NO)
+		set lr-status = "E"
+		set lr-message = "Invalid 'in std Datasheet ' flag"
+		exit 1
+	endif
+end-procedure
+
+procedure clibvimport-default-production-stock-specification export
+parameters
+	production-stock-specification.*			global
+returning
+	production-stock-specification.*						
+	do std-default-production-stock-specification 
+		parameters production-stock-specification.*
+		returning production-stock-specification.*
+end-procedure
+
+procedure std-default-production-stock-specification 
+parameters
+	production-stock-specification.*			global
+returning
+	production-stock-specification.*						
+	SETDEFAULT(spec-in-batch-test,spaces,NO)
+	SETDEFAULT(spec-in-std-datasheet,spaces,YES)
+end-procedure
+
+//------------------------------------------------------------
+//  deb-stock-retail-special-price
+//------------------------------------------------------------
+
+procedure clibvimport-validate-deb-stock-retail-special-price export
+parameters
+	deb-stock-retail-special-price.*			global
+returning
+	lr-status							pic x
+	lr-message							pic x(500)
+	do std-validate-deb-stock-retail-special-price 
+		parameters deb-stock-retail-special-price.*
+		returning lr-status lr-message
+end-procedure
+
+procedure std-validate-deb-stock-retail-special-price 
+parameters
+	deb-stock-retail-special-price.*			global
+returning
+	lr-status							pic x
+	lr-message							pic x(500)
+	lf-key-array						pic x(30) occurs 3
+	lf-type-array						pic x(30) occurs 3
+	lf-keys-used						type number
+	i 									type number
+	//
+	// check rule is valid
+	// Code BP contains the rules that have been defined
+	VALIDATESYSTBL('BP',sp-key-type,spaces)
+	get system-table
+		on index sys-tbl-type sys-tbl-code
+		key is 'BP' sp-key-type
+	on error ENOREC
+	endon
+	// Validate the keys
+	set lf-type-array[1] = sys-tbl-alpha-2
+	set lf-type-array[2] = sys-tbl-alpha-3
+	set lf-type-array[3] = sys-tbl-alpha-1
+	set lf-key-array[1] = sp-key-1
+	set lf-key-array[2] = sp-key-2
+	set lf-key-array[3] = sp-key-3
+	if sys-tbl-alpha-2 != spaces
+		set lf-keys-used = 1
+	endif
+	if sys-tbl-alpha-3 != spaces
+		set lf-keys-used = 2
+	endif
+	if sys-tbl-alpha-1 != spaces
+		set lf-keys-used = 3
+	endif
+	for i  = 1 to lf-keys-used
+		// Code BQ contiains the possible fields (including custom fields that
+		// start with "Z"
+		VALIDATESYSTBL('BQ',lf-type-array[i],concat("Invalid key " str(i) ))
+		switch lf-type-array[i]
+		case "P"
+			VALIDATESTOCK(lf-key-array[i])
+		case "C" "S"
+			VALIDATECUST(lf-key-array[i])
+		case "BC" "CG" "CI" "CM" "PE" "CT" "DC" "OS" "PG" "SS" "UM" "WH" "TC" "CM" "SY" "SZ" "TG"
+			VALIDATESYSTBL(lf-type-array[i],lf-key-array[i],spaces)
+		case "ST"
+			VALIDATESYSTBL('TC',lf-key-array[i],spaces)
+		case "PA"
+			VALIDATESYSTBL('SX',lf-key-array[i],spaces)
+		case "PB"
+			VALIDATESYSTBL('B6',lf-key-array[i],spaces)
+		case "PC"
+			VALIDATESYSTBL('OG',lf-key-array[i],spaces)
+		case "SB"
+			VALIDATESYSTBL('RR',lf-key-array[i],spaces)
+		case "SC"
+			VALIDATESYSTBL('CT',lf-key-array[i],spaces)
+		case "WG"
+			VALIDATESYSTBL('WG',lf-key-array[i],spaces)
+		case "CR"
+			get rep-master
+				on index rep-code
+				key is lf-key-array[i]
+				lookup
+			on error ENOREC
+				EXITERR("Invalid Rep Code")
+			endon
+		case "H1" "H2" "H3" "H4"
+			get stock-hierarchy-master
+				on index shm-type shm-code
+				key is substring(lf-type-array[i],2,2) lf-key-array[i]
+				lookup
+			on error ENOREC
+				EXITERR(concat("Stock Hierarchy Code " lf-type-array[i] " Invalid"))
+			endon
+		case "CP" // price code
+			// No idea what this is.  There is no lookup.
+		end-switch
+	end-for
+	for i = 1 to occurence(sp-price-or-disc)
+		if pattern(sp-price-or-disc[i],"[ P01234RBGHIJKCESLDUVWXYZ]") != 1
+			EXITERR("Price or Disc Code is invalid")
+		endif
+	end-for
+	if sp-price-rule not in ("0","1","2")
+		EXITERR("Invlaid Price Rule")
+	endif
+end-procedure
+
+procedure clibvimport-default-deb-stock-retail-special-price export
+parameters
+	deb-stock-retail-special-price.*			global
+returning
+	deb-stock-retail-special-price.*						
+	do std-default-deb-stock-retail-special-price 
+		parameters deb-stock-retail-special-price.*
+		returning deb-stock-retail-special-price.*
+end-procedure
+
+procedure std-default-deb-stock-retail-special-price 
+parameters
+	deb-stock-retail-special-price.*			global
+returning
+	deb-stock-retail-special-price.*						
+	SETDEFAULT(sp-price-rule,spaces,"0")
+	SETDEFAULT(sp-max-qty,0,max-value(sp-max-qty))
+	SETDEFAULT(sp-end-date,0,max-value(sp-end-date))
+end-procedure
+
+//------------------------------------------------------------
+//  deb-cust-notes
+//------------------------------------------------------------
+
+procedure clibvimport-validate-deb-cust-notes export
+parameters
+	deb-cust-notes.*					global
+returning
+	lr-status							pic x
+	lr-message							pic x(500)
+	do std-validate-deb-cust-notes 
+		parameters deb-cust-notes.*
+		returning lr-status lr-message
+end-procedure
+
+procedure std-validate-deb-cust-notes 
+parameters
+	deb-cust-notes.*					global
+returning
+	lr-status							pic x
+	lr-message							pic x(500)
+	VALIDATECUST(accountcode)
+end-procedure
+
+procedure clibvimport-default-deb-cust-notes export
+parameters
+	deb-cust-notes.*					global
+returning
+	deb-cust-notes.*						
+	do std-default-deb-cust-notes 
+		parameters deb-cust-notes.*
+		returning deb-cust-notes.*
+end-procedure
+
+procedure std-default-deb-cust-notes 
+parameters
+	deb-cust-notes.*					global
+returning
+	deb-cust-notes.*
+	set dcn-date-time-stamp = GMT()
+end-procedure
+
+//------------------------------------------------------------
+//  stock-movements
+//------------------------------------------------------------
+
+procedure clibvimport-validate-stock-movements export
+parameters
+	stock-movements.*			global
+returning
+	lr-status							pic x
+	lr-message							pic x(500)
+	do std-validate-stock-movements 
+		parameters stock-movements.*
+		returning lr-status lr-message
+end-procedure
+
+procedure std-validate-stock-movements 
+parameters
+	stock-movements.*			global
+returning
+	lr-status							pic x
+	lr-message							pic x(500)
+	get stock-trans-type-desc
+		on index sttd-trans-type sttd-language
+		key is stk-trans-type spaces
+	on error ENOREC
+		set lr-status = "E"
+		set lr-message = "Invalid Transaction Type"
+		exit 1
+	endon
+	VALIDATESTOCK(stock-code)
+	VALIDATESYSTBL("WH", stk-trans-whse,spaces)
+	if stk-trans-type = 'SO'
+		VALIDATECUST(stk-accountcode)
+	endif
+end-procedure
+
+procedure clibvimport-default-stock-movements export
+parameters
+	stock-movements.*			global
+returning
+	stock-movements.*						
+	do std-default-stock-movements 
+		parameters stock-movements.*
+		returning stock-movements.*
+end-procedure
+
+procedure std-default-stock-movements 
+parameters
+	stock-movements.*			global
+returning
+	stock-movements.*						
+end-procedure
+
+//------------------------------------------------------------
+//  warehouse-stock-master
+//------------------------------------------------------------
+
+procedure clibvimport-validate-warehouse-stock-master export
+parameters
+	warehouse-stock-master.*			global
+returning
+	lr-status							pic x
+	lr-message							pic x(500)
+	do std-validate-warehouse-stock-master 
+		parameters warehouse-stock-master.*
+		returning lr-status lr-message
+end-procedure
+
+procedure std-validate-warehouse-stock-master 
+parameters
+	warehouse-stock-master.*			global
+returning
+	lr-status							pic x
+	lr-message							pic x(500)
+local
+	i 									type number
+	VALIDATESTOCK(stock-code)
+	get stock-master
+		on index stock-code
+		key is stock-code
+	on error
+		// can't happen
+	endon
+	if wsm-whse-code != spaces
+		VALIDATESYSTBL("WH", wsm-whse-code,"Invalid Warehouse")
+	endif
+	for i = 1 to occurence(pick-unit-name)
+		if pick-unit-name[i] != spaces
+			VALIDATESYSTBL("UM",pick-unit-name[i],str-concat("Invalid UOM-" str(i)))
+		endif
+	endfor
+	if warehouse-stk-pick-override not in ( " " "1" "3" "4" "5")
+		set lr-status = "E"
+		set lr-message = "Invalid Stock Pick Override.  Must be blank,1,3,4 or 5"
+		exit 1
+	endif
+	for i = 1 to occurence(wsm-zone-preference)
+		if wsm-zone-preference[i] != spaces
+		get system-table
+			on index sys-tbl-type sys-tbl-code
+			key is "WZ" wsm-zone-preference[i]
+		on error ENOREC
+			set lr-status = "E"
+			set lr-message = str-concat("Invalid Zone Preference-" str(i))
+			exit 1
+		endon
+		// sys-tbl-alpha-1 contains the storage type
+		// check it is valid for the stock item
+		if stk-storage-type-flag != spaces
+			if sys-tbl-alpha-1 != stk-storage-type-flag
+				set lr-status = "E"
+				set lr-message = str-concat("Invalid Zone Preference-" str(i) ". Must Match Stock Master")
+				exit 1
+				endif
+			endif
+		endif
+	end-for
+	if wsm-pallet-size-code != spaces
+		VALIDATESYSTBL("WP",wsm-pallet-size-code,spaces)
+	endif
+end-procedure
+
+procedure clibvimport-default-warehouse-stock-master export
+parameters
+	warehouse-stock-master.*			global
+returning
+	warehouse-stock-master.*						
+	do std-default-warehouse-stock-master 
+		parameters warehouse-stock-master.*
+		returning warehouse-stock-master.*
+end-procedure
+
+procedure std-default-warehouse-stock-master 
+parameters
+	warehouse-stock-master.*			global
+returning
+	warehouse-stock-master.*						
+end-procedure
+
+//------------------------------------------------------------
+//  stock-take-variance
+//  Be careful - there is no unique key
+//------------------------------------------------------------
+
+procedure clibvimport-validate-stock-take-variance export
+parameters
+	stock-take-variance.*			global
+returning
+	lr-status							pic x
+	lr-message							pic x(500)
+	do std-validate-stock-take-variance 
+		parameters stock-take-variance.*
+		returning lr-status lr-message
+end-procedure
+
+procedure std-validate-stock-take-variance 
+parameters
+	stock-take-variance.*			global
+returning
+	lr-status							pic x
+	lr-message							pic x(500)
+local
+	lf-whse-type						type number
+	lf-count							type number
+	//
+	// Whse-code
+	//
+	// need currency on warehouse to get type for bin location
+	//
+	do validate-system-table parameters are "WH" whse-code spaces
+		returning lr-status lr-message
+	if lr-status = "E"
+		exit 1
+	endif
+	set lf-whse-type = sys-tbl-sales-mtd
+	//
+	// Biin Location - be wary of Type 1&2 warehouses and Van warehouses
+	//
+	if lf-whse-type  in (1,9)
+		get warehouse-valid-locations
+			on index whse-code sl-location-code
+			key is whse-code stv-bin-location
+		on error ENOREC
+			set lr-status = "E"
+			set lr-message = "Invalid Bin Location"
+			exit 1
+		else
+			if location-in-use != "Y" and lf-whse-type = 9
+				set lr-status = "E"
+				set lr-message = "Van location not in use"
+				exit 1
+			endif
+		endon
+	endif
+	//
+	// Stock Code
+	//
+	VALIDATESTOCK(stock-code)
+	// get current for lot control flag
+	get stock-master
+		on index stock-code
+		key is stock-code
+	on error
+		// cannot happen
+	endon
+	if stk-serialized-flag = "Y"
+		set lr-status = "E"
+		set lr-message = "Serialized items not supported"
+		exit 1
+	endif
+	if stk-stock-status in ( "K" "Z" "L" "X" )
+		set lr-status = "E"
+		set lr-message = "Cannot stock take Cross-reference, labour, special or kits"
+		exit 1
+	endif
+	//
+	//
+	// Item Stocked at warehouse
+	//
+	get stock-warehouse-detail
+		on index stock-code whse-code
+		key is stock-code whse-code
+	on error ENOREC
+		set lr-status = "E"
+		set lr-message = "Item not stocked at warehouse"
+		exit 1
+	endon
+	//
+	// stv-control-code
+	//
+	get stock-take-control
+		on index stc-control-code
+		key is stv-control-code
+	on error
+		set lr-status = "E"
+		set lr-message = "Invalid Stock Take Control Record"
+		exit 1
+	endon
+	if stc-status = "U"
+		set lr-status = "E"
+		set lr-message = "Stock Take already updated and now closed"
+		exit 1
+	endif
+	if stc-status != "F"
+		set lr-status = "E"
+		set lr-message = "Stock Take not ready for count entry"
+		exit 1
+	endif
+	//
+	// check the item was selected for couting
+	//
+	select lf-count = count(*)
+		from stock-take-variance
+		where stock-code = :stock-code
+		and whse-code = :whse-code
+	end-select
+	if lf-count  = 0
+		set lr-status = "E"
+		set lr-message = "This item not selected for counting"
+		exit 1
+	endif
+	//
+	if lf-whse-type  in (1,9)
+		// can't check the stock-take-variance file because an item
+		// can be in a location that we do not have on the book qty
+		// so there will be no stock-take-variance record.
+		// So re-check the range specified.
+		if stv-bin-location not between stc-location-from and stc-location-to
+			set lr-status = "E"
+			set lr-message = "Whse not in control range"
+			exit 1
+		endif
+	endif
+	/*
+
+ 	Instead of checking ranges just check that the product and warehouse record 
+	exists (see above).
+
+	// check status
+	if stc-status != "F"
+		set lr-status = "E"
+		set lr-message = "Stock Take control not at correct status"
+		exit 1
+	endif
+	// check the ranges
+	if whse-code not between stc-whse-from and stc-whse-to
+		set lr-status = "E"
+		set lr-message = "Whse not in control range"
+		exit 1
+	endif
+	if stv-bin-location not between stc-location-from and stc-location-to
+		set lr-status = "E"
+		set lr-message = "Whse not in control range"
+		exit 1
+	endif
+	if stock-group not between stc-group-from and stc-group-to
+		set lr-status = "E"
+		set lr-message = "Stock Group not in control range"
+		exit 1
+	endif
+	if stock-abc-code not between stc-class-from and stc-class-to
+		set lr-status = "E"
+		set lr-message = "Stock Class not in control range"
+		exit 1
+	endif
+	if stc-issue-control != "A"
+		if pattern(stc-issue-control,stk-issue-control) = 0
+			set lr-status = "E"
+			set lr-message = "Issue Control Code not in control range"
+			exit 1
+		endif
+	endif
+	if stc-storage-type != "A"
+		if pattern(stc-storage-type,stk-storage-type) = 0
+			set lr-status = "E"
+			set lr-message = "Storage Type Code not in control range"
+			exit 1
+		endif
+	endif
+	if stc-cyclic-code != spaces
+	endif
+	*/
+	// 
+	// Lot numbers - can't be validated - may be adding new one
+	// Can validate that a lot number has or hasn't been entered
+	//
+	if stk-serialized-flag in ("L"  "P")
+		if stv-lot-batch-no = spaces
+			set lr-status = "E"
+			set lr-message =  "No lot number for Lot Controlled Item"
+			exit 1
+		endif
+	else
+		if stv-lot-batch-no != spaces
+			set lr-status = "E"
+			set lr-message  = "Lot number for non-Lot Controlled Item"
+			exit 1
+		endif
+	endif
+end-procedure
+
+procedure clibvimport-default-stock-take-variance export
+parameters
+	stock-take-variance.*			global
+returning
+	stock-take-variance.*						
+	do std-default-stock-take-variance 
+		parameters stock-take-variance.*
+		returning stock-take-variance.*
+end-procedure
+
+procedure std-default-stock-take-variance 
+parameters
+	stock-take-variance.*			global
+returning
+	stock-take-variance.*						
+	set stv-date-updated = today()
+	set stv-count-date-time = gmt()
+end-procedure
+
+//------------------------------------------------------------
+//  stock-warehouse-detail
+//------------------------------------------------------------
+
+procedure clibvimport-validate-stock-warehouse-detail export
+parameters
+	stock-warehouse-detail.*			global
+returning
+	lr-status							pic x
+	lr-message							pic x(500)
+	do std-validate-stock-warehouse-detail 
+		parameters stock-warehouse-detail.*
+		returning lr-status lr-message
+end-procedure
+
+procedure std-validate-stock-warehouse-detail 
+parameters
+	stock-warehouse-detail.*			global
+returning
+	lr-status							pic x
+	lr-message							pic x(500)
+	//
+	// Validate the stock code
+	//
+	VALIDATESTOCK(stock-code)
+	// Whse Code
+	VALIDATESYSTBL("WH", whse-code,spaces)
+	if whse-abc-class != spaces	
+		VALIDATESYSTBL("IA", whse-cyclic-code,spaces)
+	endif
+	if whse-cost-to-use-flag != spaces
+		if whse-cost-to-use-flag not in { spaces 'S' 'A' 'R' 'T' 'F' 'W' }
+			set lr-status = 'E'
+			set lr-message = 'Invalid Cost to Use Flag'
+			exit 1
+		endif
+	endif
+	if whse-cyclic-code != spaces
+		VALIDATESYSTBL("ST", whse-cyclic-code,spaces)
+	endif
+end-procedure
+
+procedure clibvimport-default-stock-warehouse-detail export
+parameters
+	stock-warehouse-detail.*			global
+returning
+	stock-warehouse-detail.*						
+	do std-default-stock-warehouse-detail 
+		parameters stock-warehouse-detail.*
+		returning stock-warehouse-detail.*
+end-procedure
+
+procedure std-default-stock-warehouse-detail 
+parameters
+	stock-warehouse-detail.*			global
+returning
+	stock-warehouse-detail.*						
+	SETDEFAULT(whse-drp-replenish-multiple,0,1)
+	SETDEFAULT(whse-financial-year,0,sctd-year)
+	SETDEFAULT(whse-financial-period,0,sctd-period)
+end-procedure
+
+//------------------------------------------------------------
+//  stock-price
+//------------------------------------------------------------
+
+procedure clibvimport-validate-stock-price export
+parameters
+	stock-price.*			global
+returning
+	lr-status							pic x
+	lr-message							pic x(500)
+	do std-validate-stock-price 
+		parameters stock-price.*
+		returning lr-status lr-message
+end-procedure
+
+procedure std-validate-stock-price 
+parameters
+	stock-price.*			global
+returning
+	lr-status							pic x
+	lr-message							pic x(500)
+	VALIDATESTOCK(stock-code)
+	if sys-mult-price-rec-used = "N"
+		if prc-region-code != spaces
+			set lr-status = 'E'
+			set lr-message = 'prc-region-code must be spaces'
+			exit 1
+		endif
+	else // multiple price records.
+		VALIDATESYSTBL("CT", prc-region-code, spaces)
+	endif
+	if prc-price-type-code != spaces
+		get system-price-rules
+			on index sys-price-type-code
+			key is prc-price-type-code
+		on error ENOREC
+			set lr-status = "E"
+			set lr-message = "Invalid Price Algorithm"
+			exit 1
+		endon
+	endif
+	if prc-discount-code != spaces
+		VALIDATESYSTBL("DN",prc-discount-code,"Invalid Discount Matrix")
+	endif
+end-procedure
+
+procedure clibvimport-default-stock-price export
+parameters
+	stock-price.*			global
+returning
+	stock-price.*						
+	do std-default-stock-price 
+		parameters stock-price.*
+		returning stock-price.*
+end-procedure
+
+procedure std-default-stock-price 
+parameters
+	stock-price.*			global
+returning
+	stock-price.*						
+	set prc-break-qty[*] = integer(max-value(prc-break-qty))
+	set prc-date-last-change = today()
+end-procedure
+
+
+//------------------------------------------------------------
+//  stock-supplier
+//------------------------------------------------------------
+
+procedure clibvimport-validate-stock-supplier export
+parameters
+	stock-supplier.*			global
+returning
+	lr-status							pic x
+	lr-message							pic x(500)
+	do std-validate-stock-supplier 
+		parameters stock-supplier.*
+		returning lr-status lr-message
+end-procedure
+
+procedure std-validate-stock-supplier 
+parameters
+	stock-supplier.*			global
+returning
+	lr-status							pic x
+	lr-message							pic x(500)
+	VALIDATESTOCK(stock-code)
+	VALIDATESUPP(cre-accountcode)
+	if sup-item-group != spaces
+		VALIDATESYSTBL("RN",sup-item-group,spaces)
+	endif
+	VALIDATESYSTBL("UM",sup-unit-desc,spaces)
+	if sup-shipping-method-code != spaces
+		VALIDATESYSTBL("SI",sup-shipping-method-code,spaces)
+	endif
+	if sup-currency-code != spaces
+		get currency-code-master
+			on index ccm-currency-code
+			key is sup-currency-code
+		on error ENOREC
+			set lr-status = "E"
+			set lr-message = "Invalid Currency Code"
+			exit 1
+		endon
+	endif
+end-procedure
+
+procedure clibvimport-default-stock-supplier export
+parameters
+	stock-supplier.*			global
+returning
+	stock-supplier.*						
+	do std-default-stock-supplier 
+		parameters stock-supplier.*
+		returning stock-supplier.*
+end-procedure
+
+procedure std-default-stock-supplier 
+parameters
+	stock-supplier.*			global
+returning
+	stock-supplier.*						
+	set sup-unit-of-measure = 1
+	set sup-lead-time = 99
+	set sup-actual-lead-time = 999
+	set sup-economic-order-qty = 1
+	set sup-pack-qty = 1
+	set sup-unit-desc = "EACH"
+	set sup-unit-conversion-factor = 1
+	set sup-priority = 9
+	set sup-date-last-change = today()
+end-procedure
+
+//------------------------------------------------------------
+//  deb-licences-and-permits
+//------------------------------------------------------------
+
+procedure clibvimport-validate-deb-licences-and-permits export
+parameters
+	deb-licences-and-permits.*			global
+returning
+	lr-status							pic x
+	lr-message							pic x(500)
+	do std-validate-deb-licences-and-permits 
+		parameters deb-licences-and-permits.*
+		returning lr-status lr-message
+end-procedure
+
+procedure std-validate-deb-licences-and-permits 
+parameters
+	deb-licences-and-permits.*			global
+returning
+	lr-status							pic x
+	lr-message							pic x(500)
+	VALIDATECUST(accountcode)
+	if licence-code = spaces
+		set lr-status = "E"
+		set lr-message = "Licence Code Required"
+		exit 1
+	endif
+	VALIDATESYSTBL("LC", licence-code,spaces)
+	VALIDATESYSTBL("UM",licence-unit-desc,spaces)
+end-procedure
+
+procedure clibvimport-default-deb-licences-and-permits export
+parameters
+	deb-licences-and-permits.*			global
+returning
+	deb-licences-and-permits.*						
+	do std-default-deb-licences-and-permits 
+		parameters deb-licences-and-permits.*
+		returning deb-licences-and-permits.*
+end-procedure
+
+procedure std-default-deb-licences-and-permits 
+parameters
+	deb-licences-and-permits.*			global
+returning
+	deb-licences-and-permits.*						
+	set licence-expiry-date = max-value(licence-expiry-date)
+end-procedure  
+
+//------------------------------------------------------------
+//  bill-of-materials-header
+//------------------------------------------------------------
+
+procedure clibvimport-validate-bill-of-materials-header export
+parameters
+	bill-of-materials-header.*			global
+returning
+	lr-status							pic x
+	lr-message							pic x(500)
+	do std-validate-bill-of-materials-header 
+		parameters bill-of-materials-header.*
+		returning lr-status lr-message
+end-procedure
+
+procedure std-validate-bill-of-materials-header 
+parameters
+	bill-of-materials-header.*			global
+returning
+	lr-status							pic x
+	lr-message							pic x(500)
+	VALIDATESTOCK(stock-code)
+end-procedure
+
+procedure clibvimport-default-bill-of-materials-header export
+parameters
+	bill-of-materials-header.*			global
+returning
+	bill-of-materials-header.*						
+	do std-default-bill-of-materials-header 
+		parameters bill-of-materials-header.*
+		returning bill-of-materials-header.*
+end-procedure
+
+procedure std-default-bill-of-materials-header 
+parameters
+	bill-of-materials-header.*			global
+returning
+	bill-of-materials-header.*						
+	set bom-date-last-change = today()
+	SETDEFAULT(bomh-authorised-end-date,0,max-value(bomh-authorised-end-date))
+	set bom-mps-flag = "N"
+	set bom-formulation-qty = 1
+	set bom-authorised-flag = "N"
+	set bom-yield = 100
+	set bomh-lot-size = 1
+	set bomh-type = "P"
+end-procedure
+
+
+
+//------------------------------------------------------------
+//  bill-of-materials-detail
+//------------------------------------------------------------
+
+procedure clibvimport-validate-bill-of-materials-detail export
+parameters
+	bill-of-materials-detail.*			global
+returning
+	lr-status							pic x
+	lr-message							pic x(500)
+	do std-validate-bill-of-materials-detail 
+		parameters bill-of-materials-detail.*
+		returning lr-status lr-message
+end-procedure
+
+procedure std-validate-bill-of-materials-detail 
+parameters
+	bill-of-materials-detail.*			global
+returning
+	lr-status							pic x
+	lr-message							pic x(500)
+	VALIDATESTOCK(comp-code)
+	get bill-of-materials-header
+	on error ENOREC
+		set lr-status = "E"
+		set lr-message = "Invalid BOM Header ID"
+		exit 1
+	endon
+	VALIDATESYSTBL("UM",bom-unit-desc,spaces)
+end-procedure
+
+procedure clibvimport-default-bill-of-materials-detail export
+parameters
+	bill-of-materials-detail.*			global
+returning
+	bill-of-materials-detail.*						
+	do std-default-bill-of-materials-detail 
+		parameters bill-of-materials-detail.*
+		returning bill-of-materials-detail.*
+end-procedure
+
+procedure std-default-bill-of-materials-detail 
+parameters
+	bill-of-materials-detail.*			global
+returning
+	bill-of-materials-detail.*						
+	set bom-quantity = 1
+end-procedure
+
+
+
+//------------------------------------------------------------
+//  production-routing-header
+//------------------------------------------------------------
+
+procedure clibvimport-validate-production-routing-header export
+parameters
+	production-routing-header.*			global
+returning
+	lr-status							pic x
+	lr-message							pic x(500)
+	do std-validate-production-routing-header 
+		parameters production-routing-header.*
+		returning lr-status lr-message
+end-procedure
+
+procedure std-validate-production-routing-header 
+parameters
+	production-routing-header.*			global
+returning
+	lr-status							pic x
+	lr-message							pic x(500)
+	get production-routing-group
+		key is prh-route-group
+	on error ENOREC
+		set lr-status = "E"
+		set lr-message = "Invalid Routing Group"
+		exit 1
+	endon
+	VALIDATESTOCK(prh-route-code)
+end-procedure
+
+procedure clibvimport-default-production-routing-header export
+parameters
+	production-routing-header.*			global
+returning
+	production-routing-header.*						
+	do std-default-production-routing-header 
+		parameters production-routing-header.*
+		returning production-routing-header.*
+end-procedure
+
+procedure std-default-production-routing-header 
+parameters
+	production-routing-header.*			global
+returning
+	production-routing-header.*						
+	set prh-lot-size = 1
+	set prh-created-date-time = gmt()
+	set prh-date-time-stamp = gmt()
+	set prh-user-id = str(uid())
+end-procedure
+
+
+
+//------------------------------------------------------------
+//  production-routing
+//------------------------------------------------------------
+
+procedure clibvimport-validate-production-routing export
+parameters
+	production-routing.*			global
+returning
+	lr-status							pic x
+	lr-message							pic x(500)
+	do std-validate-production-routing 
+		parameters production-routing.*
+		returning lr-status lr-message
+end-procedure
+
+procedure std-validate-production-routing 
+parameters
+	production-routing.*			global
+returning
+	lr-status							pic x
+	lr-message							pic x(500)
+	get production-work-centre
+		key is main-work-centre
+	on error ENOREC
+		set lr-status = "E"
+		set lr-message = "Invalid Main Work Centre"
+		exit 1
+	endon
+	get production-work-centre
+		key is alt-work-centre
+	on error ENOREC
+		set lr-status = "E"
+		set lr-message = "Invalid Alternative Work Centre"
+		exit 1
+	endon
+	get production-operations
+		key is prod-op-code
+	on error ENOREC
+		set lr-status = "E"
+		set lr-message = "Invalid Operation"
+		exit 1
+	endon
+end-procedure
+
+procedure clibvimport-default-production-routing export
+parameters
+	production-routing.*			global
+returning
+	production-routing.*						
+	do std-default-production-routing 
+		parameters production-routing.*
+		returning production-routing.*
+end-procedure
+
+procedure std-default-production-routing 
+parameters
+	production-routing.*			global
+returning
+	production-routing.*						
+	set prod-op-sequence-no = 1
+	set prod-route-effect-start-date = today()
+	set prod-route-multiplier = 1
+	SETDEFAULT(prod-route-effect-end-date,0,max-value(prod-route-effect-end-date))
+end-procedure
+
+
+//------------------------------------------------------------
+//  mailer-forecast-names
+//------------------------------------------------------------
+
+procedure clibvimport-validate-mailer-forecast-names export
+parameters
+	mailer-forecast-names.*			global
+returning
+	lr-status							pic x
+	lr-message							pic x(500)
+	do std-validate-mailer-forecast-names 
+		parameters mailer-forecast-names.*
+		returning lr-status lr-message
+end-procedure
+
+procedure std-validate-mailer-forecast-names 
+parameters
+	mailer-forecast-names.*			global
+returning
+	lr-status							pic x
+	lr-message							pic x(500)
+	get mailer-names
+		key is mfn-name-seq
+	on error ENOREC
+		set lr-status = "E"
+		set lr-message = "Invalid Name ID"
+		exit 1
+	endon
+	get mailer-forecasts
+		key is mailer-forecast-no
+	on error ENOREC
+		set lr-status = "E"
+		set lr-message = "Invalid Mailer Forecast"
+		exit 1
+	endon
+end-procedure
+
+procedure clibvimport-default-mailer-forecast-names export
+parameters
+	mailer-forecast-names.*			global
+returning
+	mailer-forecast-names.*						
+	do std-default-mailer-forecast-names 
+		parameters mailer-forecast-names.*
+		returning mailer-forecast-names.*
+end-procedure
+
+procedure std-default-mailer-forecast-names 
+parameters
+	mailer-forecast-names.*			global
+returning
+	mailer-forecast-names.*						
+	set prod-op-sequence-no = 1
+	set mfn-name-user-id = login-id()
+	set mfn-name-date-time = gmt()
+end-procedure
+

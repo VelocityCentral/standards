@@ -1,0 +1,1186 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : Mobile Timesheet Entry
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2021
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: mobile/timesheet.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 27Apr21  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+#include "include/irmsdefines.spl"
+#include "include/i85tsdef.spl"
+#include "include/i8gparam.spl"
+#include "../include/i8secok.spl"
+
+link "clib/clibres"
+
+#define SUOT_CONFIG_TYPE 'MOBTS'
+
+//object resource-rates-copy like resource-rates // required for self joins because "AS" alias does not work properly.
+ 
+field
+	ws-function-title					type string
+	ws-nearestmins						type number
+	ws-default-work-rate				like rtd-employee-work-rate
+	ws-default-work-category			like rtd-employee-work-category
+	ws-default-award-code				like rtd-award-code
+	ws-default-shift-code				like rtd-shift-code
+	ws-default-maximum-days-past		type number
+	ws-default-serivce-start-code		like rtd-start-code
+	ws-default-service-stop-code		like rtd-stop-code
+	ws-ZUSR-M008						type boolean
+
+mode md-entry
+	prompt "Entry"
+mode md-correct
+	prompt "Correct"
+mode md-totals
+	prompt "Totals"
+mode md-finish
+	prompt "Finish"
+	help "Record task as finished"
+	process correct
+mode md-manu
+	prompt "Mfg"
+	help "Record Manufacturing Labour"
+mode md-equipment
+	prompt "E&quipment"
+	help "Enter / Maintain Equipment Transactions"
+
+
+procedure main
+local
+	lf-config-mode						type boolean
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8secabt-check-abort
+		parameters are sys-consolidation-division login-id() "ZMOB" "M007"
+		returning ws-function-title 
+	do i8secok-check-ok parameters
+		sys-consolidation-division login-id() "ZMOB" "M008"
+		returning ws-ZUSR-M008
+	do i8proglog-write-log
+	I8GPARAM_FLAG("-config",FALSE,lf-config-mode)
+	if lf-config-mode
+		if not ws-ZUSR-M008
+			abort "Insufficient security to access timesheet configuration (ZMOB.M008)"
+		endif
+		do config-timesheet-application
+		exit
+	endif
+	do get-current-on-resource-master
+	if exit-status != 0
+		exit
+	endif
+	set ws-function-title = rms-description
+// This sample is for projects.  May need different code for service calls
+// etc.
+	do set-ws-defaults
+	do timesheet-dg
+end-procedure
+
+procedure get-current-on-resource-master
+local
+	lf-cf-sql-login-id						like rms-user-id
+	lf-resource-no							like resource-no
+	// note that login id is not a unique key.
+	set lf-cf-sql-login-id = login-id()
+	select * from resource-master
+		where rms-user-id = :lf-cf-sql-login-id
+	detail
+		set lf-resource-no = resource-no
+	end-select
+	get resource-master
+		on index resource-no
+		key is lf-resource-no
+	on error ENOREC
+		message-box param-text("<<P1>><<BR>><<p2>>"
+			,"You are not registered in the system"
+			,"Please see IT to get registered")
+			title is ws-function-title
+			message-buttons  MSG_BOX_CANCEL
+			icon MSG_BOX_STOP
+		exit 1
+	else
+		if rms-timesheets-used != YES
+			message-box param-text("<<P1>><<BR>><<p2>>"
+				,"You are not configured for timesheet use"
+				,"Please see IT to get this resolved")
+				title is ws-function-title
+				message-buttons  MSG_BOX_CANCEL
+				icon MSG_BOX_STOP
+			exit 1
+		endif
+	endon
+end-procedure
+
+//
+// ********************************************************************************
+// *                                                                              *
+// *                                                                              *
+// *   Resource  Transactions                                                     *
+// *                                                                              *
+// *                                                                              *
+// ********************************************************************************
+//
+ 
+
+screen timesheet-dg
+local
+	lf-sql-cf-date						type date
+	window
+		title ws-function-title
+	datagrid
+	select * from resource-timesheet-details
+		where rtd-record-status = "0"
+		and rtd-employee-no = :rms-employee-no
+		and rtd-date-worked >= lf-sql-cf-date
+		order by rtd-record-no // rtd-date-worked rtd-end-time
+	allowed md-entry md-correct 
+		// md-totals 
+		md-finish 
+		remove
+		md-manu
+		md-equipment
+		next prev
+	no-prompt-for-search
+before
+	set lf-sql-cf-date = today - ws-default-maximum-days-past
+	do get-current-on-resource-master
+detail
+	if screenmode = md-manu
+		spl "bom/m95prodent" parameters "-pf" "-worder" "-rf" 8
+	endif
+	if screenmode = md-entry
+		do timesheet-line entry once parameters are 0
+	endif
+	if screenmode = md-correct
+		do timesheet-line correct parameters rtd-record-no
+	endif
+	if screenmode = md-finish
+		if rtd-date-worked != today()
+			message-box param-text("<<P1>><<BR>><<p2>>"
+				,"This function is only available"
+				,"for time entered today")
+				title is ws-function-title
+				message-buttons  MSG_BOX_CANCEL
+				icon MSG_BOX_STOP
+		else
+			do get-nearest-time parameters are tod(), ws-nearestmins returning rtd-end-time
+		endif
+	endif
+	if screenmode = md-equipment
+		do equipment-dg
+	endif
+	accept rtd-record-no  col 1
+		title "Seq"
+		when screenmode = search
+		show-value
+	display rtd-date-worked  col 3 pic "ddmmm"
+		title "Date"
+	display rtd-start-time col 4
+		title "Start"
+	display rtd-end-time col 5
+		title "End"
+	display rtd-type col 6
+		title "Type"
+	display rtd-job-code col 7
+		title "Job/Call"
+	display if-then-else(rtd-type = "L", rtd-allowance-hours,rtd-total-hours-calculated) col 8
+		title "Elapsed"
+	confirm auto
+	end-confirm
+end-screen
+
+screen timesheet-line
+parameters
+	lp-line-no						like rtd-record-no
+local
+	lf-user-id						like rms-user-id
+	lf-enter-time					type boolean
+	lf-enter-allowance					type boolean
+	//
+	window
+	title ws-function-title
+	select * from resource-timesheet-details
+		where rtd-record-no = :lp-line-no
+	responsive
+before
+	set lf-user-id = login-id()
+	set lf-enter-time = TRUE
+	set lf-enter-allowance = FALSE
+	do get-current-on-resource-master
+detail
+	if screenmode = correct
+		if rtd-type = I85TSDEF_POSTS_ALLOWANCE
+			set lf-enter-time = FALSE
+			set lf-enter-allowance = TRUE
+		endif
+	endif
+		refresh whens
+	screen-group // ----General ----------------------------
+		title "General"
+		accept rtd-date-worked
+			title "Date"
+			default rtd-date-worked
+		before-accept
+			if screenmode = form-entry-defaults
+				set rtd-date-worked = today()
+			endif
+		end-before-accept
+		accept rtd-type 
+			title "Type"
+			help "The Type of Work"
+			uppercase
+			default rtd-type
+			when screenmode = entry
+			show-value
+		before-accept
+			if screenmode = form-entry-defaults
+				set rtd-type = "W"
+			endif
+		end-before-accept
+		drop-down
+			width 38
+			concat-title
+			select sys-tbl-code,sys-description 
+				from system-table
+				where sys-tbl-type = 'TI' and sys-tbl-code < "~"
+		end-drop-down
+		on change
+			if rtd-type = I85TSDEF_POSTS_ALLOWANCE
+				set lf-enter-time = FALSE
+				set lf-enter-allowance = TRUE
+			else
+				set lf-enter-time = TRUE
+				set lf-enter-allowance = FALSE
+			endif
+			refresh whens
+		endon
+		field-group // ---- Source ----------------------------
+			title "Source"
+			radio-button rtd-job-call-none
+				"S" title  "Call"
+				"J" title  "Project"
+				default rtd-job-call-none
+				when screenmode = entry
+				before-radio-button
+					if screenmode = form-entry-defaults
+						set rtd-job-call-none = "J"
+					endif
+				end-before-radio-button
+				on change
+					refresh whens
+				endon
+			end-radio-button 
+		end-field-group // ---- Source --------------------------------------
+	end-screen-group // ---- General --------------------------------------
+	screen-group // ---- Time ----------------------------
+		title "Time"
+		horizontal
+		when lf-enter-time
+		accept rtd-start-time
+			title "Start"
+			help "Time Started on this task"
+			default rtd-start-time
+		before-accept
+			if screenmode = form-entry-defaults
+				do get-last-time-for-day parameters are
+					rtd-date-worked
+					returning rtd-start-time
+				do get-nearest-time parameters are rtd-start-time, ws-nearestmins
+					returning rtd-start-time
+			endif
+		end-before-accept
+//		validations
+			// need to check that start time is not less than previous end
+			// time
+//		end-validations 
+		on change
+			do get-nearest-time parameters are rtd-start-time, ws-nearestmins
+				returning rtd-start-time
+			refresh rtd-start-time
+		endon
+		accept rtd-end-time
+			title "End"
+			help "Time Ended on this task"
+			default rtd-end-time
+		before-accept
+			if screenmode = form-entry-defaults
+				do get-nearest-time parameters are tod(), ws-nearestmins
+					returning rtd-end-time
+			endif
+		end-before-accept
+//		validations
+			// need to check that start time is not less than previous end
+			// time
+//		end-validations 
+		on change
+			do get-nearest-time parameters are rtd-end-time ws-nearestmins
+				returning rtd-end-time
+			refresh rtd-end-time
+		endon
+	end-screen-group // ---- Time --------------------------------------
+	screen-group // ---- Qty ----------------------------
+		title "Allowance"
+		when lf-enter-allowance
+		accept rtd-allowance-code
+			title "Type"
+			uppercase
+			help "Choose the allowance code"
+			default rtd-allowance-code
+		drop-down
+			width 38
+			concat-title
+			select 
+				t0.rma-allowance-code , t1.sys-description
+				from resource-master-allowance  as t0
+				left outer join system-table as t1 on t1.sys-tbl-type = "SA" and t1.sys-tbl-code = t0.rma-allowance-code
+				where resource-no = :resource-no
+		end-drop-down
+		on change
+			set rtd-allowance-hours = 0
+			refresh rtd-allowance-hours
+			// this will ensure that the on-change event always occurs
+			// in the allowance hours
+		endon
+		accept rtd-allowance-hours
+			title "Qty"
+			help 'Enter qty of allowance'
+		validations
+			if rtd-allowance-hours = 0
+				message-box "The Qty must not be zero"
+					title is ws-function-title
+					message-buttons  MSG_BOX_RETRY
+					icon MSG_BOX_STOP
+				re-enter 
+			endif
+		end-validations
+	end-screen-group // ---- Qty --------------------------------------
+	screen-group // ---- Job ----------------------------
+		title "Job"
+		when rtd-job-call-none = "J"
+		accept rtd-job-code // @1,1  // in col 1 (dg)
+			title "Job"
+			help "Select Valid Job"
+			uppercase
+			default rtd-job-code
+		drop-down
+			width 38
+			concat-title
+			select 
+				job-code, job-cost-description
+			from 
+				job-cost-master
+				inner join system-user-masking-access
+			on 
+				job-cost-master.job-branch = system-user-masking-access.suma-code
+			where 
+				jcm-status in {"I","S"}
+				and (job-type in {"N" "C" "M" "T"}) 
+				and system-user-masking-access.suma-comp-code = :sys-consolidation-division
+				and system-user-masking-access.suma-mask-type = 'JB'
+				and system-user-masking-access.suma-user-id = :lf-user-id
+			order by
+				job-code
+		end-drop-down
+		before-accept
+			if screenmode = form-entry-defaults
+				set rtd-job-code = spaces
+			endif
+		end-before-accept
+		accept rtd-job-cost-centre
+			title "Cost Cat"
+			help "Cost Code for this project"
+			uppercase
+			when rtd-job-code != spaces
+			no-warning
+		drop-down
+			width 38
+			concat-title
+			dynamic
+			select t0.job-cost-centre,
+				t1.sys-account-name
+				from job-cost-centre-budget-actual as t0
+				left join special-accounts as t1 on t1.s-acc-name = concat('JC.' t0.job-cost-centre)
+				where sql-substring(sys-account-type,1,1) = 'L'
+				and t0.job-code = :rtd-job-code
+		end-drop-down
+		before-accept
+			if screenmode = form-entry-defaults
+				set rtd-job-cost-centre = spaces
+			endif
+		end-before-accept
+		accept rtd-cbs-section-code
+			title "CBS"
+			help "Select CBS for Job"
+			uppercase
+			when rtd-job-cost-centre != spaces
+			no-warning
+		drop-down
+			dynamic
+			width 38
+			concat-title
+			select jcb-section-code, jcb-description
+				from job-cost-breakdown
+				where jcb-type = 'JC'
+				and jcb-job-code = :rtd-job-code
+				and jcb-cost-category = :rtd-job-cost-centre
+		end-drop-down
+		before-accept
+			if screenmode = form-entry-defaults
+				set rtd-cbs-section-code = spaces
+			endif
+		end-before-accept
+	end-screen-group // ---- Job --------------------------------------
+	screen-group // ---- Call ----------------------------
+		title "Call"
+		when rtd-job-call-none = "S"
+		accept rtd-call-no
+			title "Call"
+			help "Select Call Number"
+		drop-down
+			width 38
+			concat-title
+			select t0.call-no, concat(t1.customer-code, "-", t1.call-service-access-no)
+				from service-multiple-engineer as t0
+				inner join service-call-master as t1 on t0.call-no = t1.call-no
+				where t0.sme-engineer-no = :rms-engineer-no
+		end-drop-down
+		before-accept	
+			// get engineer code from resource-master
+		end-before-accept
+		on change
+			set rtd-job-code = str(rtd-call-no)
+		endon
+		accept rtd-job-cost-centre
+			title "Cost Cat"
+			help "Cost Code for this project"
+			uppercase
+			when rtd-job-code != spaces
+			no-warning
+		drop-down
+			width 38
+			concat-title
+			dynamic
+			select t0.job-cost-centre,
+				t1.sys-account-name
+				from job-cost-centre-budget-actual as t0
+				left join special-accounts as t1 on t1.s-acc-name = concat('JC.' t0.job-cost-centre)
+				where sql-substring(sys-account-type,1,1) = 'L'
+				and t0.job-code = :rtd-job-code
+		end-drop-down
+		before-accept
+			if screenmode = form-entry-defaults
+				set rtd-job-cost-centre = spaces
+			endif
+		end-before-accept
+	end-screen-group // ---- Call --------------------------------------
+	confirm 
+		auto
+	before 
+		do set-rtd-defaults
+		if screenmode = entry
+			// get next rtd seq
+			do clibres-get-next-timesheet-record-no
+				parameter rtd-resource-no
+				returning rtd-record-no
+		endif
+	confirmed
+	end-confirm 
+end-screen
+
+procedure set-rtd-defaults
+local
+	lf-work-rate						like rtd-employee-work-rate
+	lf-employee-work-category			like rtd-employee-work-category
+	lf-award-code						like rtd-award-code
+	lf-shift-code						like rtd-shift-code
+	set lf-work-rate = ws-default-work-rate
+	set lf-employee-work-category = ws-default-work-category
+	set lf-award-code  = ws-default-award-code
+	set lf-shift-code = ws-default-shift-code
+	if rms-type = "P"
+		get payroll-employee-details
+			on index employee-no
+			key is rms-employee-no
+		on error
+		endon
+		set lf-work-rate = em-work-rate-code
+		set lf-employee-work-category = em-category-code
+		set lf-award-code = rms-award-code
+		select lf-shift-code = min(ras-shift-code)
+			from resource-award-shift
+			where rawm-award = :lf-award-code
+		end-select
+	endif
+	set rtd-resource-no = resource-no
+	set rtd-record-status = "0"
+	set rtd-employee-no = rms-employee-no
+	set rtd-employee-work-rate = lf-work-rate
+	set rtd-employee-work-category = lf-employee-work-category
+	set rtd-award-code = lf-award-code
+	set rtd-shift-code = lf-shift-code
+	set rtd-gl-accountcode = str-concat(rtd-job-code, "." , rtd-job-cost-centre)
+	set rtd-user-id = login-id
+	set rtd-manually-entered = YES
+	set rtd-date-time-stamp = gmt()
+	set rtd-total-hours-calculated = (rtd-end-time - rtd-start-time) / 3600
+	if rtd-type = "L"
+		get resource-award-allowance
+			on index rawm-award raa-allowance-code
+			key is rms-award-code rtd-allowance-code
+		on error ENOREC // can'r really happen
+		else
+			set rtd-details = str-concat("Allow:" rtd-allowance-code)
+			set rtd-reference = "ALLOW"
+			set rtd-allowance-rate = raa-amount
+			get system-table
+				on index sys-tbl-type sys-tbl-code
+				key is "SA" raa-allowance-code
+			on error ENOREC
+				set rtd-charge-out-rate-override = 0
+			else
+				if sys-tbl-alpha-4 = YES
+					set rtd-charge-out-rate-override = 1
+				endif
+			endon
+			set rtd-allowance-paycode = raa-paycode
+			set rtd-allowance-total-amount = rtd-allowance-rate * rtd-allowance-hours
+			set rtd-allowance-total-claimed = rtd-allowance-total-amount
+		endon
+	endif
+	if rtd-job-call-none = "S"
+		set rtd-start-code = ws-default-serivce-start-code
+		set rtd-stop-code = ws-default-service-stop-code
+	endif
+end-procedure
+
+procedure get-nearest-time
+parameters
+	lp-time								type time
+	lp-nearest-mins						type number 
+returning
+	lr-time								type time
+local
+	lf-minutes							type number
+	set lf-minutes = minute(lp-time)
+	//
+	if fraction(lf-minutes / lp-nearest-mins) >= 0.5
+		set lf-minutes = (integer(lf-minutes / lp-nearest-mins) + 1) * lp-nearest-mins
+	else
+		set lf-minutes = (integer(lf-minutes / lp-nearest-mins)) * lp-nearest-mins
+	endif
+	set lr-time = (hour(lp-time) * 3600 ) + ( lf-minutes * 60)
+end-procedure
+	
+procedure get-last-time-for-day
+parameters
+	lp-date								type date
+returning
+	lr-time								type time
+	//
+	select lr-time = max(rtd-end-time)
+		from resource-timesheet-details
+		where rtd-resource-no = :resource-no
+		and rtd-date-worked = :lp-date
+		and rtd-type != I85TSDEF_POSTS_ALLOWANCE
+	end-select
+	if lr-time = 0
+		set lr-time = tod()
+	endif
+end-procedure
+
+procedure set-ws-defaults
+	do check-and-create-config-records
+	get system-user-only-table
+		on index suot-tbl-type suot-tbl-code
+		key is SUOT_CONFIG_TYPE "EMP"
+	on error
+		message-box param-text("<<P1>><<BR>><<p2>>"
+			,"There is a problem in the configuration function"
+			,"Report to IT")
+			title is ws-function-title
+			message-buttons  MSG_BOX_CANCEL
+			icon MSG_BOX_STOP
+		exit
+	endon
+	set ws-nearestmins = suot-numeric1
+	set ws-default-maximum-days-past = suot-numeric2
+	set ws-default-work-rate = suot-alpha-4-1
+	set ws-default-work-category = suot-alpha-4-2
+	set ws-default-shift-code = suot-alpha-4-3
+	set ws-default-shift-code = suot-alpha-4-4
+	set ws-default-serivce-start-code = substring(suot-alpha-4-5,1,1)
+	set ws-default-service-stop-code = substring(suot-alpha-4-5,2,2)
+end-procedure
+
+//
+// ********************************************************************************
+// *                                                                              *
+// *                                                                              *
+// *   Equipment Transactions                                                     *
+// *                                                                              *
+// *                                                                              *
+// ********************************************************************************
+//
+ 
+screen equipment-dg
+local
+	lf-login-id							type string
+	lf-sql-cf-date						type date
+	window
+	datagrid
+	title ws-function-title
+	select 
+		t0.reqt-record-id
+		t0.resource-no
+		t1.resource-master-code
+		t1.rms-description
+		t0.reqt-date
+		t0.reqt-start-time
+		t0.reqt-end-time
+		t0.reqt-qty-unit
+		t0.reqt-qty
+		from resource-equipment-trans as t0
+		inner join resource-master as t1 on t0.resource-no = t1.resource-no
+		where t0.reqt-status = IRMSDEFINES_RESOURCE_TIMESHEET_STATUS_ENTERED
+		and t0.reqt-date >= lf-sql-cf-date
+		and t0.reqt-user-id = :lf-login-id
+	allowed search md-entry next prev md-correct remove
+	no-prompt-for-search
+before
+	set lf-login-id = login-id()
+	set lf-sql-cf-date = today - ws-default-maximum-days-past
+detail
+	if screenmode = md-entry
+		do enter-equipment-trans entry once parameter 0
+	endif
+	if screenmode = md-correct
+		do enter-equipment-trans correct once parameters are reqt-record-id
+	endif
+	accept reqt-record-id  col 1
+		title "ID"
+		when screenmode = search
+		show-value
+	display  resource-master-code col 2
+		title "Equip"
+	display reqt-date col 3 pic ddmmm
+		title "Date"
+	display reqt-qty-unit col 4
+		title "UOM"
+	display reqt-qty col 5 pic z(4)
+		title "Qty"
+end-screen
+
+screen enter-equipment-trans
+parameters are 	
+	lp-record-id						like reqt-record-id
+local
+	lf-enter-time						type boolean
+	lf-user-id							type string
+	lf-qty								type number
+	window
+	responsive
+	title ws-function-title
+	//
+	select * from resource-equipment-trans
+		where reqt-record-id = :lp-record-id
+before
+	set lf-enter-time = FALSE
+	set reqt-job-code = IRMSDEFINES_RESOURCE_TIMESHEET_FOR_PROJECT
+	set lf-user-id = login-id
+detail
+	if screenmode = correct
+		set lf-enter-time = FALSE
+		refresh whens
+	endif
+	screen-group // ---- Item ----------------------------
+		title "Item"
+		accept resource-no pic z(9)
+			title "Resource"
+			help "Enter the resource ID"
+			default resource-no
+			drop-down
+				width 38
+				concat-title
+				select resource-no, concat(resource-master-code ":" rms-description)
+					from resource-master
+					where rms-type = "E"
+			end-drop-down
+			validations
+				// there must be at least one cost rate that also has a
+				// support charge out rate
+				select lf-qty = count(*) 
+					from resource-rates as t0
+					where t0.resource-no = :resource-no
+					and t0.rr-type = IRMSDEFINES_COST_RATE_CODE				
+					and exists (select 1 
+								from resource-rates as t1
+								where t1.resource-no = t0.resource-no
+								and t1.rr-uom = t0.rr-uom
+								and t1.rr-type = IRMSDEFINES_CHARGEOUT_RATE_CODE	)
+				end-select
+				if lf-qty = 0
+					message-box param-text("<<P1>><<BR>><<p2>>"
+						,"This resource has not been correctly configured."
+						,"Refer this to the system administrator")
+						title is ws-function-title
+						message-buttons  MSG_BOX_CANCEL
+						icon MSG_BOX_STOP
+					re-enter resource-no
+				endif
+			end-validations
+		accept reqt-date
+			title "Date"
+			help "date"
+			default today()
+			show-value
+		field-group // ---- Source ----------------------------
+			title "Source"
+			radio-button reqt-type
+				IRMSDEFINES_RESOURCE_TIMESHEET_FOR_SERVICE_CALL title "Call"
+				IRMSDEFINES_RESOURCE_TIMESHEET_FOR_PROJECT title "Project"
+				default reqt-type
+				before-radio-button
+					if screenmode = form-entry-defaults
+						set reqt-type = IRMSDEFINES_RESOURCE_TIMESHEET_FOR_PROJECT
+					endif
+				end-before-radio-button
+				on change
+					refresh whens
+				endon
+			end-radio-button 
+		end-field-group // ---- Source --------------------------------------
+	end-screen-group // ---- General --------------------------------------
+	screen-group // ---- Units ----------------------------
+		title "Units"
+		accept reqt-qty-unit // @1,1  // in col 1 (dg)
+			title "Units"
+			help "Select the Unit of Measure"
+			uppercase
+			default reqt-qty-unit
+		before-accept
+			if screenmode = form-entry-defaults
+				// get the first Unit for which there is a charge unit
+				select reqt-qty-unit = min(rr-uom)
+					from resource-rates as t0
+					where t0.resource-no = :resource-no
+					and t0.rr-type = IRMSDEFINES_COST_RATE_CODE				
+					and exists (select 1 
+								from resource-rates as t1
+								where t1.resource-no = t0.resource-no
+								and t0.rr-uom  = t1.rr-uom
+								and t1.rr-type = IRMSDEFINES_CHARGEOUT_RATE_CODE	)
+				end-select
+			endif
+		end-before-accept
+		drop-down
+			width 38
+			select rr-uom
+				from resource-rates as t0
+				where t0.resource-no = :resource-no
+				and t0.rr-type = IRMSDEFINES_COST_RATE_CODE				
+				and exists (select 1 
+							from resource-rates as t1
+							where t1.resource-no = t0.resource-no
+							and t0.rr-uom  = t1.rr-uom
+							and t1.rr-type = IRMSDEFINES_CHARGEOUT_RATE_CODE	)
+		end-drop-down
+		accept reqt-qty pic z(5)
+			title "Qty"
+			help "Enter the qty required"
+			default 0
+	end-screen-group // ---- Units --------------------------------------
+	screen-group // ---- Job ----------------------------
+		title "Job"
+		when reqt-type = IRMSDEFINES_RESOURCE_TIMESHEET_FOR_PROJECT
+		accept reqt-job-code // @1,1  // in col 1 (dg)
+			title "Job"
+			help "Select Valid Job"
+			uppercase
+			default reqt-job-code
+		drop-down
+			width 38
+			dynamic
+			concat-title
+			select 
+				job-code, job-cost-description
+			from 
+				job-cost-master
+				inner join system-user-masking-access
+			on 
+				job-cost-master.job-branch = system-user-masking-access.suma-code
+			where 
+				jcm-status in {"I","S"}
+				and (job-type in {"N" "C" "M" "T"}) 
+				and system-user-masking-access.suma-comp-code = :sys-consolidation-division
+				and system-user-masking-access.suma-mask-type = 'JB'
+				and system-user-masking-access.suma-user-id = :lf-user-id
+			order by
+				job-code
+		end-drop-down
+		before-accept
+			if screenmode = form-entry-defaults
+				set reqt-job-code = spaces
+			endif
+		end-before-accept
+		accept reqt-cost-category
+			title "Cost Cat"
+			help "Cost Code for this project"
+			uppercase
+			when reqt-job-code != spaces
+			no-warning
+		drop-down
+			width 38
+			concat-title
+			dynamic
+			select t0.job-cost-centre,
+				t1.sys-account-name
+				from job-cost-centre-budget-actual as t0
+				left join special-accounts as t1 on t1.s-acc-name = concat('JC.' t0.job-cost-centre)
+				where sql-substring(sys-account-type,1,1) = 'L'
+				and t0.job-code = :reqt-job-code
+		end-drop-down
+		before-accept
+			if screenmode = form-entry-defaults
+				set reqt-cost-category = spaces
+			endif
+		end-before-accept
+		/*
+		 CBS Not supported for equipment transactions
+		*/
+	end-screen-group // ---- Job --------------------------------------
+	screen-group // ---- Call ----------------------------
+		title "Call"
+		when reqt-type = IRMSDEFINES_RESOURCE_TIMESHEET_FOR_SERVICE_CALL
+		accept reqt-job-code
+			title "Call"
+			help "Select Call Number"
+		drop-down
+			width 38
+			concat-title
+			select job-code, concat(accountcode, "-", job-cost-description)
+				from job-cost-master
+				where job-type = "S"
+		end-drop-down
+		before-accept	
+			// get engineer code from resource-master
+		end-before-accept
+	end-screen-group // ---- Call --------------------------------------
+	confirm 
+		auto
+	before 
+		// Set the defaults
+		// defaults for entry mode
+		if screenmode = entry
+			// get next rtd seq
+			do clibres-get-next-equipment-trans-record-no 
+				parameter resource-no
+				returning	reqt-record-id
+			set reqt-reference = login-id
+			set reqt-details = str-concat(
+				"Entered via Mobile by:" login-id
+				" at " format-picture(today(), "dd/mm/yy")
+				"-" format-picture(tod(),"HH:MM"))
+			set reqt-user-id = login-id
+		endif
+		// values changed whether in entry or correct
+		set reqt-status = IRMSDEFINES_RESOURCE_TIMESHEET_STATUS_ENTERED
+		set reqt-cost-qty = reqt-qty
+		get resource-rates
+			on index resource-no  rr-type rr-uom
+			key is resource-no IRMSDEFINES_COST_RATE_CODE reqt-qty-unit
+		on error
+			// should not happen as checked above
+		else
+			set reqt-cost-rate = rr-rate
+		endon
+		set reqt-chargeout-unit = reqt-qty-unit
+		set reqt-charge-out-qty = reqt-qty
+		get resource-rates
+			on index resource-no  rr-type rr-uom
+			key is resource-no IRMSDEFINES_CHARGEOUT_RATE_CODE reqt-qty-unit
+		on error
+			// should not happen as checked above
+		else
+			set reqt-charge-out-rate = rr-rate
+		endon
+		set reqt-manually-entered = 0
+	confirmed
+	end-confirm 
+end-screen
+
+//
+// ********************************************************************************
+// *                                                                              *
+// *                                                                              *
+// *   Application Configuration Section                                          *
+// *                                                                              *
+// *                                                                              *
+// ********************************************************************************
+//
+
+procedure config-timesheet-application
+	do check-and-create-config-records
+	get system-user-only-table
+		on index suot-tbl-type suot-tbl-code
+		key is SUOT_CONFIG_TYPE "EMP"
+	on error
+		message-box param-text("<<P1>><<BR>><<p2>>"
+			,"There is a problem in the configuration function"
+			,"Report to IT")
+			title is ws-function-title
+			message-buttons  MSG_BOX_CANCEL
+			icon MSG_BOX_STOP
+		exit
+	endon
+	do maintain-configuration correct once
+		parameters are 
+			suot-numeric1
+			suot-numeric2
+			suot-alpha-4-1
+			suot-alpha-4-2
+			suot-alpha-4-3
+			suot-alpha-4-4
+			suot-alpha-4-5
+end-procedure
+
+screen maintain-configuration
+parameters
+	lp-nearestmins						type number
+	lp-dayspast							type number
+	lp-default-work-rate				like rtd-employee-work-rate
+	lp-default-work-category			like rtd-employee-work-category
+	lp-default-award-code				like rtd-award-code
+	lp-default-shift-code				like rtd-shift-code
+	lp-service-codes					like suot-alpha-4-5
+local
+	lf-default-service-start-code		pic x
+	lf-default-service-stop-code		pic x
+	window
+	title "Mobile Timesheet Configuration"
+	responsive
+before
+	set lf-default-service-start-code = substring(lp-service-codes,1,1)
+	set lf-default-service-stop-code = substring(lp-service-codes,2,2)
+detail
+	screen-group // ---- Time ----------------------------
+		title "Time"
+		accept lp-nearestmins pic z(5)
+			title "Nearest time amount"
+			help "Time will be rounded to the nearest of these minutes"
+			default lp-nearestmins
+	end-screen-group // ---- Time --------------------------------------
+	screen-group // ---- Calendar Window ----------------------------
+		title "Calendar Window"
+		accept lp-dayspast pic z(5)
+			title "Days Past to display"
+			help "Only records less than or equal to this number of days will be displayed"
+			default lp-dayspast
+	end-screen-group // ---- Group Title --------------------------------------
+	screen-group // ---- Default Codes ----------------------------
+		title "Default Codes"
+		accept lp-default-work-rate
+			title "Default Work Rate"
+			default lp-default-work-rate
+			help "Select the default work rate"
+			drop-down
+				width 38
+				concat-title
+				select em-work-rate-code, pr-desc 
+					from payroll-work-pay-rates
+			end-drop-down
+		accept  lp-default-work-category
+			title "Work Category"
+			default lp-default-work-category	
+			help "Select the default work category"
+			drop-down
+				width 38
+				concat-title
+				select pec-category-code, pec-desc
+					from payroll-employment-category 
+			end-drop-down
+		accept lp-default-award-code
+			title "Award"
+			default lp-default-award-code
+			help "Select the default Award Code"
+			drop-down
+				width 38
+				concat-title
+				select rawm-award, rawm-description
+					from resource-award-master 
+			end-drop-down
+			on change
+				// check the shift
+				get resource-award-shift
+					on index rawm-award ras-shift-code
+					key is lp-default-award-code lp-default-shift-code
+				on error ENOREC
+					// user changed the award for which the default shift is
+					// no longer valid
+					select lp-default-shift-code = min(ras-shift-code)
+						from resource-award-shift
+						where rawm-award = :lp-default-award-code
+					end-select
+					refresh lp-default-shift-code
+				endon
+			endon
+		accept lp-default-shift-code
+			title "Default Shift"
+			default lp-default-shift-code
+			help "Select the default shift for this award"
+			drop-down
+				width 38
+				dynamic
+				concat-title
+				select ras-shift-code, ras-description
+					from resource-award-shift 
+					where rawm-award = :lp-default-award-code
+			end-drop-down
+	end-screen-group // ---- Default Codes --------------------------------------
+	screen-group // ---- Service Codes ----------------------------
+		title "Service Codes"
+		accept lf-default-service-start-code
+			title "Service Start Code"
+			default lf-default-service-start-code
+			help "All Service timesheets will be added with this start code"
+			drop-down
+				width 38
+				concat-title
+				select sys-tbl-code, sys-description, 0 , 
+							,if-then-else(sys-tbl-inactive-date = ZERO_DATE_TIME,TRUE,FALSE)
+					from system-table 
+					where sys-tbl-type = "S1"
+			//	show-value
+			end-drop-down
+		accept lf-default-service-stop-code
+			title "Service End Code"
+			default lf-default-service-stop-code
+			help "All Service timesheets will be added with this end code"
+			drop-down
+				width 38
+				concat-title
+				select sys-tbl-code, sys-description, 0 , 
+							,if-then-else(sys-tbl-inactive-date = ZERO_DATE_TIME,TRUE,FALSE)
+					from system-table 
+					where sys-tbl-type = "S2"
+			//	show-value
+			end-drop-down
+	end-screen-group // ---- Service Codes --------------------------------------
+	confirm 
+	confirmed
+		get system-user-only-table
+			on index suot-tbl-type suot-tbl-code
+			key is SUOT_CONFIG_TYPE "EMP"
+			lock
+		on error
+		else
+			set suot-numeric1 = lp-nearestmins
+			set suot-numeric2 = lp-dayspast
+			set suot-alpha-4-1 = lp-default-work-rate
+			set suot-alpha-4-2 = lp-default-work-category
+			set suot-alpha-4-3 = lp-default-award-code
+			set suot-alpha-4-4 = lp-default-shift-code
+			set suot-alpha-4-5 = concat(lf-default-service-start-code, lf-default-service-stop-code)
+			update system-user-only-table
+			on error
+			endon
+		endon
+	end-confirm 
+end-screen
+
+procedure check-and-create-config-records
+local
+	lf-start-code						pic x
+	lf-stop-code						pic x
+	//
+	get system-user-only-table-types
+		on index suot-tbl-type
+		key is SUOT_CONFIG_TYPE
+		lock
+	on error ENOREC
+		initialise system-user-only-table-types
+		set suot-tbl-type = SUOT_CONFIG_TYPE
+		insert system-user-only-table-types
+		on error
+		endon
+	endon
+	//
+	get system-user-only-table-types
+		on index suot-tbl-type
+		key is SUOT_CONFIG_TYPE
+		lock
+	on error
+		message-box param-text("<<P1>><<BR>><<p2>>"
+			,"There is a problem in the configuration function"
+			,"Report to IT")
+			title is ws-function-title
+			message-buttons  MSG_BOX_CANCEL
+			icon MSG_BOX_STOP
+		exit
+	else
+		set suott-description = "Mobile Timesheet Configurations"
+		set suott-maint-option = 1
+		set suott-min-code-size = 1
+		set suott-max-code-size = 10
+		set suott-code-format = "A"
+		set suott-title-numeric1 = "Nearest Mins"
+		set suott-title-numeric2 = "Maximum days past"
+		set suott-title-alpha41 = "Deflt Work Rate Code"
+		set suott-title-alpha42 = "Deflt Category Code"
+		set suott-title-alpha43 = "Default Award Code"
+		set suott-title-alpha44 = "Default Shift Code"
+		set suott-title-alpha45 = "Service StrtEnd Code"
+		update system-user-only-table-types
+		on error
+			message-box param-text("<<P1>><<BR>><<p2>>"
+				,"There is a problem in the configuration function"
+				,"Report to IT")
+				title is ws-function-title
+				message-buttons  MSG_BOX_CANCEL
+				icon MSG_BOX_STOP
+			exit
+		endon
+	endon
+	//  Now deal with the types
+	get system-user-only-table
+		on index suot-tbl-type suot-tbl-code
+		key is SUOT_CONFIG_TYPE "EMP"
+	on error ENOREC
+		initialise system-user-only-table
+			leaving suot-tbl-type suot-tbl-code
+		set suot-numeric1 = 5
+		set suot-numeric1 = 14
+		set suot-alpha-4-1 = "STD"
+		set suot-alpha-4-2 = "STD"
+		set suot-alpha-4-3 = "STD"
+		set suot-alpha-4-4 = "STD"
+		select lf-start-code = min(sys-tbl-code) from system-table where sys-tbl-type = "S1" end-select	
+		select lf-stop-code = min(sys-tbl-code) from system-table where sys-tbl-type = "S2" end-select	
+		set suot-alpha-4-5 = concat(lf-start-code,lf-stop-code)
+		insert system-user-only-table
+		on error
+			message-box param-text("<<P1>><<BR>><<p2>>"
+				,"There is a problem in the configuration function"
+				,"Report to IT")
+				title is ws-function-title
+				message-buttons  MSG_BOX_CANCEL
+				icon MSG_BOX_STOP
+			exit
+		endon
+	endon
+	//
+end-procedure

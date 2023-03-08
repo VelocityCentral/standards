@@ -1,0 +1,359 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : Datagrid paste in for supplier price change
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2020
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: stk/setsuppprice.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 23Dec20  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+
+#define DISPLAY_COLOUR \
+	colour if-then-else(s-status = "E", red, if-then-else( s-status = "V", green,0)) \
+		on \
+		if-then-else(s-status = "E", yellow, if-then-else( s-status = "V",0 ,0))
+
+ 
+field
+	ws-function-title						type string pic x(80)
+	ws-cre-accountcode						like cre-accountcode
+	ws-validated							type boolean
+
+object supp-price
+	type is memory
+	record
+		s-part-code						pic x(30) // could be stock code, bar code, supplier code
+		s-new-price						like sup-new-buy-price
+		s-stock-code					like stock-code
+		s-status						pic xx
+		s-message						pic x(1000) type string
+	end-record
+	key is s-part-code
+	key is s-stock-code
+
+mode md-validate
+	prompt "Validate"
+	help "You must validate before any updates can occur"
+mode md-update
+	prompt "Update"
+	help "Only validated records will be updated"
+	when ws-validated
+	always-show
+mode md-comparison
+	prompt "Comparison"
+	help "Display a comparison datagrid for analysis purposes"
+
+procedure main
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8secabt-check-abort
+		parameters are sys-consolidation-division login-id() "ZVG" "M016"
+		returning ws-function-title 
+	do i8proglog-write-log
+	do select-supplier entry once
+	get cre-master
+		on index cre-accountcode
+		key is ws-cre-accountcode
+	on error ENOREC
+	else
+		get cre-master
+			on index cre-accountcode
+			key is ws-cre-accountcode
+		on error
+			exit 1 // should never happen
+		else
+			string ws-function-title appending " Supplier:" 
+			string ws-function-title appending cre-accountcode
+			string ws-function-title appending ":" 
+			string ws-function-title appending cr-shortname
+		endon
+		do price-datagrid
+	endon
+end-procedure
+
+screen select-supplier
+	window
+		window-position 5
+		title ws-function-title
+	responsive
+detail
+	screen-group // ---- Select Supplier ----------------------------
+		accept ws-cre-accountcode 
+			title "Supplier"
+			drop-down
+				width 38
+				concat-title
+				select cre-accountcode, cr-shortname, 0 , 
+							,if-then-else(cr-account-status not in ("S" "H", "C" "V") ,TRUE,FALSE)
+					from cre-master 
+			end-drop-down
+	end-screen-group // ---- Select Supplier --------------------------------------
+end-screen
+
+screen price-datagrid
+local
+	lf-title 							pic x(60)
+	window
+		title ws-function-title
+	allowed search entry remove correct md-validate md-update md-comparison
+	datagrid
+	select * from supp-price
+before
+	close supp-price and remove
+	open supp-price temporary
+detail
+	if screenmode = md-validate
+		do validate-data
+	endif
+	if screenmode = md-update
+		do update-data
+		refresh data
+	endif
+	if screenmode = md-comparison
+		do comparison-analysis
+	endif
+	accept s-part-code @1,2
+		title "Part Code"
+		DISPLAY_COLOUR
+		help "Stock Code, Supplier part code, Bar Code, APN"
+	accept s-new-price @1,3
+		title "New Price"
+		DISPLAY_COLOUR
+	display s-status @1,4
+		title "Status"
+		DISPLAY_COLOUR
+	display s-message @1,5 pic x(50)
+		title "Message"
+		DISPLAY_COLOUR
+	display s-stock-code @1,6
+		title "Stock Code"
+		DISPLAY_COLOUR
+end-screen
+
+procedure validate-data
+	select * from supp-price
+		for update
+	detail
+		set s-stock-code = spaces
+		set s-status = spaces
+		set s-message = spaces
+		get stock-master
+			on index stock-code
+			key is s-part-code
+		on error
+			select *
+				from stock-supplier
+				where sup-stock-code = :s-part-code
+			detail 
+				// supplier stock code entered
+				set s-stock-code = stock-code
+				break
+			end-select
+			if s-stock-code = spaces
+				get stock-master
+					on index stk-apn-number
+					key is s-part-code
+				on error
+					set s-status = 'E'
+					set s-message = "Unable to determine stock code"
+				else // apn entered
+					set s-stock-code = stock-code
+				endon
+			endif
+		else // stock code entered
+			set s-stock-code = stock-code
+		endon
+		if s-status = spaces // all ok so far
+			get stock-supplier
+				on index stock-code cre-accountcode
+				key is s-stock-code ws-cre-accountcode
+			on error ENOREC
+				set s-status = "E"
+				set s-message = concat("This item not supplied by " ws-cre-accountcode)
+			endon
+		endif
+		if s-status = spaces // all ok so far
+			if s-new-price > 
+				(if-then-else(sup-new-buy-price > sup-last-buy-price, sup-new-buy-price, sup-last-buy-price) * 2)
+				set s-status = "W"
+				set s-message = "The new price is more than double the old price"
+			endif
+		endif
+		if s-status = spaces
+			set s-status = "V"
+		endif
+		update supp-price
+	end-select
+	set ws-validated = TRUE
+end-procedure
+
+screen get-update-parameters
+returning
+	lr-last-or-new					pic x // "L)ast N)ew"
+	lr-effective-date				type date
+local
+	lf-escaped						type boolean
+	//
+	window
+		window-position 5
+		title "Update Parameters"
+	responsive
+before
+	set lf-escaped = TRUE
+detail
+	screen-group // ---- Update Parameters ----------------------------
+		field-group // ---- Update Which Price ----------------------------
+			title "Update Which Price"
+			radio-button lr-last-or-new
+				"L" title  "Last Buy Price"
+				"N" title  "New Buy Price"
+				default lr-last-or-new
+				before-radio-button
+					if screenmode = form-entry-defaults
+						set lr-last-or-new = "N"
+					endif
+				end-before-radio-button
+				on change
+					refresh lr-effective-date
+				end-on
+			end-radio-button 
+		end-field-group // ---- Update Which Price --------------------------------------
+		accept  lr-effective-date
+			title "Effective Date"
+			when lr-last-or-new = "N"
+			default lr-effective-date
+			before-accept
+				if screenmode = form-entry-defaults
+					set lr-effective-date = today() + 7
+				endif
+			end-before-accept
+	end-screen-group // ---- Update Parameters --------------------------------------
+	confirm auto
+		set lf-escaped = FALSE
+	end-confirm
+after
+	if lf-escaped
+		exit 1
+	endif
+end-screen
+
+procedure update-data
+local
+	lf-last-or-new					pic x // "L)ast N)ew"
+	lf-effective-date				type date
+	lf-count						type number
+	lf-commit 						type boolean
+	do get-update-parameters entry once
+		returning lf-last-or-new lf-effective-date
+	if exit-status != 0
+		exit 
+	endif
+	set lf-commit = TRUE
+	transaction begin
+	select *
+		from supp-price
+		where s-status in ( "V" "W" )
+		for update
+	detail
+		get stock-supplier
+			on index stock-code cre-accountcode
+			key is s-stock-code ws-cre-accountcode
+			lock
+		on error ENOREC
+		else
+			if lf-last-or-new = "L"
+				set sup-last-buy-price = s-new-price
+			else
+				set sup-new-buy-price = s-new-price
+				set sup-new-buy-effective-date = lf-effective-date
+			endif
+			update stock-supplier
+			on error
+				set lf-commit = FALSE
+			else
+				set lf-count += 1
+			endon
+		endon
+		delete supp-price
+		on error
+			set lf-commit = FALSE
+		endon
+	end-select
+	if lf-commit
+		transaction commit
+		message-box param-text("<<P1>> Records updated successfully"
+			,str(lf-count))
+			title is ws-function-title
+			message-buttons  MSG_BOX_OK
+			icon MSG_BOX_INFORMATION
+	else
+		transaction rollback
+		message-box param-text("<<P1>><<BR>><<p2>>"
+			,"There was at least one error during the update."
+			,"All changes have been reversed.")
+			title is ws-function-title
+			message-buttons  MSG_BOX_OK
+			icon MSG_BOX_INFORMATION
+	endif
+end-procedure
+
+screen comparison-analysis
+	window
+		title ws-function-title
+	datagrid
+	select *
+		from stock-supplier as t0
+		left join stock-master as t2
+			on t2.stock-code = t0.stock-code
+		where t0.cre-accountcode = :ws-cre-accountcode
+	allowed search
+before
+	if not ws-validated
+		message-box param-text("<<P1>><<BR>><<p2>>"
+			,"Entered data has not been validated."
+			,"To display the new entered price, the input data must be validated")
+			title is ws-function-title
+			message-buttons  MSG_BOX_OK
+			icon MSG_BOX_WARNING
+	endif
+detail
+	get supp-price
+		on index s-stock-code
+		key is stock-code
+	on error ENOREC
+		initialise supp-price
+	endon
+	accept stock-code @1,1
+		title "Stock Code"
+	display stk-description @1,2
+		title "Description"
+	display stock-group @1,3
+		title "Stock Group"
+	display sup-last-buy-price @1,4
+		title "Last Buy"
+	display sup-last-buy-date @1,5
+		title "Last Buy Date"
+	display sup-new-buy-price @1,6
+		title "New Supplier Price "
+	display sup-new-buy-effective-date @1,7
+		title "New Effective"
+	display sup-stock-code @1,8
+		title "Supplier Code"
+	display sup-unit-desc @1,9
+		title "UoM"
+	display s-new-price @1,10 pic z(6).zzzz
+		title "Upload Price"
+end-screen
+

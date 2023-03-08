@@ -1,0 +1,15 @@
+#PRONTO Screen Customiser File (Override statements only).
+#PCS_TIMESTAMP : Tue Mar 27 07:28:23 2018 rayb
+screen display-cfi
+	{
+	accept
+		{
+		name = cfpi-user-only-num1
+		title = "Misc"
+		}
+	accept
+		{
+		name = cfpi-user-only-num2
+		title = "Interest"
+		}
+	}

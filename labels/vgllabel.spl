@@ -1,0 +1,1330 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : address Label Printing - Meto or Zebra Supported.
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2008
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: so/vgllabel.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 07Jul08	RJB Log 104	Don't print zround
+// 25Jun08	jcb Log 93	Add direct printing
+// 25May08  rjb log 9   written
+////////////////////////////////////////////////////////////////////////////////
+
+mode md-archive
+	prompt "Archive"
+mode md-select
+	prompt "Select"
+
+#include '../include/i8param.spl'
+#include '../include/i8secabt.spl'
+#include '../include/m2enqcre.spl'
+#include "../include/i85labdefn.spl"
+#include "../include/i8proglog.spl"
+
+link 'clib/clibvgeocode'
+
+field
+	ws-address			pic x(30) occurs 7
+	ws-from				pic x(30) occurs 4
+	ws-reference		pic x(20)
+	ws-reference-2		pic x(20)
+	ws-archive			type number
+	ws-job-no           pic x(20)
+	ws-function-title	type string
+	//
+	ws-lab-APN 			type string  //Global Trade Item Number
+	ws-lab-AUDS 		type string  //Alternate unit Description
+	ws-lab-CA1 			type string  //Customer address line one
+	ws-lab-CA2 			type string  //Customer address line two
+	ws-lab-CA3 			type string  //Customer address line three
+	ws-lab-CA4 			type string  //Customer address line four
+	ws-lab-CA5 			type string  //Customer address line five
+	ws-lab-CPC 			type string  //Customer address postcode
+	ws-lab-CREF 		type string  //Sales Order Cust Reference
+	ws-lab-CSTK 		type string  //Customers item code
+	ws-lab-CSV0 		type string  //Carrier service description
+	ws-lab-DAA1 		type string  //Delivery address line one
+	ws-lab-DAA2 		type string  //Delivery address line two
+	ws-lab-DAA3 		type string  //Delivery address line three
+	ws-lab-DAA4 		type string  //Delivery address line four
+	ws-lab-DAA5 		type string  //Delivery address line five
+	ws-lab-DAA6 		type string  //Delivery address line six
+	ws-lab-DAA7 		type string  //Delivery address line seven
+	ws-lab-DAPC 		type string  //Delivery address postcode
+	ws-lab-DATE 		type string  //Date entered
+	ws-lab-DDAT 		type string  //Delivery date
+	ws-lab-DEBT 		type string  //Customer accountcode
+	ws-lab-DI1 			type string  //Delivery Instruction 1
+	ws-lab-DI2 			type string  //Delivery Instruction 2
+	ws-lab-DI3 			type string  //Delivery Instruction 3
+	ws-lab-DI4 			type string  //Delivery Instruction 4
+	ws-lab-DI5 			type string  //Delivery Instruction 5
+	ws-lab-DI6 			type string  //Delivery Instruction 6
+	ws-lab-DI7 			type string  //Delivery Instruction 6
+	ws-lab-DNAM 		type string  //Customers Short Name
+	ws-lab-LABN 		type string  //No. of labels in repeat count(see NLAB)
+	ws-lab-LINE 		type string  //Sales Order Line Number
+	ws-lab-NLAB 		type string  //Repeat count for each label(see LABN)
+	ws-lab-ORDN 		type string  //Sales order number
+	ws-lab-OSLSTAR 		type string  //*Sales Order + Suffix + lines*
+	ws-lab-STK0 		type string  //Item description
+	ws-lab-STK2 		type string  //2nd line description
+	ws-lab-STKC 		type string  //Item code
+	ws-lab-STKU 		type string  //Stock unit description
+	ws-lab-WHSE 		type string  //Warehouse
+	ws-lab-CARN 		type string  //Carton Count
+	//
+	ws-label-address	type string
+	ws-label-order		type string
+	ws-label-line		type string
+
+
+object sales-order-comms type is external
+	record is
+		so-order-no
+		so-bo-suffix
+	endrecord
+
+object textfile
+	type is text
+	record is
+		tf-line			pic x(500) type string
+	end-record
+
+procedure main
+	get system-control first
+	on error
+		abort "No system control record"
+	endon
+	do i8secabt-check-abort parameters
+		sys-consolidation-division login-id() "ZVG" "R001"
+		returning ws-function-title
+	do i8proglog-write-log
+	set ws-archive = FALSE
+	if get-param(1) != '-comms'
+		do get-parameters entry //once
+	else
+		open sales-order-comms file is get-param(2)
+		extract sales-order-comms
+			ALL
+		detail
+			do setup-label
+				parameters are "O" str(so-order-no) so-bo-suffix
+			do print-label
+				parameters are so-order-packages
+		end-extract
+		close sales-order-comms and remove
+	endif
+end-procedure
+
+screen get-parameters
+local
+	l-order-no							like so-order-no
+	l-so-bo-suffix						like so-bo-suffix
+	l-cartons							pic 9999
+	l-debtor							pic x(10)
+	l-creditor							pic x(10)
+	l-job-no							pic x(10)
+	l-printer							pic x
+	l-print-address-prompt				pic x(50) type string
+	l-print-stock-prompt				pic x(50) type string
+	l-exit-prompt						pic x(50) type string
+	l-google-prompt						pic x(50) type string
+	l-map-prompt						pic x(50) type string
+	l-address-line						pic x(1024) type string
+	l-address-array						pic x(20) type string occurs 7
+	i									type number
+//
+	window @1,1 to @24,80
+	title ws-function-title
+	no-ok-cancel
+	form-entry
+before
+	display "Order Number           :" @1,3
+	display "OR" @1,30 pic xxx
+	display "Debtor" @1,35
+	display "OR" @1,43 pic xxx
+	display "Creditor" @1,49
+	set l-order-no = 0
+	set l-so-bo-suffix = spaces
+	set l-cartons = 1
+	do setup-from
+	set l-printer = "Z"
+	if get-env("PROTERM") = "prowebclient"
+		set l-print-stock-prompt = "Print <br> Stock<br>" 
+		set l-print-address-prompt = "Print <br> Address<br>" 
+		set l-exit-prompt = "Exit<br>" 
+		set l-google-prompt = "Google <br> Address<br>" 
+		set l-map-prompt = "Display <br> Map<br>" 
+	else
+		set l-print-stock-prompt = "Print <br> Stock<br>(F11)" 
+		set l-print-address-prompt = "Print <br> Address<br>(F10)" 
+		set l-exit-prompt = "Exit<br>(F12)" 
+		set l-google-prompt = "Google <br> Address<br>(F08)" 
+		set l-map-prompt = "Display <br> Map<br>(F09)" 
+	endif
+detail
+	accept l-order-no @2,15 pic z(7)9
+		optional
+		default l-order-no
+		help "Enter the sales order number for the label you wish to print"
+		when l-debtor = spaces and l-creditor = spaces
+	on help-key
+		do find-order returning l-order-no l-so-bo-suffix
+		re-enter l-order-no
+	endon
+	accept l-so-bo-suffix @2,24
+		help "Enter the sales order suffix"
+		default l-so-bo-suffix
+		optional
+		when l-order-no != 0
+	validations
+		if l-order-no != 0
+			get sales-order
+				on index so-order-no so-bo-suffix
+				key is l-order-no l-so-bo-suffix
+			on error
+				if file-status = 111
+					message "Can not find order"
+				else
+					acknowledge "Some problem getting the order"
+					acknowledge " "
+					acknowledge "Please Tell Ray the following : "
+					acknowledge error-description(file-status())
+				endif
+				// re-instate after upgrade to 2000
+				get sales-order-archive
+					on index so-order-no so-bo-suffix
+					key is l-order-no l-so-bo-suffix
+				on error
+					message "Invalid Sales Order No"
+					re-enter l-order-no
+				else
+					set l-cartons = so-order-packages
+					do setup-label
+						parameters are "A" str(so-order-no) so-bo-suffix
+					refresh data
+				endon	
+			else	
+				set l-cartons = so-order-packages
+				do count-total-labels
+					parameters are so-order-no so-bo-suffix
+					returning l-cartons
+				if l-cartons = 0
+					set l-cartons = 1
+				endif
+				do setup-label
+					parameters are "O" str(so-order-no) so-bo-suffix
+				refresh data
+				set ws-archive = false
+			endon
+		endif
+	end-validations
+	accept l-debtor @2,32 pic x(10)
+		default l-debtor
+		help 'Enter a valid debtor code'
+		when l-order-no = 0 and l-creditor = spaces
+		optional
+		upper_case
+	on help-key
+			spl 'deb/m1enqdeb.spl'
+			on error
+				message 'Program not installed: deb/m1enqdeb.spl'
+			endon
+			parameters are l-debtor
+			returning l-debtor
+		re-enter optional
+	endon
+	validations
+		if l-debtor <> spaces
+			do setup-label
+				parameters are "D" l-debtor spaces
+			refresh data
+		endif
+	end-validations
+	accept l-creditor @2,49 pic x(10)
+		default l-creditor
+		help 'Enter a valid Creditor Code'
+		when l-order-no = 0 and l-debtor = spaces
+		optional
+		uppercase
+	on help-key
+		do m2enqcre-enquire-on-creditors
+			parameters are l-creditor spaces spaces
+			returning l-creditor
+			re-enter optional
+	endon
+	validations
+		if l-creditor <> spaces
+			do setup-label
+				parameters are "C" l-creditor spaces
+			refresh data
+		endif
+	end-validations
+	accept l-cartons @3,30
+		title "Cartons:"
+		default l-cartons
+	before-accept
+		if l-cartons = 0
+			set l-cartons = 1
+		endif
+	end-before-accept
+	/*
+	accept l-job-no @4,30
+		title "Job:"
+		default l-job-no
+	validations
+			if l-job-no <> spaces then
+				set ws-job-no = right-justify(concat("Job: ", l-job-no), 20)
+			else
+				set ws-job-no = spaces
+			end-if
+	end-validations
+	radio-button l-printer
+		@6,20 "E" title "Epson"
+		@6,30 "M" title "Meto"
+		@6,40 "Z" title "Zebra"
+		default is "Z"
+	validations
+		refresh
+	end-validations
+	*/
+	accept ws-address[1] @10,12
+		default ws-address[1]
+	accept ws-reference @10,44
+		default ws-reference
+		justify
+		when l-printer <> "Z"
+		or l-order-no = 0
+	accept ws-address[2] @11,12
+		default ws-address[2]
+	accept ws-address[3] @12,12
+		default ws-address[3]
+	accept ws-address[4] @13,12
+		default ws-address[4]
+	accept ws-address[5] @14,12
+		default ws-address[5]
+	accept ws-from[1] @16,12
+		default ws-from[1]
+		when l-printer <> "Z"
+	accept ws-reference-2 @16,44
+		default ws-reference-2
+		justify
+		when l-printer <> "Z"
+	accept ws-job-no @17,44
+		default ws-job-no
+		justify
+		when l-printer <> "Z"
+	accept ws-from[2] @17,12
+		default ws-from[2]
+		when l-printer <> "Z"
+	accept ws-from[3] @18,12
+		default ws-from[3]
+		when l-printer <> "Z"
+	accept ws-from[4] @19,12
+		default ws-from[4]
+		when l-printer <> "Z"
+	option l-google-prompt @21,1 to @23,11
+		hot-key 8
+		text-position 15
+		help "access Google to verify address"
+	detail
+		set l-address-array[*] = spaces
+		for i = 1 to 6
+			set l-address-array[i] = ws-address[ i + 1 ]
+		endfor
+		do clibvgeocode-array-to-string 
+			parameters are l-address-array
+			returning l-address-line
+		do address-prompt entry once
+			parameters are l-address-line
+			returning l-address-line
+		do clibvgeocode-select-address
+			parameters are l-address-line
+			returning l-address-array
+		for i = 1 to 6
+			set ws-address[ i + 1] = l-address-array[i]
+		endfor
+		refresh data
+	end-option
+	option l-map-prompt @21,16 to @23,26
+		hot-key 10
+		text-position 15
+		help "(F10) Print n labels with the address only"
+	detail
+		set l-address-array[*] = spaces
+		for i = 1 to 6
+			set l-address-array[i] = ws-address[ i + 1 ]
+		endfor
+		do clibvgeocode-display-map
+			parameters are  l-address-array
+	end-option
+	option l-print-address-prompt @21,31 to @23,41
+		hot-key 10
+		text-position 15
+		help "(F10) Print n labels with the address only"
+	detail
+		switch l-printer
+		case "Z"
+			do print-zebra parameters are l-cartons "A" l-order-no l-so-bo-suffix
+				if-then-else(l-debtor <> spaces, l-debtor,l-creditor)
+		case "M"
+			do print-meto parameters are l-cartons
+		else
+			do print-label parameters are l-cartons
+		end-switch
+		message "Labels Printed"
+	end-option
+	option l-print-stock-prompt @21,46 to @23,56
+		hot-key 11
+		text-position 15
+		help "(F11) Print one label for each stock item on the order"
+		when l-order-no <> 0
+	detail
+		switch l-printer
+		case "Z"
+			do print-zebra parameters are l-cartons "S" l-order-no l-so-bo-suffix
+				spaces
+		case "M"
+			do print-meto parameters are l-cartons
+		else
+			do print-label parameters are l-cartons
+		end-switch
+		message "Labels Printed"
+	end-option
+	option l-exit-prompt @21,61 to @23,71
+		HOT-KEY 12
+		text-position 15
+		help "(F12)"
+	detail
+		exit
+	end-option
+after
+//	back-to-detail
+end-screen
+
+procedure print-label
+parameters are
+	l-cartons			pic 9999
+local
+	i					type number
+	if get-env("LABEL") = spaces
+		report "Labels"
+			no-message
+			depth 24
+			length 24
+			form "Label"
+			no-xml
+	else
+		report "Labels"
+			no-message
+			depth 24
+			length 24
+			form "Label"
+			direct to get-env("LABEL")
+			no-xml
+	endif
+	for i = 1 to l-cartons	
+		skip 1
+		print "Delivery Address:" in col 5	underline
+			ws-reference in col 25
+		skip 2
+		print ws-address[1] font 15 bold col 5
+		skip
+		print ws-address[2] font 15 bold col 5
+		skip
+		print ws-address[3] font 15 bold col 5
+		skip
+		print ws-address[4] font 15 bold col 5
+		skip
+		print ws-address[5] font 9 bold col 5
+		skip
+		print "From:" in col 5 underline
+			ws-reference-2 in col 25
+		print ws-from[1] in col 5
+			ws-job-no in col 25
+		print ws-from[2] in col 5
+		print ws-from[3] in col 5
+		print ws-from[4] in col 5
+			i pic zz9  bold in col 32
+			" of " bold
+			l-cartons pic zz9 bold
+//		if i != l-cartons
+			page
+//		endif
+	end-for
+	report finished
+end-procedure
+
+screen find-order
+returning
+	l-so-order-no					like so-order-no
+	l-so-bo-suffix					like so-bo-suffix
+	select * from  sales-order
+		order by so-order-no so-bo-suffix
+	allowed md-select search md-archive
+	no-prompt-for-search
+	datagrid occurs 22
+	window @1,1 to @24,80
+	title "Orders"
+detail
+	if screenmode = md-archive
+		do find-order-archive
+			returning l-so-order-no l-so-bo-suffix
+		set l-so-order-no = so-order-no
+		set l-so-bo-suffix = so-bo-suffix
+		exit
+	endif
+	if screenmode = md-select
+		set l-so-order-no = so-order-no
+		set l-so-bo-suffix = so-bo-suffix
+		exit
+	endif
+	accept so-order-no @1,3
+		title "Order"
+	accept so-bo-suffix @1,12
+		title "Suffix"
+	display so-cust-code @1,15
+		title "Customer"
+	get deb-master
+		on index accountcode
+		key is so-cust-code
+	on error
+		set shortname = spaces
+	endon
+	display shortname @1,26
+		title "Name"
+	display so-order-packages @1,57
+		title "Cartons"
+end-screen
+
+screen find-order-archive
+returning
+	l-so-order-no					like so-order-no
+	l-so-bo-suffix					like so-bo-suffix
+	select * from sales-order-archive
+		order by so-order-no so-bo-suffix
+	allowed md-select search
+	no-prompt-for-search
+	datagrid occurs 22
+	window @1,1 to @24,80
+	title "Order Archive"
+detail
+	if screenmode = md-select
+		set l-so-order-no = so-order-no
+		set l-so-bo-suffix = so-bo-suffix
+		exit
+	endif
+	accept so-order-no @1,3
+		title "Order"
+	accept so-bo-suffix @1,12
+		title "Suffix"
+	display so-cust-code @1,15
+		title "Customer"
+	get deb-master
+		on index accountcode
+		key is so-cust-code
+	on error
+		set shortname = spaces
+	endon
+	display shortname @1,26
+		title "Name"
+	display so-order-packages @1,57
+		title "Cartons"
+end-screen
+
+procedure setup-label
+parameters
+	/* type can be
+		O - Order
+		A - Archive
+		D - Debtor
+		C - Creditor
+	*/
+	l-type				pic x
+	l-key-1				pic x(10)
+	l-key-2				pic x(10)
+	set ws-address[*] = spaces
+	set ws-from[*] = spaces
+	set ws-reference = spaces
+	set ws-reference-2 = spaces
+	switch l-type
+	case "O"
+		set ws-archive = FALSE
+		do get-order-details
+			parameters are num(l-key-1) l-key-2
+	case "A"
+		set ws-archive = FALSE
+		do get-order-details
+			parameters are num(l-key-1) l-key-2
+	case "D"
+		do setup-debtor-creditor parameters are l-key-1 "DA"
+		do setup-from
+	case "C"
+		do setup-debtor-creditor parameters are l-key-1 "SA"
+		do setup-from
+	end-switch
+end-procedure
+
+procedure setup-debtor-creditor
+parameters
+	l-key-1				pic x(10)
+	l-d-type			pic xx
+	// l-d-type = DA for debtor and SA for Supplier
+	get name-and-address-master
+		key is l-key-1 l-d-type
+	on error
+		get name-and-address-master
+			key is l-key-1 "C "
+		on error
+			set ws-address[1] = "To Be Picked Up"
+		else
+			set ws-address[1] = na-name
+			set ws-address[2] = na-company
+			set ws-address[3] = na-street
+			set ws-address[4] = na-suburb
+			set ws-address[5] = na-country
+		endon
+	else
+		set ws-address[1] = na-name
+		set ws-address[2] = na-company
+		set ws-address[3] = na-street
+		set ws-address[4] = na-suburb
+		set ws-address[5] = na-country
+	endon
+end-procedure
+
+procedure setup-from
+	get system-user-control
+		on index user-id
+		key is login-id
+	on error endon
+	get system-user
+		on index sys-comp-code user-id
+		key is sys-consolidation-division login-id
+	on error
+		set ws-from[1] = user-employee-name
+		get name-and-address-master
+			on index accountcode na-type
+			key is "AKL" "WH"
+		on error
+			initialise name-and-address-master
+		endon
+		set ws-from[2] =  na-company
+		set ws-from[3] =  na-street
+		set ws-from[4] =  na-suburb
+	else	
+		set ws-from[1] = user-employee-name
+		get name-and-address-master
+			on index accountcode na-type
+			key is user-whse "WH"
+		on error
+			get name-and-address-master
+				on index accountcode na-type
+				key is "AKL" "WH"
+			on error
+				initialise name-and-address-master
+			endon
+		endon
+		set ws-from[2] =  na-company
+		set ws-from[3] =  na-street
+		set ws-from[4] =  na-suburb
+	endon
+end-procedure
+
+procedure get-order-details
+parameters
+	l-order-no			like so-order-no
+	l-so-bo-suffix		like so-bo-suffix
+local
+	x					type number
+	l-address			like so-dl-text
+	l-postcode			like so-dl-postcode
+	set ws-address[*] = spaces
+	if ws-archive
+	// reinstate after 2000
+		get sales-order-archive
+			on index so-order-no so-bo-suffix
+			key is l-order-no l-so-bo-suffix
+		on error endon
+		set ws-reference = right-justify(concat("Ref.",so-cust-reference),20)
+		set ws-reference-2 = right-justify(concat("Velocity Ref."
+											,str(so-order-no)
+											,so-bo-suffix)
+										,20)
+		get sales-order-delivery-archive
+			on index so-order-no so-bo-suffix
+			key is l-order-no l-so-bo-suffix
+		on error
+			get name-and-address-master
+				key is so-cust-code "DA"
+			on error
+				get name-and-address-master
+					key is so-cust-code "C "
+				on error
+					set ws-address[1] = "To Be Picked Up"
+				else
+					set ws-address[1] = na-name
+					set ws-address[2] = na-company
+					set ws-address[3] = na-street
+					set ws-address[4] = na-suburb
+					set ws-address[5] = na-country
+				endon
+			else
+				set ws-address[1] = na-name
+				set ws-address[2] = na-company
+				set ws-address[3] = na-street
+				set ws-address[4] = na-suburb
+				set ws-address[5] = na-country
+			endon
+		else
+			for x = 1 to 5
+				set ws-address[x] = so-dl-text[x]
+			endfor
+		endon
+	else
+		get sales-order
+			on index so-order-no so-bo-suffix
+			key is l-order-no l-so-bo-suffix
+		on error endon
+		set ws-reference = right-justify(concat("Ref.",so-cust-reference),20)
+		set ws-reference-2 = right-justify(concat("Velocity Ref."
+											,str(so-order-no)
+											,so-bo-suffix)
+										,20)
+		do get-address parameters are so-order-no so-bo-suffix "O" spaces
+			returning l-address l-postcode
+		for x = 1 to 5
+			set ws-address[x] = l-address[x]
+		end-for
+
+		/*
+		get sales-order-delivery
+			on index so-order-no so-bo-suffix
+			key is l-order-no l-so-bo-suffix
+		on error
+			get name-and-address-master
+				key is so-cust-code "DA"
+			on error
+				get name-and-address-master
+					key is so-cust-code "C "
+				on error
+					set ws-address[1] = "To Be Picked Up"
+				else
+					set ws-address[1] = na-name
+					set ws-address[2] = na-company
+					set ws-address[3] = na-street
+					set ws-address[4] = na-suburb
+					set ws-address[5] = na-country
+				endon
+			else
+				set ws-address[1] = na-name
+				set ws-address[2] = na-company
+				set ws-address[3] = na-street
+				set ws-address[4] = na-suburb
+				set ws-address[5] = na-country
+			endon
+		else
+			for x = 1 to 5
+				set ws-address[x] = so-dl-text[x]
+			endfor
+		endon
+		*/
+		//
+		get rep-master
+			on index rep-code
+			key is so-rep-code
+		on error
+			initialise rep-master
+		endon
+		//
+		set ws-from[1] = rep-description
+		get name-and-address-master
+			on index accountcode na-type
+			key is so-whse-code "WH"
+		on error
+			initialise name-and-address-master
+		endon
+		set ws-from[2] =  na-company
+		set ws-from[3] =  na-street
+		set ws-from[4] =  na-suburb
+	endif
+end-procedure
+
+//--------------------------------------------------------------------------------
+
+// code for a Meto Printer
+
+field
+	k					type number
+
+#define ADDLINE(A) \
+	for k = 1 to strlen(A) \
+		set tf-char = substring(A,k,k) \
+		insert stream \
+	endfor \
+	set tf-char = chr(13) \
+	insert stream \
+
+#define CREATE_TEXT(A,B,C) \
+	set xrow = format-picture(A,"9999") \
+	set ycol = format-picture(B,"9999") \
+	set datastring = C \
+	ADDLINE(concat(rotation fontid widthx heightx eee xrow ycol datastring))
+
+object stream
+	type is sequential
+	record is
+		tf-char pic x
+	end-record
+
+procedure start-meto
+	open stream
+		file is str-concat("/tmp/metostream"  str(pid()))
+		create truncate permanent
+	ADDLINE(concat(chr(2) "n")) // imperial
+	ADDLINE(concat(chr(2) "Kf0080")) // Set tear off
+	// This must be the last one before the printing records :
+		ADDLINE(concat(chr(2)  "L"))  // Attention getter flag
+endprocedure
+
+procedure print-meto
+parameters are
+	l-cartons			pic 9999
+local
+	rotation			pic X
+	fontid				pic X
+	widthX				pic X
+	heightX				pic x
+	eee					pic XXX
+	xrow					pic xxxx
+	ycol					pic xxxx
+	datastring			pic x(50) type string
+	filetoprint			pic x(50) type string
+	/*
+	if get-env("LABEL") = spaces
+		report "Labels"
+			no-message
+			depth 24
+			length 24
+			form "Label"
+			no-xml
+	else
+		report "Labels"
+			no-message
+			depth 24
+			length 24
+			form "Label"
+			direct to get-env("LABEL")
+			no-xml
+	endif
+	*/
+	// Constants
+	set rotation = "4"
+	set fontid = "9"
+	set WidthX = "1"
+	set heightx = "1"
+	set eee = "A04"
+	
+	do start-meto
+	set eee = "A04"
+	CREATE_TEXT(5,5,"X")
+	CREATE_TEXT(50,20,"Delivery Address:")
+	CREATE_TEXT(300,20,ws-reference)
+	CREATE_TEXT(400,280,"From")
+	CREATE_TEXT(400,300,ws-from[1])
+	CREATE_TEXT(400,320,ws-from[2])
+	CREATE_TEXT(400,340,ws-from[3])
+	CREATE_TEXT(400,360,ws-from[4])
+	CREATE_TEXT(200,350,ws-reference-2)
+	CREATE_TEXT(200,330,ws-job-no)
+	set eee = "A12"
+	CREATE_TEXT(50,100,ws-address[1])
+	CREATE_TEXT(50,140,ws-address[2])
+	CREATE_TEXT(50,180,ws-address[3])
+	CREATE_TEXT(50,220,ws-address[4])
+	CREATE_TEXT(50,260,ws-address[5])
+	// Careful - the next two lines create an automatically incrementing number
+	CREATE_TEXT(50,350,"1")
+	ADDLINE("+01")
+	CREATE_TEXT(70,350,concat(" of " str(l-cartons)))
+	// Now the Box
+	set rotation = "1"
+	set fontid = "X"
+	set eee = "000"
+	CREATE_TEXT(40,40,concat("B" "200" "400" "005" "005"))
+	ADDLINE(concat("Q",format-picture(l-cartons,"9999")))
+	ADDLINE("E")
+	set filetoprint = file-name(stream)
+	close stream
+	do send-to-output parameters are filetoprint TRUE
+end-procedure
+
+procedure send-to-output
+parameters are
+	filetoprint								type string
+	actuallyprint							type boolean
+local
+	l-print-line 							pic x(132)
+	i										type number
+//
+	if actuallyprint
+		command "sh" parameters are
+			"-c" concat("lpr -Pmeto " filetoprint)
+	else
+		report concat("MetoFile:" filetoprint)
+		open stream
+			file is filetoprint
+		set l-print-line  = spaces
+		set i = 1
+		select * from stream
+		detail
+			if ascii(tf-char) = 13
+				print l-print-line
+				set l-print-line = spaces
+				set i = 1
+			else
+				if ascii(tf-char) >= 32 and ascii(tf-char) <= 126
+					string l-print-line inserting tf-char at i
+					set i += 1
+				else
+					string l-print-line inserting str-concat("<",str(ascii(tf-char)),">") at i
+					set i += str-len(str-concat("<",str(ascii(tf-char)),">") )
+				endif
+			endif
+		end-select
+		print l-print-line
+		close stream
+		report finished
+	endif
+end-procedure
+//--------------------------------------------------------------------------------
+
+// code for a zebra printer
+
+procedure print-zebra
+parameters are
+	l-cartons			pic 9999
+	l-type				pic x  // A=Address as per normal  S=One label per stock item on the order
+	l-so-order-no		like so-order-no
+	l-so-bo-suffix		like so-bo-suffix
+	l-account			like accountcode
+local
+	l-total-count		type number
+/*
+	if tpye = "A" then ignore the sales order and print l-cartons worth
+	else print one for each sol
+*/
+	set ws-label-address = "DESPADDR"
+	set ws-label-order = "DESPSO"
+	set ws-label-line = "DESPPICK"
+	do initialise-label-fields
+	// set cartons here
+	set ws-lab-CARN = str(l-cartons)
+// jcb log 93-start-------------------------------------------------------------
+	if get-env("LABEL") = SPACES
+		report str-concat("Address Labels")
+			no-message
+			no-xml
+			width 132
+	else
+		report str-concat("Address Labels")
+			no-message
+			no-xml
+			width 132
+			direct to get-env("LABEL")
+	endif
+// jcb log 93-end---------------------------------------------------------------
+	if l-so-order-no = 0
+		set l-type = spaces
+	endif
+	do get-address-fields parameters are
+		l-so-order-no	l-so-bo-suffix	l-account			
+	switch l-type
+	case " "
+		// then I must have an accountcode
+		I85LABDEFN_INITIALISE_LABEL_PRINTER(ws-label-address)
+		I85LABDEFN_PRINT_ONE_LABEL(ws-label-address,l-cartons)
+		I85LABDEFN_FINISH_LABEL_PRINTING(ws-label-address)
+	case "A"
+		get sales-order
+			on index so-order-no so-bo-suffix
+			key is l-so-order-no l-so-bo-suffix
+		on error
+			initialise sales-order
+		endon
+		I85LABDEFN_INITIALISE_LABEL_PRINTER(ws-label-order)
+		do get-order-header-fields
+		I85LABDEFN_PRINT_ONE_LABEL(ws-label-order,l-cartons)
+		I85LABDEFN_FINISH_LABEL_PRINTING(ws-label-order)
+	case "S"
+		get sales-order
+			on index so-order-no so-bo-suffix
+			key is l-so-order-no l-so-bo-suffix
+		on error
+			initialise sales-order
+		endon
+		do get-order-header-fields
+		//
+		do count-total-labels parameters are l-so-order-no l-so-bo-suffix
+			returning l-total-count
+		if l-total-count != l-cartons
+			acknowledge "You have specified " l-cartons " cartons in the order"
+			acknowledge "but there are " l-total-count " labels to be produced "
+			acknowledge l-total-count " lalels will be printed"
+			acknowledge "Be careful of the carton number shown on the label"
+		endif
+		I85LABDEFN_INITIALISE_LABEL_PRINTER(ws-label-line)
+		select * from sales-order-line
+			where so-order-no = :l-so-order-no
+			and so-bo-suffix = :l-so-bo-suffix
+			and sol-line-type = "SN"
+			and (sol-print-line <> "N" 
+				OR (sol-print-line = "N" and sol-chg-type = "D"))
+// RJB log 104-start-------------------------------------------------------------
+			and stock-code <> "ZROUND"
+// RJB log 104-end---------------------------------------------------------------
+			order by so-order-no so-bo-suffix sol-line-seq
+		detail
+			do get-order-line-fields
+			I85LABDEFN_PRINT_ONE_LABEL(ws-label-line,sol-shipped-qty)
+		end-select
+		I85LABDEFN_FINISH_LABEL_PRINTING(ws-label-line)
+	end-switch
+	report finished
+end-procedure
+
+procedure count-total-labels
+parameters are
+	l-so-order-no 					like so-order-no
+	l-so-bo-suffix					like so-bo-suffix
+returning
+	l-count							type number
+	select * from sales-order-line
+		where so-order-no = :l-so-order-no
+		and so-bo-suffix = :l-so-bo-suffix
+		and sol-line-type = "SN"
+		and (sol-print-line <> "N" 
+			OR (sol-print-line = "N" and sol-chg-type = "D"))
+		order by so-order-no so-bo-suffix sol-line-seq
+	detail
+		set l-count += sol-shipped-qty
+	end-select
+end-procedure
+
+procedure get-address-fields
+parameters are
+	l-so-order-no		like so-order-no
+	l-so-bo-suffix		like so-bo-suffix
+	l-account			like accountcode
+local
+	l-address						like so-dl-text
+	l-postcode						like so-dl-postcode
+//
+	if l-so-order-no <> 0
+		get sales-order
+			on index so-order-no so-bo-suffix
+			key is l-so-order-no l-so-bo-suffix
+		on error
+		else
+			set l-account = so-cust-code
+		endon
+	endif
+	get deb-master
+		on index accountcode
+		key is l-account
+	on error
+		get cre-master
+			on index cre-accountcode
+			key is l-account
+		on error
+			set ws-lab-DNAM = cr-shortname
+		endon
+	else
+		set ws-lab-DNAM = shortname
+	endon
+	do get-address parameters are 0 spaces "C" l-account
+		returning l-address l-postcode
+	//
+	set ws-lab-CA1  = l-address[1]  //Customer address line one
+	set ws-lab-CA2  = l-address[2]  //Customer address line two
+	set ws-lab-CA3  = l-address[3]  //Customer address line three
+	set ws-lab-CA4  = l-address[4]  //Customer address line four
+	set ws-lab-CA5  = l-address[5]  //Customer address line five
+	set ws-lab-CPC  = l-postcode  //Customer address postcode
+	//
+	set ws-lab-DAA1  = ws-address[1]  //Delivery address line one
+	set ws-lab-DAA2  = ws-address[2]  //Delivery address line two
+	set ws-lab-DAA3  = ws-address[3]  //Delivery address line three
+	set ws-lab-DAA4  = ws-address[4]  //Delivery address line four
+	set ws-lab-DAA5  = ws-address[5]  //Delivery address line five
+	set ws-lab-DAA6  = spaces  //Delivery address line six
+	set ws-lab-DAA7  = spaces  //Delivery address line seven
+	set ws-lab-DAPC  = spaces  //Delivery address postcode
+	set ws-lab-DEBT = l-account
+	set ws-lab-CREF  = ws-reference  //Sales Order Cust Reference
+	//
+end-procedure
+
+procedure get-order-header-fields
+// Assumes currency on order
+local
+	l-address						like so-dl-text
+	l-postcode						like so-dl-postcode
+	l-no-lines						type number
+	set ws-lab-CREF  = so-cust-reference  //Sales Order Cust Reference
+	do get-address parameters are so-order-no so-bo-suffix "O" spaces
+		returning l-address l-postcode
+	set ws-lab-DAA1  = l-address[1]  //Delivery address line one
+	set ws-lab-DAA2  = l-address[2]  //Delivery address line two
+	set ws-lab-DAA3  = l-address[3]  //Delivery address line three
+	set ws-lab-DAA4  = l-address[4]  //Delivery address line four
+	set ws-lab-DAA5  = l-address[5]  //Delivery address line five
+	set ws-lab-DAA6  = l-address[6]  //Delivery address line six
+	set ws-lab-DAA7  = l-address[7]  //Delivery address line seven
+	set ws-lab-DAPC  = l-postcode  //Delivery address postcode
+	//
+	set ws-lab-DATE	= format-picture(so-order-date,"DD-MMM-YYYY")
+	set ws-lab-DDAT	= format-picture(so-actual-delivery-date,"DD-MMM-YYYY")
+	set ws-lab-DEBT = so-cust-code
+	//
+	do get-address parameters are so-order-no so-bo-suffix "I" spaces
+		returning l-address l-postcode
+	set ws-lab-DI1  = l-address[1]  //Delivery Instruction 1
+	set ws-lab-DI2  = l-address[2]  //Delivery Instruction 2
+	set ws-lab-DI3  = l-address[3]  //Delivery Instruction 3
+	set ws-lab-DI4  = l-address[4]  //Delivery Instruction 4
+	set ws-lab-DI5  = l-address[5]  //Delivery Instruction 5
+	set ws-lab-DI6  = l-address[6]  //Delivery Instruction 6
+	set ws-lab-DI7  = l-address[7]  //Delivery Instruction 6
+	get deb-master
+		on index accountcode
+		key is so-cust-code
+	on error
+	endon
+	set ws-lab-DNAM = shortname
+	set ws-lab-WHSE  = so-whse-code  //Warehouse
+	set ws-lab-ORDN  = concat(str(so-order-no),so-bo-suffix)
+	save sales-order-line
+	select * from sales-order-line
+		where so-order-no = :so-order-no
+		and so-bo-suffix = :so-bo-suffix
+		and sol-line-type = "SN"
+		and sol-print-line <> "N"
+		order by so-order-no so-bo-suffix sol-line-seq
+	detail
+		set l-no-lines += 1
+	end-select
+	restore sales-order-line
+	set ws-lab-OSLSTAR  = concat(str(so-order-no),so-bo-suffix,":",str(l-no-lines))
+end-procedure
+
+procedure get-order-line-fields
+// assumes currency on order line
+	get stock-master
+		on index stock-code
+		key is stock-code
+	on error
+		initialise stock-master leaving stock-code
+	endon
+	set ws-lab-APN = stk-apn-number
+	set ws-lab-AUDS  = stk-alt-unit-desc  //Alternate unit Description
+	select * from stock-conversion-procedure
+		where scp-accountcode = :so-cust-code
+		and scp-stock-code = :stock-code
+		and scp-conversion-rule = spaces
+		order by scp-conversion-rule scp-accountcode scp-stock-code scp-sequence-no
+	detail
+		// if we get one just use the first we encounter on the file (there should only be one)
+		set ws-lab-CSTK  = scp-component-code  //Customers item code
+		break
+	end-select
+	if ws-lab-CSTK = spaces
+		set ws-lab-cstk = stock-code
+	endif
+	set ws-lab-LINE  = str(sol-line-seq)  //Sales Order Line Number
+	set ws-lab-STK0  = stk-description  //Item description
+	set ws-lab-STK2  = stk-desc-line-2  //2nd line description
+	set ws-lab-STKC  = stock-code  //Item code
+	set ws-lab-STKU  = stk-unit-desc  //Stock unit description
+end-procedure
+
+procedure get-labfld-value											
+//
+// This is a key routine.  This is called by the label print program when it
+// wants to get the value of the field to print.
+//
+	parameter
+		lp-code		pic x(4)
+	returning
+		lr-value	pic x(50)
+	if lp-code = "OSL*"
+		set lr-value = get-field-value("ws-lab-oslstar")
+	else
+		set lr-value = get-field-value(concat("ws-lab-",lowercase(lp-code)))
+	endif
+end-procedure
+
+procedure initialise-label-fields
+	set ws-lab-APN  = spaces  //Global Trade Item Number
+	set ws-lab-AUDS  = spaces  //Alternate unit Description
+	set ws-lab-CA1  = spaces  //Customer address line one
+	set ws-lab-CA2  = spaces  //Customer address line two
+	set ws-lab-CA3  = spaces  //Customer address line three
+	set ws-lab-CA4  = spaces  //Customer address line four
+	set ws-lab-CA5  = spaces  //Customer address line five
+	set ws-lab-CPC  = spaces  //Customer address postcode
+	set ws-lab-CREF  = spaces  //Sales Order Cust Reference
+	set ws-lab-CSTK  = spaces  //Customers item code
+	set ws-lab-CSV0  = "Not Currently Supported"  //Carrier service description
+	set ws-lab-DAA1  = spaces  //Delivery address line one
+	set ws-lab-DAA2  = spaces  //Delivery address line two
+	set ws-lab-DAA3  = spaces  //Delivery address line three
+	set ws-lab-DAA4  = spaces  //Delivery address line four
+	set ws-lab-DAA5  = spaces  //Delivery address line five
+	set ws-lab-DAA6  = spaces  //Delivery address line six
+	set ws-lab-DAA7  = spaces  //Delivery address line seven
+	set ws-lab-DAPC  = spaces  //Delivery address postcode
+	set ws-lab-DATE  = spaces  //Date entered
+	set ws-lab-DDAT  = spaces  //Delivery date
+	set ws-lab-DEBT  = spaces  //Customer accountcode
+	set ws-lab-DI1  = spaces  //Delivery Instruction 1
+	set ws-lab-DI2  = spaces  //Delivery Instruction 2
+	set ws-lab-DI3  = spaces  //Delivery Instruction 3
+	set ws-lab-DI4  = spaces  //Delivery Instruction 4
+	set ws-lab-DI5  = spaces  //Delivery Instruction 5
+	set ws-lab-DI6  = spaces  //Delivery Instruction 6
+	set ws-lab-DI7  = spaces  //Delivery Instruction 6
+	set ws-lab-DNAM  = spaces  //Customers Short Name
+	set ws-lab-LABN  = spaces  //No. of labels in repeat count(see NLAB)
+	set ws-lab-LINE  = spaces  //Sales Order Line Number
+	set ws-lab-NLAB  = spaces  //Repeat count for each label(see LABN)
+	set ws-lab-ORDN  = spaces  //Sales order number
+	set ws-lab-OSLSTAR  = "Not Currently Suppoted"  //*Sales Order + Suffix + lines*
+	set ws-lab-STK0  = spaces  //Item description
+	set ws-lab-STK2  = spaces  //2nd line description
+	set ws-lab-STKC  = spaces  //Item code
+	set ws-lab-STKU  = spaces  //Stock unit description
+	set ws-lab-WHSE  = spaces  //Warehouse
+	set ws-lab-CARN = spaces // carton count
+end-procedure
+
+
+procedure get-address
+	/*
+	If there is a delivery address for the customer or multiple delivery
+		addresses, then the selected address will be copied into the
+		sales-order-delivery file.  Otherwise use the customer address.
+	*/
+	// assumes currency on order !!
+parameter	
+	lp-order-no						like so-order-no
+	lp-bo-suffix					like so-bo-suffix
+	l-type							pic x // c=customer o=order
+	lp-account						like accountcode
+returning
+	l-address						like so-dl-text
+	l-postcode						like so-dl-postcode
+local
+	lf-i							pic 9
+	//
+	switch l-type
+	case "C"
+		get name-and-address-master
+			on index accountcode na-type
+			key lp-account 'C'
+		on error
+			initialise name-and-address-master
+				leaving accountcode
+		endon
+		set l-address[1] = na-name
+		set l-address[2] = na-company
+		set l-address[3] = na-street
+		set l-address[4] = na-suburb
+		set l-address[5] = na-country
+		set l-address[6] = na-address-6
+		set l-address[7] = na-address-7
+		set l-postcode = postcode
+	case "O"
+		get sales-order-delivery
+			on index so-order-no so-bo-suffix so-text-type
+			key lp-order-no lp-bo-suffix 'DA'
+		on error
+			get name-and-address-master
+				on index accountcode na-type
+				key so-cust-code 'DA'
+			on error
+				get name-and-address-master
+					on index accountcode na-type
+					key so-cust-code 'C'
+				on error
+					initialise name-and-address-master
+						leaving accountcode
+				endon
+			endon
+			set l-address[1] = na-name
+			set l-address[2] = na-company
+			set l-address[3] = na-street
+			set l-address[4] = na-suburb
+			set l-address[5] = na-country
+			set l-address[6] = na-address-6
+			set l-address[7] = na-address-7
+			set l-postcode = postcode
+		else
+			if sub-string(so-dl-text[1],1,6) = "XXMULT"
+				get name-and-address-master
+					on index accountcode na-type
+					key is so-cust-code sub-string(so-dl-text[1],7,8)
+				on error
+				else
+					set l-address[1] = na-name
+					set l-address[2] = na-company
+					set l-address[3] = na-street
+					set l-address[4] = na-suburb
+					set l-address[5] = na-country
+					set l-address[6] = na-address-6
+					set l-address[7] = na-address-7
+					set l-postcode = postcode
+				endon
+			else
+				for lf-i = 1 to 7
+					set l-address[lf-i] = so-dl-text[lf-i]
+				endfor		
+				set l-postcode = so-dl-postcode
+			endif
+		endon
+	case "I"
+		get sales-order-delivery
+			on index so-order-no so-bo-suffix so-text-type
+			key lp-order-no lp-bo-suffix 'DI'
+		on error
+		else
+			for lf-i = 1 to 7
+				set l-address[lf-i] = so-dl-text[lf-i]
+			endfor		
+			set l-postcode = so-dl-postcode
+		endon
+	end-switch
+endprocedure
+
+screen address-prompt   
+parameters
+	lp-address-text						pic x(1024) type string
+returning
+	lr-address-text						pic x(1024) type string
+	window @1,1 to @3,70
+	title "Enter Address"
+before
+	set lr-address-text = lp-address-text
+detail
+	accept lr-address-text @2,2 pic x(66)
+		default lr-address-text
+end-screen
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                

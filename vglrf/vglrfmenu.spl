@@ -1,0 +1,110 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : rf main menu
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2011
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: vglrfpick.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 13Jan11	rayb		written
+////////////////////////////////////////////////////////////////////////////////
+//
+
+#include "../include/i8secabt.spl" 
+#include "../include/i8secok.spl" 
+#include "../include/i8proglog.spl" 
+
+link "vglrf/vglrfclib"
+
+field
+	ws-function-title						type string
+	ws-ZVRF-E001							type boolean
+	ws-ZVRF-M001							type boolean
+	ws-ZVRF-M002							type boolean
+	ws-ZVRF-M003							type boolean
+	ws-ZVRF-M004							type boolean
+	ws-ZVRF-M005							type boolean
+	ws-ZVRF-T001							type boolean
+	ws-ZVRF-T002							type boolean
+	ws-ZVRF-E002							type boolean
+
+procedure main
+local
+	lf-coy-path							like sys-comp-path
+	get system-control first 
+	on error
+		abort "No Control Record"
+	endon
+	do i8secabt-check-abort
+		parameters are sys-consolidation-division login-id() "ZVRF" "M001"
+		returning ws-function-title 
+	do i8proglog-write-log
+	// Stock Enquiry
+	do i8secok-check-ok parameters
+		sys-consolidation-division login-id() "ZVRF" "E001"
+		returning ws-ZVRF-E001
+	do i8secok-check-ok parameters
+		sys-consolidation-division login-id() "ZVRF" "M001"
+		returning ws-ZVRF-M001
+	do i8secok-check-ok parameters
+		sys-consolidation-division login-id() "ZVRF" "M002"
+		returning ws-ZVRF-M002
+	do i8secok-check-ok parameters
+		sys-consolidation-division login-id() "ZVRF" "M003"
+		returning ws-ZVRF-M003
+	do i8secok-check-ok parameters
+		sys-consolidation-division login-id() "ZVRF" "M004"
+		returning ws-ZVRF-M004
+	do i8secok-check-ok parameters
+		sys-consolidation-division login-id() "ZVRF" "T001"
+		returning ws-ZVRF-T001
+	do i8secok-check-ok parameters
+		sys-consolidation-division login-id() "ZVRF" "T002"
+		returning ws-ZVRF-T002
+	do i8secok-check-ok parameters
+		sys-consolidation-division login-id() "ZVRF" "E002"
+		returning ws-ZVRF-E002
+	do i8secok-check-ok parameters
+		sys-consolidation-division login-id() "ZVRF" "M005"
+		returning ws-ZVRF-M005
+	do rf-menu
+end-procedure
+
+menu rf-menu
+	no-hide
+before
+	clear
+detail
+	option "1. Enquiry" @1,1
+		when ws-ZVRF-E001
+		spl "vglrf/vglrfenq"
+	option "2. Count" @2,1
+		when ws-ZVRF-T002
+		spl "vglrf/vglrfcount"
+	option "3. Pick" @3,1
+		when ws-ZVRF-T001
+		spl "vglrf/vglrfpick"
+	option "4. Collect Data" @4,1
+		when ws-ZVRF-M002
+		spl "vglrf/vglrfdatacap"
+	option "5. Order Enquiry" @5,1
+		when ws-ZVRF-E002
+		spl "vglrf/vglrfoenq"
+	option "6. Production" @6,1
+		when ws-ZVRF-M005
+		spl "vglrf/vglrfprod"
+	option "8. test screen" @8,1
+		when ws-ZVRF-M004
+		spl "vglrf/vglrftest"
+	option "9. Exit" @9,1
+		exit
+endmenu
+
+
+

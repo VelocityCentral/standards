@@ -1,0 +1,38 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : 
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2019
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: sys/nzpostapikey.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 24Sep19  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+ 
+//link "clib/clibnzpost2"
+link "clib/clibvnzpost"
+
+field
+	ws-function-title						type string
+
+procedure main
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8secabt-check-abort
+		parameters are sys-consolidation-division login-id() "ZUSR" "M006"
+		returning ws-function-title 
+	do i8proglog-write-log
+	do clibvnzpost-maintain-keys correct once
+end-procedure
+

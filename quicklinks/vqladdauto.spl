@@ -1,0 +1,149 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : 
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2018
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: quicklinks/addnewlinks.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 17Mar18  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+/*
+
+For full documentation see clibvqlauto
+
+*/
+ 
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+#include "../include/i8gparam.spl"
+#include "../include/iwrtevntlog.spl"
+#include "../quicklinks/ivqlauto.spl"
+
+link 'clib/clibvqlauto'
+link 'clib/clibwrtevntlog'
+
+// pattern here trims off leading directory paths
+#define LOG(A) \
+	do clibwrtevntlog-write-log parameters are IWRTEVNTLOG_LEVEL_DEBUG 'APPS'   \
+		str-concat(substring(get-param(0),pattern(get-param(0),"[~/]*$"),str-len(get-param(0))) \
+		,"|",str(pid())) \
+		A
+#define KEYSARRAY  pic x(128) type string occurs 10
+
+field
+	ws-function-title					type string
+	ws-results							pic x(1024) type string
+	// Parameters
+	// -folder foldername
+	ws-folder							pic x(1024) type string
+	// -today (only files today)
+	ws-today							type boolean
+	// -minsago (only files changed in the last n mins)
+	ws-lastnmins						type number
+	ws-recurse							type boolean
+
+object csv-file
+	type is external
+	record is
+		cf-filename						pic x(512) type string
+		cf-foldername					pic x(1024) type string
+	end-record
+
+procedure main
+returning
+	lr-result							pic x(1024) type string
+	lr-pid								pic x(10) type string
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8secabt-check-abort
+		parameters are sys-consolidation-division login-id() "ZQL" "T001"
+		returning ws-function-title 
+	I8GPARAM_ALPHA("-folder",spaces,ws-folder)
+	I8GPARAM_FLAG("-today",FALSE,ws-today)
+	I8GPARAM_FLAG("-recurse",FALSE,ws-recurse)
+	I8GPARAM_NUM("-minsago",0,ws-lastnmins)
+	do i8proglog-write-log
+	do run-this-pgm
+	set lr-pid = str(pid())
+	set lr-result = concat(lr-pid, "|", ws-results)
+	LOG(lr-result)
+end-procedure
+
+procedure run-this-pgm
+	if file_exists(ws-folder,FALSE) != 2
+		set ws-results = concat("Folder " ws-folder " does not exist")
+		exit 1
+	endif
+	do get-files 
+	if exit-status() != 0
+		exit
+	endif
+	do process-files
+end-procedure
+
+procedure get-files
+local
+	lf-cmd							pic x(1024) type string
+	lf-filename						pic x(1024) type string
+	//
+	set lf-filename = concat("/tmp/folder_list" str(pid()) ".csv")
+	set lf-cmd = concat("find " ws-folder )
+	if not ws-recurse
+		string lf-cmd appending " -maxdepth 1 "
+	endif
+	string lf-cmd appending " ! -type d "
+	// for files created in the last day
+	// There is no real way to know when a file was CREATED.  the closest
+	// we get is when it changed.
+	// (-atime : file access -mtime : file contents changed -ctime : file
+	// inode changed e.g. chmod)
+	if ws-today 
+		string lf-cmd appending concat(" -daystart -mtime -1") 
+	elseif ws-lastnmins > 0
+		string lf-cmd appending concat(" -mmin -" str(ws-lastnmins))
+	endif
+	string lf-cmd appending concat(' -printf "%f|%h\n" > ' lf-filename)
+	// make sure we get the errors in the output stream
+	string lf-cmd appending concat(' 2>&1 ')
+	LOG(lf-cmd)
+	command "sh"  parameters are "-c" lf-cmd
+	open csv-file
+		file is lf-filename
+	on error
+		set ws-results = concat("Unable to open file " lf-filename)
+		LOG(ws-results)
+		exit 1
+	endon
+end-procedure
+
+procedure process-files
+local
+	lf-counter						type number
+#ifdef DEBUG
+	report "Quicklinks Auto Add"
+#endif
+	select * from csv-file
+	detail
+		if pattern(cf-filename,'Permission denied') != 0
+			LOG(str-concat('Permission Denied:' cf-filename))
+		else
+			set lf-counter += 1
+			do clibvqlauto-assign-object
+				parameters are cf-filename cf-foldername 
+		endif
+	end-select
+	set ws-results = concat(str(lf-counter) " files processed")
+	close csv-file and remove
+#ifdef DEBUG
+	report finished
+#endif
+end-procedure

@@ -1,0 +1,1257 @@
+<?xml version="1.0"?>
+<Objects>
+  <Table dictionary="BMS" Description="system-modules-functions:ZVG|M001" ImpNodeID="1">
+    <system-modules-functions Description="system-modules-functions:ZVG|M001">
+      <smf-module>ZVG</smf-module>
+      <smf-function>M001</smf-function>
+      <smf-description>IPMI Maint</smf-description>
+      <smf-type>P</smf-type>
+      <smf-command>ipmi/codemaint</smf-command>
+      <smf-parameters>
+        <p1></p1>
+        <p2></p2>
+        <p3></p3>
+        <p4></p4>
+        <p5></p5>
+        <p6></p6>
+        <p7></p7>
+        <p8></p8>
+        <p9></p9>
+        <p10></p10>
+        <p11></p11>
+        <p12></p12>
+        <p13></p13>
+        <p14></p14>
+        <p15></p15>
+        <p16></p16>
+        <p17></p17>
+        <p18></p18>
+        <p19></p19>
+        <p20></p20>
+      </smf-parameters>
+      <smf-help>Keyword Rebuild</smf-help>
+      <smf-menu-icon>4</smf-menu-icon>
+      <smf-user-modified></smf-user-modified>
+      <smf-help-file></smf-help-file>
+      <smf-help-file-context-id>0</smf-help-file-context-id>
+      <smf-user-id>rayb</smf-user-id>
+      <smf-date-time-stamp>25-JUL-2015 08:06:05</smf-date-time-stamp>
+      <smf-alias>ZVG.M001</smf-alias>
+      <smf-from-related-dict-ver>0.00</smf-from-related-dict-ver>
+      <smf-to-related-dict-ver>0.00</smf-to-related-dict-ver>
+      <smf-spare-flag1></smf-spare-flag1>
+    </system-modules-functions>
+  </Table>
+  <Table dictionary="BMS" Description="event-manual-table-joins:ipmi-readings/ipmi-master" ImpNodeID="2">
+    <event-manual-table-joins Description="event-manual-table-joins:101">
+      <emtj-seq-no>101</emtj-seq-no>
+      <emtj-table-from>ipmi-readings</emtj-table-from>
+      <emtj-table-to>ipmi-master</emtj-table-to>
+      <emtj-fields-from>
+        <p1>ipmi-code</p1>
+        <p2></p2>
+        <p3></p3>
+        <p4></p4>
+        <p5></p5>
+      </emtj-fields-from>
+      <emtj-fields-to>
+        <p1>ipmi-code</p1>
+        <p2></p2>
+        <p3></p3>
+        <p4></p4>
+        <p5></p5>
+      </emtj-fields-to>
+      <emtj-table-intermediate></emtj-table-intermediate>
+      <emtj-fields-intermediate>
+        <p1></p1>
+        <p2></p2>
+        <p3></p3>
+        <p4></p4>
+        <p5></p5>
+      </emtj-fields-intermediate>
+      <emtj-fields-intermediate-to>
+        <p1></p1>
+        <p2></p2>
+        <p3></p3>
+        <p4></p4>
+        <p5></p5>
+      </emtj-fields-intermediate-to>
+    </event-manual-table-joins>
+  </Table>
+  <Alert Description="Velocity Internal IPMI failure (Boolean)" ImpNodeID="3">
+    <event-master Description="event-master:11">
+      <em-identifier>11</em-identifier>
+      <em-comp-code></em-comp-code>
+      <em-description>Velocity Internal IPMI failure (Boolean)</em-description>
+      <em-master-table>ipmi-readings</em-master-table>
+      <em-notification-method>E</em-notification-method>
+      <em-email-send-method>D</em-email-send-method>
+      <em-linked-event-id>0</em-linked-event-id>
+      <em-before-update></em-before-update>
+      <em-after-update>N</em-after-update>
+      <em-before-insert></em-before-insert>
+      <em-after-insert>Y</em-after-insert>
+      <em-before-delete></em-before-delete>
+      <em-after-delete>N</em-after-delete>
+      <em-scheduled-trigger>N</em-scheduled-trigger>
+      <em-external-trigger>N</em-external-trigger>
+      <em-external-apply-filter></em-external-apply-filter>
+      <em-workflow-name></em-workflow-name>
+      <em-workflow-process-name></em-workflow-process-name>
+      <em-workflow-data></em-workflow-data>
+      <em-launch-program></em-launch-program>
+      <em-launch-type></em-launch-type>
+      <em-email-subject>Velocity Internal - IPMI Readings</em-email-subject>
+      <em-log-recipients>Y</em-log-recipients>
+      <em-email-format>1</em-email-format>
+      <em-message-box-title></em-message-box-title>
+      <em-message-box-icon></em-message-box-icon>
+      <em-message-box-user-icon-path></em-message-box-user-icon-path>
+      <em-hyperlink-1></em-hyperlink-1>
+      <em-hyperlink-2></em-hyperlink-2>
+      <em-hyperlink-1-text></em-hyperlink-1-text>
+      <em-hyperlink-2-text></em-hyperlink-2-text>
+      <em-message-box-exit-status>0</em-message-box-exit-status>
+      <em-fax-coverpage></em-fax-coverpage>
+      <em-module></em-module>
+      <em-function></em-function>
+      <em-status>A</em-status>
+      <em-start-date></em-start-date>
+      <em-end-date>06-JUN-2079</em-end-date>
+      <em-login-id>rayb</em-login-id>
+      <em-date-stamp>28-JUL-2015 18:08:35</em-date-stamp>
+      <em-user-only-date1></em-user-only-date1>
+      <em-user-only-date2></em-user-only-date2>
+      <em-user-only-alpha20-1></em-user-only-alpha20-1>
+      <em-user-only-alpha20-2></em-user-only-alpha20-2>
+      <em-user-only-alpha4-1></em-user-only-alpha4-1>
+      <em-user-only-alpha4-2></em-user-only-alpha4-2>
+      <em-user-only-alpha4-3></em-user-only-alpha4-3>
+      <em-user-only-alpha4-4></em-user-only-alpha4-4>
+      <em-user-only-num1>0.00</em-user-only-num1>
+      <em-user-only-num2>0.00</em-user-only-num2>
+      <em-user-only-num3>0.00</em-user-only-num3>
+      <em-user-only-num4>0.00</em-user-only-num4>
+    </event-master>
+    <event-master-filters Description="event-master-filters:11|1">
+      <em-identifier>11</em-identifier>
+      <emf-seq-no>1</emf-seq-no>
+      <emf-field-name>n.ipmi-reading-value</emf-field-name>
+      <emf-operator>EQUAL TO</emf-operator>
+      <emf-operator-value>0</emf-operator-value>
+      <emf-operator-relationship>A</emf-operator-relationship>
+      <emf-table-name></emf-table-name>
+      <emf-join></emf-join>
+      <emf-calculation></emf-calculation>
+      <emf-calculation2></emf-calculation2>
+    </event-master-filters>
+    <event-master-filters Description="event-master-filters:11|2">
+      <em-identifier>11</em-identifier>
+      <emf-seq-no>2</emf-seq-no>
+      <emf-field-name>n.ipmi-reading-unit</emf-field-name>
+      <emf-operator>EQUAL TO</emf-operator>
+      <emf-operator-value>T/F</emf-operator-value>
+      <emf-operator-relationship>A</emf-operator-relationship>
+      <emf-table-name></emf-table-name>
+      <emf-join></emf-join>
+      <emf-calculation></emf-calculation>
+      <emf-calculation2></emf-calculation2>
+    </event-master-filters>
+    <event-master-text Description="event-master-text:11|1">
+      <em-identifier>11</em-identifier>
+      <emt-seq-no>1</emt-seq-no>
+      <emt-text>The system monitor has detected a failure on unit {ipmi-code} {ipmi-description}</emt-text>
+    </event-master-text>
+    <event-master-text Description="event-master-text:11|2">
+      <em-identifier>11</em-identifier>
+      <emt-seq-no>2</emt-seq-no>
+      <emt-text></emt-text>
+    </event-master-text>
+    <event-master-text Description="event-master-text:11|3">
+      <em-identifier>11</em-identifier>
+      <emt-seq-no>3</emt-seq-no>
+      <emt-text>Your attention is required.</emt-text>
+    </event-master-text>
+    <event-master-extended Description="event-master-extended:11">
+      <em-identifier>11</em-identifier>
+      <eme-message-box-bell>0</eme-message-box-bell>
+      <eme-email-send-delay>15</eme-email-send-delay>
+      <eme-spare-num1>0.00</eme-spare-num1>
+      <eme-spare-num2>0.00</eme-spare-num2>
+      <eme-spare-alpha-80></eme-spare-alpha-80>
+      <eme-sapre-alpha-20></eme-sapre-alpha-20>
+      <eme-spare-alpha-10-1></eme-spare-alpha-10-1>
+      <eme-spare-alpha-10-2></eme-spare-alpha-10-2>
+      <eme-custom-email-template></eme-custom-email-template>
+      <eme-spare-alpha1-2></eme-spare-alpha1-2>
+      <eme-spare-alpha1-3></eme-spare-alpha1-3>
+      <eme-spare-alpha1-4></eme-spare-alpha1-4>
+      <eme-spare-datetime-1></eme-spare-datetime-1>
+      <eme-spare-datetime-2></eme-spare-datetime-2>
+    </event-master-extended>
+    <event-recipients-user Description="event-recipients-user:11|psd">
+      <em-identifier>11</em-identifier>
+      <eru-login-id>psd</eru-login-id>
+    </event-recipients-user>
+  </Alert>
+  <Alert Description="Velocity Internal IPMI failure (Numeric)" ImpNodeID="4">
+    <event-master Description="event-master:12">
+      <em-identifier>12</em-identifier>
+      <em-comp-code></em-comp-code>
+      <em-description>Velocity Internal IPMI failure (Numeric)</em-description>
+      <em-master-table>ipmi-readings</em-master-table>
+      <em-notification-method>E</em-notification-method>
+      <em-email-send-method>D</em-email-send-method>
+      <em-linked-event-id>0</em-linked-event-id>
+      <em-before-update></em-before-update>
+      <em-after-update>N</em-after-update>
+      <em-before-insert></em-before-insert>
+      <em-after-insert>Y</em-after-insert>
+      <em-before-delete></em-before-delete>
+      <em-after-delete>N</em-after-delete>
+      <em-scheduled-trigger>N</em-scheduled-trigger>
+      <em-external-trigger>N</em-external-trigger>
+      <em-external-apply-filter></em-external-apply-filter>
+      <em-workflow-name></em-workflow-name>
+      <em-workflow-process-name></em-workflow-process-name>
+      <em-workflow-data></em-workflow-data>
+      <em-launch-program></em-launch-program>
+      <em-launch-type></em-launch-type>
+      <em-email-subject>Velocity Internal - IPMI Readings</em-email-subject>
+      <em-log-recipients>Y</em-log-recipients>
+      <em-email-format>1</em-email-format>
+      <em-message-box-title></em-message-box-title>
+      <em-message-box-icon></em-message-box-icon>
+      <em-message-box-user-icon-path></em-message-box-user-icon-path>
+      <em-hyperlink-1></em-hyperlink-1>
+      <em-hyperlink-2></em-hyperlink-2>
+      <em-hyperlink-1-text></em-hyperlink-1-text>
+      <em-hyperlink-2-text></em-hyperlink-2-text>
+      <em-message-box-exit-status>0</em-message-box-exit-status>
+      <em-fax-coverpage></em-fax-coverpage>
+      <em-module></em-module>
+      <em-function></em-function>
+      <em-status>A</em-status>
+      <em-start-date></em-start-date>
+      <em-end-date>06-JUN-2079</em-end-date>
+      <em-login-id>rayb</em-login-id>
+      <em-date-stamp>28-JUL-2015 18:08:54</em-date-stamp>
+      <em-user-only-date1></em-user-only-date1>
+      <em-user-only-date2></em-user-only-date2>
+      <em-user-only-alpha20-1></em-user-only-alpha20-1>
+      <em-user-only-alpha20-2></em-user-only-alpha20-2>
+      <em-user-only-alpha4-1></em-user-only-alpha4-1>
+      <em-user-only-alpha4-2></em-user-only-alpha4-2>
+      <em-user-only-alpha4-3></em-user-only-alpha4-3>
+      <em-user-only-alpha4-4></em-user-only-alpha4-4>
+      <em-user-only-num1>0.00</em-user-only-num1>
+      <em-user-only-num2>0.00</em-user-only-num2>
+      <em-user-only-num3>0.00</em-user-only-num3>
+      <em-user-only-num4>0.00</em-user-only-num4>
+    </event-master>
+    <event-master-filters Description="event-master-filters:12|1">
+      <em-identifier>12</em-identifier>
+      <emf-seq-no>1</emf-seq-no>
+      <emf-field-name>n.ipmi-reading-unit</emf-field-name>
+      <emf-operator>NOT EQUAL TO</emf-operator>
+      <emf-operator-value>T/F</emf-operator-value>
+      <emf-operator-relationship>A</emf-operator-relationship>
+      <emf-table-name></emf-table-name>
+      <emf-join></emf-join>
+      <emf-calculation></emf-calculation>
+      <emf-calculation2></emf-calculation2>
+    </event-master-filters>
+    <event-master-filters Description="event-master-filters:12|2">
+      <em-identifier>12</em-identifier>
+      <emf-seq-no>2</emf-seq-no>
+      <emf-field-name>ipmi-trigger-low</emf-field-name>
+      <emf-operator>GREATER THAN</emf-operator>
+      <emf-operator-value>n.ipmi-reading-value</emf-operator-value>
+      <emf-operator-relationship>O</emf-operator-relationship>
+      <emf-table-name>ipmi-master</emf-table-name>
+      <emf-join> ipmi-code</emf-join>
+      <emf-calculation></emf-calculation>
+      <emf-calculation2></emf-calculation2>
+    </event-master-filters>
+    <event-master-filters Description="event-master-filters:12|3">
+      <em-identifier>12</em-identifier>
+      <emf-seq-no>3</emf-seq-no>
+      <emf-field-name>n.ipmi-reading-unit</emf-field-name>
+      <emf-operator>NOT EQUAL TO</emf-operator>
+      <emf-operator-value>T/F</emf-operator-value>
+      <emf-operator-relationship>A</emf-operator-relationship>
+      <emf-table-name></emf-table-name>
+      <emf-join></emf-join>
+      <emf-calculation></emf-calculation>
+      <emf-calculation2></emf-calculation2>
+    </event-master-filters>
+    <event-master-filters Description="event-master-filters:12|4">
+      <em-identifier>12</em-identifier>
+      <emf-seq-no>4</emf-seq-no>
+      <emf-field-name>ipmi-trigger-high</emf-field-name>
+      <emf-operator>LESS THAN</emf-operator>
+      <emf-operator-value>n.ipmi-reading-value</emf-operator-value>
+      <emf-operator-relationship></emf-operator-relationship>
+      <emf-table-name>ipmi-master</emf-table-name>
+      <emf-join> ipmi-code</emf-join>
+      <emf-calculation></emf-calculation>
+      <emf-calculation2></emf-calculation2>
+    </event-master-filters>
+    <event-master-text Description="event-master-text:12|1">
+      <em-identifier>12</em-identifier>
+      <emt-seq-no>1</emt-seq-no>
+      <emt-text>Warning - A reading value has fallen outside the bounds for</emt-text>
+    </event-master-text>
+    <event-master-text Description="event-master-text:12|2">
+      <em-identifier>12</em-identifier>
+      <emt-seq-no>2</emt-seq-no>
+      <emt-text>Monitor Point  {ipmi-code} : {ipmi-description}</emt-text>
+    </event-master-text>
+    <event-master-text Description="event-master-text:12|3">
+      <em-identifier>12</em-identifier>
+      <emt-seq-no>3</emt-seq-no>
+      <emt-text></emt-text>
+    </event-master-text>
+    <event-master-text Description="event-master-text:12|4">
+      <em-identifier>12</em-identifier>
+      <emt-seq-no>4</emt-seq-no>
+      <emt-text>The value read was : {n.ipmi-reading-value} {ipmi-reading-unit}</emt-text>
+    </event-master-text>
+    <event-master-text Description="event-master-text:12|5">
+      <em-identifier>12</em-identifier>
+      <emt-seq-no>5</emt-seq-no>
+      <emt-text>The reading value should be between {ipmi-trigger-low} and {ipmi-trigger-high}</emt-text>
+    </event-master-text>
+    <event-master-extended Description="event-master-extended:12">
+      <em-identifier>12</em-identifier>
+      <eme-message-box-bell>0</eme-message-box-bell>
+      <eme-email-send-delay>15</eme-email-send-delay>
+      <eme-spare-num1>0.00</eme-spare-num1>
+      <eme-spare-num2>0.00</eme-spare-num2>
+      <eme-spare-alpha-80></eme-spare-alpha-80>
+      <eme-sapre-alpha-20></eme-sapre-alpha-20>
+      <eme-spare-alpha-10-1></eme-spare-alpha-10-1>
+      <eme-spare-alpha-10-2></eme-spare-alpha-10-2>
+      <eme-custom-email-template></eme-custom-email-template>
+      <eme-spare-alpha1-2></eme-spare-alpha1-2>
+      <eme-spare-alpha1-3></eme-spare-alpha1-3>
+      <eme-spare-alpha1-4></eme-spare-alpha1-4>
+      <eme-spare-datetime-1></eme-spare-datetime-1>
+      <eme-spare-datetime-2></eme-spare-datetime-2>
+    </event-master-extended>
+    <event-master-text-field-joins Description="event-master-text-field-joins:12|1">
+      <em-identifier>12</em-identifier>
+      <emtfj-seq-no>1</emtfj-seq-no>
+      <emtfj-table-name>ipmi-master</emtfj-table-name>
+      <emtfj-join> ipmi-code</emtfj-join>
+    </event-master-text-field-joins>
+    <event-recipients-user Description="event-recipients-user:12|psd">
+      <em-identifier>12</em-identifier>
+      <eru-login-id>psd</eru-login-id>
+    </event-recipients-user>
+  </Alert>
+  <Dictionary table_name="ipmi-master" dictionary="D" Description="ipmi-master" ImpNodeID="5">
+    <dict-object Description="dict-object:ipmi-master">
+      <obj-name>ipmi-master</obj-name>
+      <obj-id>9</obj-id>
+      <obj-old-id>1</obj-old-id>
+      <obj-doc>Ipmi Master</obj-doc>
+      <obj-sec>2</obj-sec>
+      <obj-file>$PRONTO/sysinfo/ipmimast</obj-file>
+      <obj-version>0</obj-version>
+      <obj-type>I</obj-type>
+      <obj-sep></obj-sep>
+      <obj-flags>0</obj-flags>
+      <obj-audit></obj-audit>
+      <obj-app-lock>N</obj-app-lock>
+      <obj-num-flds>10</obj-num-flds>
+      <obj-date-time>02-SEP-2015 06:45:29</obj-date-time>
+      <obj-user>rayb</obj-user>
+      <documentation>
+        <dict-documentation Description="dict-documentation:O|9|1|1">
+          <doc-id-type>O</doc-id-type>
+          <doc-id>9</doc-id>
+          <doc-type>1</doc-type>
+          <doc-line-no>1</doc-line-no>
+          <doc-line>This file contains all the monitor points and trigger data that is used</doc-line>
+        </dict-documentation>
+        <dict-documentation Description="dict-documentation:O|9|1|2">
+          <doc-id-type>O</doc-id-type>
+          <doc-id>9</doc-id>
+          <doc-type>1</doc-type>
+          <doc-line-no>2</doc-line-no>
+          <doc-line>to Fire Alterts using alert intelligence</doc-line>
+        </dict-documentation>
+      </documentation>
+    </dict-object>
+    <columns>
+      <dict-field Description="dict-field:ipmi-code">
+        <fld-name>ipmi-code</fld-name>
+        <fld-id>1</fld-id>
+        <fld-old-id>0</fld-old-id>
+        <fld-like-id>1</fld-like-id>
+        <fld-type>A</fld-type>
+        <fld-tot-size>10</fld-tot-size>
+        <fld-decs>0</fld-decs>
+        <fld-signed></fld-signed>
+        <fld-pres-size>0</fld-pres-size>
+        <fld-pres-decs>0</fld-pres-decs>
+        <fld-max-size>0</fld-max-size>
+        <fld-max-decs>0</fld-max-decs>
+        <fld-sec>0</fld-sec>
+        <fld-occurs>1</fld-occurs>
+        <fld-doc>Code</fld-doc>
+        <fld-col-name>code</fld-col-name>
+        <fld-flags>0</fld-flags>
+        <fld-audit></fld-audit>
+        <fld-form-title>0</fld-form-title>
+        <fld-col-title>0</fld-col-title>
+        <fld-help-line>0</fld-help-line>
+        <fld-date-time>21-APR-2011 05:57:34</fld-date-time>
+        <fld-user>rayb</fld-user>
+        <documentation>
+          <dict-documentation Description="dict-documentation:F|1|3|10">
+            <doc-id-type>F</doc-id-type>
+            <doc-id>1</doc-id>
+            <doc-type>3</doc-type>
+            <doc-line-no>10</doc-line-no>
+            <doc-line>help " **Enter Help Text in quotes**"</doc-line>
+          </dict-documentation>
+          <dict-documentation Description="dict-documentation:F|1|4|0">
+            <doc-id-type>F</doc-id-type>
+            <doc-id>1</doc-id>
+            <doc-type>4</doc-type>
+            <doc-line-no>0</doc-line-no>
+            <doc-line>Code</doc-line>
+          </dict-documentation>
+          <dict-documentation Description="dict-documentation:F|1|7|0">
+            <doc-id-type>F</doc-id-type>
+            <doc-id>1</doc-id>
+            <doc-type>7</doc-type>
+            <doc-line-no>0</doc-line-no>
+            <doc-line>10370,sys06</doc-line>
+          </dict-documentation>
+        </documentation>
+      </dict-field>
+      <dict-field Description="dict-field:ipmi-description">
+        <fld-name>ipmi-description</fld-name>
+        <fld-id>2</fld-id>
+        <fld-old-id>0</fld-old-id>
+        <fld-like-id>2</fld-like-id>
+        <fld-type>A</fld-type>
+        <fld-tot-size>30</fld-tot-size>
+        <fld-decs>0</fld-decs>
+        <fld-signed></fld-signed>
+        <fld-pres-size>0</fld-pres-size>
+        <fld-pres-decs>0</fld-pres-decs>
+        <fld-max-size>0</fld-max-size>
+        <fld-max-decs>0</fld-max-decs>
+        <fld-sec>0</fld-sec>
+        <fld-occurs>1</fld-occurs>
+        <fld-doc>Description</fld-doc>
+        <fld-col-name>description</fld-col-name>
+        <fld-flags>0</fld-flags>
+        <fld-audit></fld-audit>
+        <fld-form-title>0</fld-form-title>
+        <fld-col-title>0</fld-col-title>
+        <fld-help-line>0</fld-help-line>
+        <fld-date-time>21-APR-2011 06:10:39</fld-date-time>
+        <fld-user>rayb</fld-user>
+        <documentation>
+          <dict-documentation Description="dict-documentation:F|2|3|10">
+            <doc-id-type>F</doc-id-type>
+            <doc-id>2</doc-id>
+            <doc-type>3</doc-type>
+            <doc-line-no>10</doc-line-no>
+            <doc-line>help "The description of this reading"</doc-line>
+          </dict-documentation>
+          <dict-documentation Description="dict-documentation:F|2|4|0">
+            <doc-id-type>F</doc-id-type>
+            <doc-id>2</doc-id>
+            <doc-type>4</doc-type>
+            <doc-line-no>0</doc-line-no>
+            <doc-line>Description</doc-line>
+          </dict-documentation>
+          <dict-documentation Description="dict-documentation:F|2|7|0">
+            <doc-id-type>F</doc-id-type>
+            <doc-id>2</doc-id>
+            <doc-type>7</doc-type>
+            <doc-line-no>0</doc-line-no>
+            <doc-line>10012,sys02</doc-line>
+          </dict-documentation>
+        </documentation>
+      </dict-field>
+      <dict-field Description="dict-field:ipmi-match-text">
+        <fld-name>ipmi-match-text</fld-name>
+        <fld-id>3</fld-id>
+        <fld-old-id>0</fld-old-id>
+        <fld-like-id>3</fld-like-id>
+        <fld-type>A</fld-type>
+        <fld-tot-size>50</fld-tot-size>
+        <fld-decs>0</fld-decs>
+        <fld-signed></fld-signed>
+        <fld-pres-size>0</fld-pres-size>
+        <fld-pres-decs>0</fld-pres-decs>
+        <fld-max-size>0</fld-max-size>
+        <fld-max-decs>0</fld-max-decs>
+        <fld-sec>0</fld-sec>
+        <fld-occurs>1</fld-occurs>
+        <fld-doc>Match Text</fld-doc>
+        <fld-col-name>match-text</fld-col-name>
+        <fld-flags>0</fld-flags>
+        <fld-audit></fld-audit>
+        <fld-form-title>0</fld-form-title>
+        <fld-col-title>0</fld-col-title>
+        <fld-help-line>0</fld-help-line>
+        <fld-date-time>21-APR-2011 05:59:03</fld-date-time>
+        <fld-user>rayb</fld-user>
+        <documentation>
+          <dict-documentation Description="dict-documentation:F|3|3|10">
+            <doc-id-type>F</doc-id-type>
+            <doc-id>3</doc-id>
+            <doc-type>3</doc-type>
+            <doc-line-no>10</doc-line-no>
+            <doc-line>help "Text to look for in the ipmitool sdr"</doc-line>
+          </dict-documentation>
+          <dict-documentation Description="dict-documentation:F|3|4|0">
+            <doc-id-type>F</doc-id-type>
+            <doc-id>3</doc-id>
+            <doc-type>4</doc-type>
+            <doc-line-no>0</doc-line-no>
+            <doc-line>Match Text</doc-line>
+          </dict-documentation>
+        </documentation>
+      </dict-field>
+      <dict-field Description="dict-field:ipmi-reading-type">
+        <fld-name>ipmi-reading-type</fld-name>
+        <fld-id>4</fld-id>
+        <fld-old-id>0</fld-old-id>
+        <fld-like-id>4</fld-like-id>
+        <fld-type>A</fld-type>
+        <fld-tot-size>1</fld-tot-size>
+        <fld-decs>0</fld-decs>
+        <fld-signed></fld-signed>
+        <fld-pres-size>0</fld-pres-size>
+        <fld-pres-decs>0</fld-pres-decs>
+        <fld-max-size>0</fld-max-size>
+        <fld-max-decs>0</fld-max-decs>
+        <fld-sec>0</fld-sec>
+        <fld-occurs>1</fld-occurs>
+        <fld-doc>Reading Type</fld-doc>
+        <fld-col-name>reading-type</fld-col-name>
+        <fld-flags>0</fld-flags>
+        <fld-audit></fld-audit>
+        <fld-form-title>0</fld-form-title>
+        <fld-col-title>0</fld-col-title>
+        <fld-help-line>0</fld-help-line>
+        <fld-date-time>21-APR-2011 06:01:59</fld-date-time>
+        <fld-user>rayb</fld-user>
+        <documentation>
+          <dict-documentation Description="dict-documentation:F|4|2|1">
+            <doc-id-type>F</doc-id-type>
+            <doc-id>4</doc-id>
+            <doc-type>2</doc-type>
+            <doc-line-no>1</doc-line-no>
+            <doc-line>the field can contain either numeric data such as temperature or Fan RPM</doc-line>
+          </dict-documentation>
+          <dict-documentation Description="dict-documentation:F|4|2|2">
+            <doc-id-type>F</doc-id-type>
+            <doc-id>4</doc-id>
+            <doc-type>2</doc-type>
+            <doc-line-no>2</doc-line-no>
+            <doc-line>(type N for numeric) or it may contain just an OK/Not OK value in the case of</doc-line>
+          </dict-documentation>
+          <dict-documentation Description="dict-documentation:F|4|2|3">
+            <doc-id-type>F</doc-id-type>
+            <doc-id>4</doc-id>
+            <doc-type>2</doc-type>
+            <doc-line-no>3</doc-line-no>
+            <doc-line>redundant power supplies or disks.</doc-line>
+          </dict-documentation>
+          <dict-documentation Description="dict-documentation:F|4|3|10">
+            <doc-id-type>F</doc-id-type>
+            <doc-id>4</doc-id>
+            <doc-type>3</doc-type>
+            <doc-line-no>10</doc-line-no>
+            <doc-line>help "N)umeric B)oolean"</doc-line>
+          </dict-documentation>
+          <dict-documentation Description="dict-documentation:F|4|3|20">
+            <doc-id-type>F</doc-id-type>
+            <doc-id>4</doc-id>
+            <doc-type>3</doc-type>
+            <doc-line-no>20</doc-line-no>
+            <doc-line>allow "N" "B"</doc-line>
+          </dict-documentation>
+          <dict-documentation Description="dict-documentation:F|4|4|0">
+            <doc-id-type>F</doc-id-type>
+            <doc-id>4</doc-id>
+            <doc-type>4</doc-type>
+            <doc-line-no>0</doc-line-no>
+            <doc-line>Reading Type</doc-line>
+          </dict-documentation>
+        </documentation>
+      </dict-field>
+      <dict-field Description="dict-field:ipmi-reading-field">
+        <fld-name>ipmi-reading-field</fld-name>
+        <fld-id>5</fld-id>
+        <fld-old-id>0</fld-old-id>
+        <fld-like-id>5</fld-like-id>
+        <fld-type>N</fld-type>
+        <fld-tot-size>3</fld-tot-size>
+        <fld-decs>0</fld-decs>
+        <fld-signed>N</fld-signed>
+        <fld-pres-size>0</fld-pres-size>
+        <fld-pres-decs>0</fld-pres-decs>
+        <fld-max-size>0</fld-max-size>
+        <fld-max-decs>0</fld-max-decs>
+        <fld-sec>0</fld-sec>
+        <fld-occurs>1</fld-occurs>
+        <fld-doc>Reading Field</fld-doc>
+        <fld-col-name>reading-field</fld-col-name>
+        <fld-flags>0</fld-flags>
+        <fld-audit></fld-audit>
+        <fld-form-title>0</fld-form-title>
+        <fld-col-title>0</fld-col-title>
+        <fld-help-line>0</fld-help-line>
+        <fld-date-time>21-APR-2011 06:04:47</fld-date-time>
+        <fld-user>rayb</fld-user>
+        <documentation>
+          <dict-documentation Description="dict-documentation:F|5|2|1">
+            <doc-id-type>F</doc-id-type>
+            <doc-id>5</doc-id>
+            <doc-type>2</doc-type>
+            <doc-line-no>1</doc-line-no>
+            <doc-line>the ipmi reading file should contain the date,time, sensor name in the first</doc-line>
+          </dict-documentation>
+          <dict-documentation Description="dict-documentation:F|5|2|2">
+            <doc-id-type>F</doc-id-type>
+            <doc-id>5</doc-id>
+            <doc-type>2</doc-type>
+            <doc-line-no>2</doc-line-no>
+            <doc-line>three fields.  the data field may be in any field from 4 onwards.</doc-line>
+          </dict-documentation>
+          <dict-documentation Description="dict-documentation:F|5|2|3">
+            <doc-id-type>F</doc-id-type>
+            <doc-id>5</doc-id>
+            <doc-type>2</doc-type>
+            <doc-line-no>3</doc-line-no>
+            <doc-line>This field contains the field number in the file.  Field number 1 is the first</doc-line>
+          </dict-documentation>
+          <dict-documentation Description="dict-documentation:F|5|2|4">
+            <doc-id-type>F</doc-id-type>
+            <doc-id>5</doc-id>
+            <doc-type>2</doc-type>
+            <doc-line-no>4</doc-line-no>
+            <doc-line>field on the file (date).</doc-line>
+          </dict-documentation>
+          <dict-documentation Description="dict-documentation:F|5|3|10">
+            <doc-id-type>F</doc-id-type>
+            <doc-id>5</doc-id>
+            <doc-type>3</doc-type>
+            <doc-line-no>10</doc-line-no>
+            <doc-line>help "The number of the field that contains the value"</doc-line>
+          </dict-documentation>
+          <dict-documentation Description="dict-documentation:F|5|3|20">
+            <doc-id-type>F</doc-id-type>
+            <doc-id>5</doc-id>
+            <doc-type>3</doc-type>
+            <doc-line-no>20</doc-line-no>
+            <doc-line>default 4</doc-line>
+          </dict-documentation>
+          <dict-documentation Description="dict-documentation:F|5|3|30">
+            <doc-id-type>F</doc-id-type>
+            <doc-id>5</doc-id>
+            <doc-type>3</doc-type>
+            <doc-line-no>30</doc-line-no>
+            <doc-line>allow 4-10</doc-line>
+          </dict-documentation>
+          <dict-documentation Description="dict-documentation:F|5|4|0">
+            <doc-id-type>F</doc-id-type>
+            <doc-id>5</doc-id>
+            <doc-type>4</doc-type>
+            <doc-line-no>0</doc-line-no>
+            <doc-line>Reading Field</doc-line>
+          </dict-documentation>
+        </documentation>
+      </dict-field>
+      <dict-field Description="dict-field:ipmi-boolean-tf">
+        <fld-name>ipmi-boolean-tf</fld-name>
+        <fld-id>6</fld-id>
+        <fld-old-id>0</fld-old-id>
+        <fld-like-id>6</fld-like-id>
+        <fld-type>A</fld-type>
+        <fld-tot-size>1</fld-tot-size>
+        <fld-decs>0</fld-decs>
+        <fld-signed></fld-signed>
+        <fld-pres-size>0</fld-pres-size>
+        <fld-pres-decs>0</fld-pres-decs>
+        <fld-max-size>0</fld-max-size>
+        <fld-max-decs>0</fld-max-decs>
+        <fld-sec>0</fld-sec>
+        <fld-occurs>1</fld-occurs>
+        <fld-doc>Boolean True/False</fld-doc>
+        <fld-col-name>boolean-tf</fld-col-name>
+        <fld-flags>0</fld-flags>
+        <fld-audit></fld-audit>
+        <fld-form-title>0</fld-form-title>
+        <fld-col-title>0</fld-col-title>
+        <fld-help-line>0</fld-help-line>
+        <fld-date-time>22-APR-2011 15:09:58</fld-date-time>
+        <fld-user>rayb</fld-user>
+        <documentation>
+          <dict-documentation Description="dict-documentation:F|6|3|10">
+            <doc-id-type>F</doc-id-type>
+            <doc-id>6</doc-id>
+            <doc-type>3</doc-type>
+            <doc-line-no>10</doc-line-no>
+            <doc-line>help "Enter T if the boolean match text will result in TRUE or F for false"</doc-line>
+          </dict-documentation>
+          <dict-documentation Description="dict-documentation:F|6|3|20">
+            <doc-id-type>F</doc-id-type>
+            <doc-id>6</doc-id>
+            <doc-type>3</doc-type>
+            <doc-line-no>20</doc-line-no>
+            <doc-line>default "T"</doc-line>
+          </dict-documentation>
+          <dict-documentation Description="dict-documentation:F|6|3|30">
+            <doc-id-type>F</doc-id-type>
+            <doc-id>6</doc-id>
+            <doc-type>3</doc-type>
+            <doc-line-no>30</doc-line-no>
+            <doc-line>allowed "T" "F"</doc-line>
+          </dict-documentation>
+          <dict-documentation Description="dict-documentation:F|6|4|0">
+            <doc-id-type>F</doc-id-type>
+            <doc-id>6</doc-id>
+            <doc-type>4</doc-type>
+            <doc-line-no>0</doc-line-no>
+            <doc-line>Boolean True/False</doc-line>
+          </dict-documentation>
+        </documentation>
+      </dict-field>
+      <dict-field Description="dict-field:ipmi-reading-boolean-match">
+        <fld-name>ipmi-reading-boolean-match</fld-name>
+        <fld-id>7</fld-id>
+        <fld-old-id>0</fld-old-id>
+        <fld-like-id>7</fld-like-id>
+        <fld-type>A</fld-type>
+        <fld-tot-size>30</fld-tot-size>
+        <fld-decs>0</fld-decs>
+        <fld-signed></fld-signed>
+        <fld-pres-size>0</fld-pres-size>
+        <fld-pres-decs>0</fld-pres-decs>
+        <fld-max-size>0</fld-max-size>
+        <fld-max-decs>0</fld-max-decs>
+        <fld-sec>0</fld-sec>
+        <fld-occurs>1</fld-occurs>
+        <fld-doc>Boolean match test</fld-doc>
+        <fld-col-name>boolean_match</fld-col-name>
+        <fld-flags>0</fld-flags>
+        <fld-audit></fld-audit>
+        <fld-form-title>0</fld-form-title>
+        <fld-col-title>0</fld-col-title>
+        <fld-help-line>0</fld-help-line>
+        <fld-date-time>22-APR-2011 15:12:04</fld-date-time>
+        <fld-user>rayb</fld-user>
+        <documentation>
+          <dict-documentation Description="dict-documentation:F|7|2|1">
+            <doc-id-type>F</doc-id-type>
+            <doc-id>7</doc-id>
+            <doc-type>2</doc-type>
+            <doc-line-no>1</doc-line-no>
+            <doc-line>The program looks at fields marked as boolean.  It looks at the text in this</doc-line>
+          </dict-documentation>
+          <dict-documentation Description="dict-documentation:F|7|2|2">
+            <doc-id-type>F</doc-id-type>
+            <doc-id>7</doc-id>
+            <doc-type>2</doc-type>
+            <doc-line-no>2</doc-line-no>
+            <doc-line>field.  If it matches the text in the IPMI then the value is set to TRUE.</doc-line>
+          </dict-documentation>
+          <dict-documentation Description="dict-documentation:F|7|2|3">
+            <doc-id-type>F</doc-id-type>
+            <doc-id>7</doc-id>
+            <doc-type>2</doc-type>
+            <doc-line-no>3</doc-line-no>
+            <doc-line>if not the value is set to FALSE.</doc-line>
+          </dict-documentation>
+          <dict-documentation Description="dict-documentation:F|7|2|4">
+            <doc-id-type>F</doc-id-type>
+            <doc-id>7</doc-id>
+            <doc-type>2</doc-type>
+            <doc-line-no>4</doc-line-no>
+            <doc-line>Triggers are raised when the value of the field is false.</doc-line>
+          </dict-documentation>
+          <dict-documentation Description="dict-documentation:F|7|2|5">
+            <doc-id-type>F</doc-id-type>
+            <doc-id>7</doc-id>
+            <doc-type>2</doc-type>
+            <doc-line-no>5</doc-line-no>
+            <doc-line>So the description for a redundant power supply sensor should be</doc-line>
+          </dict-documentation>
+          <dict-documentation Description="dict-documentation:F|7|2|6">
+            <doc-id-type>F</doc-id-type>
+            <doc-id>7</doc-id>
+            <doc-type>2</doc-type>
+            <doc-line-no>6</doc-line-no>
+            <doc-line>"Power supply OK".  The reading true value should be "ok".  Whenever</doc-line>
+          </dict-documentation>
+          <dict-documentation Description="dict-documentation:F|7|2|7">
+            <doc-id-type>F</doc-id-type>
+            <doc-id>7</doc-id>
+            <doc-type>2</doc-type>
+            <doc-line-no>7</doc-line-no>
+            <doc-line>the reading returns something other than OK.  Then the value is set</doc-line>
+          </dict-documentation>
+          <dict-documentation Description="dict-documentation:F|7|2|8">
+            <doc-id-type>F</doc-id-type>
+            <doc-id>7</doc-id>
+            <doc-type>2</doc-type>
+            <doc-line-no>8</doc-line-no>
+            <doc-line>to FALSE and a trigger alarm raised.</doc-line>
+          </dict-documentation>
+          <dict-documentation Description="dict-documentation:F|7|4|0">
+            <doc-id-type>F</doc-id-type>
+            <doc-id>7</doc-id>
+            <doc-type>4</doc-type>
+            <doc-line-no>0</doc-line-no>
+            <doc-line>Boolean Match</doc-line>
+          </dict-documentation>
+          <dict-documentation Description="dict-documentation:F|7|7|0">
+            <doc-id-type>F</doc-id-type>
+            <doc-id>7</doc-id>
+            <doc-type>7</doc-type>
+            <doc-line-no>0</doc-line-no>
+            <doc-line>10133,sys06</doc-line>
+          </dict-documentation>
+        </documentation>
+      </dict-field>
+      <dict-field Description="dict-field:ipmi-trigger-low">
+        <fld-name>ipmi-trigger-low</fld-name>
+        <fld-id>52</fld-id>
+        <fld-old-id>8</fld-old-id>
+        <fld-like-id>52</fld-like-id>
+        <fld-type>N</fld-type>
+        <fld-tot-size>18</fld-tot-size>
+        <fld-decs>4</fld-decs>
+        <fld-signed>Y</fld-signed>
+        <fld-pres-size>0</fld-pres-size>
+        <fld-pres-decs>0</fld-pres-decs>
+        <fld-max-size>0</fld-max-size>
+        <fld-max-decs>0</fld-max-decs>
+        <fld-sec>0</fld-sec>
+        <fld-occurs>1</fld-occurs>
+        <fld-doc>Trigger</fld-doc>
+        <fld-col-name>trigger-low</fld-col-name>
+        <fld-flags>0</fld-flags>
+        <fld-audit></fld-audit>
+        <fld-form-title>0</fld-form-title>
+        <fld-col-title>0</fld-col-title>
+        <fld-help-line>0</fld-help-line>
+        <fld-date-time>02-SEP-2015 06:45:24</fld-date-time>
+        <fld-user>rayb</fld-user>
+        <documentation>
+          <dict-documentation Description="dict-documentation:F|52|3|10">
+            <doc-id-type>F</doc-id-type>
+            <doc-id>52</doc-id>
+            <doc-type>3</doc-type>
+            <doc-line-no>10</doc-line-no>
+            <doc-line>help "Lower Boundary Trigger Point"</doc-line>
+          </dict-documentation>
+          <dict-documentation Description="dict-documentation:F|52|4|0">
+            <doc-id-type>F</doc-id-type>
+            <doc-id>52</doc-id>
+            <doc-type>4</doc-type>
+            <doc-line-no>0</doc-line-no>
+            <doc-line>Trigger</doc-line>
+          </dict-documentation>
+          <dict-documentation Description="dict-documentation:F|52|7|0">
+            <doc-id-type>F</doc-id-type>
+            <doc-id>52</doc-id>
+            <doc-type>7</doc-type>
+            <doc-line-no>0</doc-line-no>
+            <doc-line>10073,sys06</doc-line>
+          </dict-documentation>
+        </documentation>
+      </dict-field>
+      <dict-field Description="dict-field:ipmi-trigger-high">
+        <fld-name>ipmi-trigger-high</fld-name>
+        <fld-id>51</fld-id>
+        <fld-old-id>9</fld-old-id>
+        <fld-like-id>51</fld-like-id>
+        <fld-type>N</fld-type>
+        <fld-tot-size>18</fld-tot-size>
+        <fld-decs>4</fld-decs>
+        <fld-signed>Y</fld-signed>
+        <fld-pres-size>0</fld-pres-size>
+        <fld-pres-decs>0</fld-pres-decs>
+        <fld-max-size>0</fld-max-size>
+        <fld-max-decs>0</fld-max-decs>
+        <fld-sec>0</fld-sec>
+        <fld-occurs>1</fld-occurs>
+        <fld-doc>Trigger High</fld-doc>
+        <fld-col-name>trigger-high</fld-col-name>
+        <fld-flags>0</fld-flags>
+        <fld-audit></fld-audit>
+        <fld-form-title>0</fld-form-title>
+        <fld-col-title>0</fld-col-title>
+        <fld-help-line>0</fld-help-line>
+        <fld-date-time>02-SEP-2015 06:45:17</fld-date-time>
+        <fld-user>rayb</fld-user>
+        <documentation>
+          <dict-documentation Description="dict-documentation:F|51|3|10">
+            <doc-id-type>F</doc-id-type>
+            <doc-id>51</doc-id>
+            <doc-type>3</doc-type>
+            <doc-line-no>10</doc-line-no>
+            <doc-line>help "High Tigger point"</doc-line>
+          </dict-documentation>
+          <dict-documentation Description="dict-documentation:F|51|4|0">
+            <doc-id-type>F</doc-id-type>
+            <doc-id>51</doc-id>
+            <doc-type>4</doc-type>
+            <doc-line-no>0</doc-line-no>
+            <doc-line>Trigger High</doc-line>
+          </dict-documentation>
+        </documentation>
+      </dict-field>
+      <dict-field Description="dict-field:ipmi-days-to-keep">
+        <fld-name>ipmi-days-to-keep</fld-name>
+        <fld-id>10</fld-id>
+        <fld-old-id>0</fld-old-id>
+        <fld-like-id>10</fld-like-id>
+        <fld-type>N</fld-type>
+        <fld-tot-size>4</fld-tot-size>
+        <fld-decs>0</fld-decs>
+        <fld-signed>N</fld-signed>
+        <fld-pres-size>0</fld-pres-size>
+        <fld-pres-decs>0</fld-pres-decs>
+        <fld-max-size>0</fld-max-size>
+        <fld-max-decs>0</fld-max-decs>
+        <fld-sec>0</fld-sec>
+        <fld-occurs>1</fld-occurs>
+        <fld-doc>Days To Keep</fld-doc>
+        <fld-col-name>days-to-keep</fld-col-name>
+        <fld-flags>0</fld-flags>
+        <fld-audit></fld-audit>
+        <fld-form-title>0</fld-form-title>
+        <fld-col-title>0</fld-col-title>
+        <fld-help-line>0</fld-help-line>
+        <fld-date-time>22-APR-2011 15:13:06</fld-date-time>
+        <fld-user>rayb</fld-user>
+        <documentation>
+          <dict-documentation Description="dict-documentation:F|10|3|10">
+            <doc-id-type>F</doc-id-type>
+            <doc-id>10</doc-id>
+            <doc-type>3</doc-type>
+            <doc-line-no>10</doc-line-no>
+            <doc-line>help "Number of days to keep readings"</doc-line>
+          </dict-documentation>
+          <dict-documentation Description="dict-documentation:F|10|3|20">
+            <doc-id-type>F</doc-id-type>
+            <doc-id>10</doc-id>
+            <doc-type>3</doc-type>
+            <doc-line-no>20</doc-line-no>
+            <doc-line>default 5</doc-line>
+          </dict-documentation>
+          <dict-documentation Description="dict-documentation:F|10|4|0">
+            <doc-id-type>F</doc-id-type>
+            <doc-id>10</doc-id>
+            <doc-type>4</doc-type>
+            <doc-line-no>0</doc-line-no>
+            <doc-line>Days To Keep</doc-line>
+          </dict-documentation>
+          <dict-documentation Description="dict-documentation:F|10|7|0">
+            <doc-id-type>F</doc-id-type>
+            <doc-id>10</doc-id>
+            <doc-type>7</doc-type>
+            <doc-line-no>0</doc-line-no>
+            <doc-line>10016,sys06</doc-line>
+          </dict-documentation>
+        </documentation>
+      </dict-field>
+    </columns>
+    <keys>
+      <dict-keys Description="dict-keys:9|1">
+        <obj-id>9</obj-id>
+        <index-no>1</index-no>
+        <key-flags>0</key-flags>
+        <num-fields>1</num-fields>
+        <k-fld-id>
+          <p1>1</p1>
+          <p2>0</p2>
+          <p3>0</p3>
+          <p4>0</p4>
+          <p5>0</p5>
+          <p6>0</p6>
+          <p7>0</p7>
+          <p8>0</p8>
+          <p9>0</p9>
+          <p10>0</p10>
+          <p11>0</p11>
+          <p12>0</p12>
+          <p13>0</p13>
+          <p14>0</p14>
+          <p15>0</p15>
+          <p16>0</p16>
+        </k-fld-id>
+        <k-desc-flag>
+          <p1></p1>
+          <p2></p2>
+          <p3></p3>
+          <p4></p4>
+          <p5></p5>
+          <p6></p6>
+          <p7></p7>
+          <p8></p8>
+          <p9>N</p9>
+          <p10>N</p10>
+          <p11>N</p11>
+          <p12>N</p12>
+          <p13>N</p13>
+          <p14>N</p14>
+          <p15>N</p15>
+          <p16>N</p16>
+        </k-desc-flag>
+      </dict-keys>
+    </keys>
+  </Dictionary>
+  <Dictionary table_name="ipmi-readings" dictionary="D" Description="ipmi-readings" ImpNodeID="6">
+    <dict-object Description="dict-object:ipmi-readings">
+      <obj-name>ipmi-readings</obj-name>
+      <obj-id>8</obj-id>
+      <obj-old-id>2</obj-old-id>
+      <obj-doc>Ipmi Readings</obj-doc>
+      <obj-sec>2</obj-sec>
+      <obj-file>$PRONTO/sysinfo/ipmireading</obj-file>
+      <obj-version>0</obj-version>
+      <obj-type>I</obj-type>
+      <obj-sep></obj-sep>
+      <obj-flags>0</obj-flags>
+      <obj-audit></obj-audit>
+      <obj-app-lock>N</obj-app-lock>
+      <obj-num-flds>4</obj-num-flds>
+      <obj-date-time>02-SEP-2015 06:45:29</obj-date-time>
+      <obj-user>rayb</obj-user>
+      <documentation>
+        <dict-documentation Description="dict-documentation:O|8|1|1">
+          <doc-id-type>O</doc-id-type>
+          <doc-id>8</doc-id>
+          <doc-type>1</doc-type>
+          <doc-line-no>1</doc-line-no>
+          <doc-line>This file contains all the monitor point readings.</doc-line>
+        </dict-documentation>
+      </documentation>
+    </dict-object>
+    <columns>
+      <dict-field Description="dict-field:ipmi-code">
+        <fld-name>ipmi-code</fld-name>
+        <fld-id>1</fld-id>
+        <fld-old-id>0</fld-old-id>
+        <fld-like-id>1</fld-like-id>
+        <fld-type>A</fld-type>
+        <fld-tot-size>10</fld-tot-size>
+        <fld-decs>0</fld-decs>
+        <fld-signed></fld-signed>
+        <fld-pres-size>0</fld-pres-size>
+        <fld-pres-decs>0</fld-pres-decs>
+        <fld-max-size>0</fld-max-size>
+        <fld-max-decs>0</fld-max-decs>
+        <fld-sec>0</fld-sec>
+        <fld-occurs>1</fld-occurs>
+        <fld-doc>Code</fld-doc>
+        <fld-col-name>code</fld-col-name>
+        <fld-flags>0</fld-flags>
+        <fld-audit></fld-audit>
+        <fld-form-title>0</fld-form-title>
+        <fld-col-title>0</fld-col-title>
+        <fld-help-line>0</fld-help-line>
+        <fld-date-time>21-APR-2011 05:57:34</fld-date-time>
+        <fld-user>rayb</fld-user>
+        <documentation>
+          <dict-documentation Description="dict-documentation:F|1|3|10">
+            <doc-id-type>F</doc-id-type>
+            <doc-id>1</doc-id>
+            <doc-type>3</doc-type>
+            <doc-line-no>10</doc-line-no>
+            <doc-line>help " **Enter Help Text in quotes**"</doc-line>
+          </dict-documentation>
+          <dict-documentation Description="dict-documentation:F|1|4|0">
+            <doc-id-type>F</doc-id-type>
+            <doc-id>1</doc-id>
+            <doc-type>4</doc-type>
+            <doc-line-no>0</doc-line-no>
+            <doc-line>Code</doc-line>
+          </dict-documentation>
+          <dict-documentation Description="dict-documentation:F|1|7|0">
+            <doc-id-type>F</doc-id-type>
+            <doc-id>1</doc-id>
+            <doc-type>7</doc-type>
+            <doc-line-no>0</doc-line-no>
+            <doc-line>10370,sys06</doc-line>
+          </dict-documentation>
+        </documentation>
+      </dict-field>
+      <dict-field Description="dict-field:ipmi-datetime">
+        <fld-name>ipmi-datetime</fld-name>
+        <fld-id>11</fld-id>
+        <fld-old-id>0</fld-old-id>
+        <fld-like-id>11</fld-like-id>
+        <fld-type>L</fld-type>
+        <fld-tot-size>8</fld-tot-size>
+        <fld-decs>0</fld-decs>
+        <fld-signed></fld-signed>
+        <fld-pres-size>0</fld-pres-size>
+        <fld-pres-decs>0</fld-pres-decs>
+        <fld-max-size>0</fld-max-size>
+        <fld-max-decs>0</fld-max-decs>
+        <fld-sec>0</fld-sec>
+        <fld-occurs>1</fld-occurs>
+        <fld-doc>Datetime</fld-doc>
+        <fld-col-name>reading_time</fld-col-name>
+        <fld-flags>0</fld-flags>
+        <fld-audit></fld-audit>
+        <fld-form-title>0</fld-form-title>
+        <fld-col-title>0</fld-col-title>
+        <fld-help-line>0</fld-help-line>
+        <fld-date-time>02-MAY-2011 13:12:15</fld-date-time>
+        <fld-user>rayb</fld-user>
+        <documentation>
+          <dict-documentation Description="dict-documentation:F|11|4|0">
+            <doc-id-type>F</doc-id-type>
+            <doc-id>11</doc-id>
+            <doc-type>4</doc-type>
+            <doc-line-no>0</doc-line-no>
+            <doc-line>Datetime</doc-line>
+          </dict-documentation>
+        </documentation>
+      </dict-field>
+      <dict-field Description="dict-field:ipmi-reading-value">
+        <fld-name>ipmi-reading-value</fld-name>
+        <fld-id>50</fld-id>
+        <fld-old-id>12</fld-old-id>
+        <fld-like-id>50</fld-like-id>
+        <fld-type>N</fld-type>
+        <fld-tot-size>18</fld-tot-size>
+        <fld-decs>4</fld-decs>
+        <fld-signed>Y</fld-signed>
+        <fld-pres-size>0</fld-pres-size>
+        <fld-pres-decs>0</fld-pres-decs>
+        <fld-max-size>0</fld-max-size>
+        <fld-max-decs>0</fld-max-decs>
+        <fld-sec>0</fld-sec>
+        <fld-occurs>1</fld-occurs>
+        <fld-doc>Reading Value</fld-doc>
+        <fld-col-name>reading-value</fld-col-name>
+        <fld-flags>0</fld-flags>
+        <fld-audit></fld-audit>
+        <fld-form-title>0</fld-form-title>
+        <fld-col-title>0</fld-col-title>
+        <fld-help-line>0</fld-help-line>
+        <fld-date-time>02-SEP-2015 06:44:55</fld-date-time>
+        <fld-user>rayb</fld-user>
+        <documentation>
+          <dict-documentation Description="dict-documentation:F|50|3|10">
+            <doc-id-type>F</doc-id-type>
+            <doc-id>50</doc-id>
+            <doc-type>3</doc-type>
+            <doc-line-no>10</doc-line-no>
+            <doc-line>help "Reading Value"</doc-line>
+          </dict-documentation>
+          <dict-documentation Description="dict-documentation:F|50|4|0">
+            <doc-id-type>F</doc-id-type>
+            <doc-id>50</doc-id>
+            <doc-type>4</doc-type>
+            <doc-line-no>0</doc-line-no>
+            <doc-line>Reading Value</doc-line>
+          </dict-documentation>
+        </documentation>
+      </dict-field>
+      <dict-field Description="dict-field:ipmi-reading-unit">
+        <fld-name>ipmi-reading-unit</fld-name>
+        <fld-id>13</fld-id>
+        <fld-old-id>0</fld-old-id>
+        <fld-like-id>13</fld-like-id>
+        <fld-type>A</fld-type>
+        <fld-tot-size>10</fld-tot-size>
+        <fld-decs>0</fld-decs>
+        <fld-signed></fld-signed>
+        <fld-pres-size>0</fld-pres-size>
+        <fld-pres-decs>0</fld-pres-decs>
+        <fld-max-size>0</fld-max-size>
+        <fld-max-decs>0</fld-max-decs>
+        <fld-sec>0</fld-sec>
+        <fld-occurs>1</fld-occurs>
+        <fld-doc>Reading Unit</fld-doc>
+        <fld-col-name>uom</fld-col-name>
+        <fld-flags>0</fld-flags>
+        <fld-audit></fld-audit>
+        <fld-form-title>0</fld-form-title>
+        <fld-col-title>0</fld-col-title>
+        <fld-help-line>0</fld-help-line>
+        <fld-date-time>21-APR-2011 06:19:56</fld-date-time>
+        <fld-user>rayb</fld-user>
+        <documentation>
+          <dict-documentation Description="dict-documentation:F|13|3|10">
+            <doc-id-type>F</doc-id-type>
+            <doc-id>13</doc-id>
+            <doc-type>3</doc-type>
+            <doc-line-no>10</doc-line-no>
+            <doc-line>help "Unit of Measure"</doc-line>
+          </dict-documentation>
+          <dict-documentation Description="dict-documentation:F|13|4|0">
+            <doc-id-type>F</doc-id-type>
+            <doc-id>13</doc-id>
+            <doc-type>4</doc-type>
+            <doc-line-no>0</doc-line-no>
+            <doc-line>Reading Unit</doc-line>
+          </dict-documentation>
+        </documentation>
+      </dict-field>
+    </columns>
+    <keys>
+      <dict-keys Description="dict-keys:8|1">
+        <obj-id>8</obj-id>
+        <index-no>1</index-no>
+        <key-flags>0</key-flags>
+        <num-fields>2</num-fields>
+        <k-fld-id>
+          <p1>1</p1>
+          <p2>11</p2>
+          <p3>0</p3>
+          <p4>0</p4>
+          <p5>0</p5>
+          <p6>0</p6>
+          <p7>0</p7>
+          <p8>0</p8>
+          <p9>0</p9>
+          <p10>0</p10>
+          <p11>0</p11>
+          <p12>0</p12>
+          <p13>0</p13>
+          <p14>0</p14>
+          <p15>0</p15>
+          <p16>0</p16>
+        </k-fld-id>
+        <k-desc-flag>
+          <p1></p1>
+          <p2></p2>
+          <p3></p3>
+          <p4></p4>
+          <p5></p5>
+          <p6></p6>
+          <p7></p7>
+          <p8></p8>
+          <p9>N</p9>
+          <p10>N</p10>
+          <p11>N</p11>
+          <p12>N</p12>
+          <p13>N</p13>
+          <p14>N</p14>
+          <p15>N</p15>
+          <p16>N</p16>
+        </k-desc-flag>
+      </dict-keys>
+    </keys>
+  </Dictionary>
+</Objects>

@@ -1,0 +1,1113 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : create simulated kpi data
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2017
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: nan/crtkpidata.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 19May17  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+
+
+/*
+
+*****  to add new KPI's look for the comment "newkpi:"
+*****  THEN :  Check the drill paths and add code for new drill path
+*****   This is also commented with "newkpi"
+
+*/
+ 
+#include "../include/i8proglog.spl"
+ 
+#define RANDOM_BETWEEN(A,B) \
+	(((RANDOM(0) / 32767) * (B - A)) + A)
+#define XMLKPIFILE "/tmp/kpicrtspec.xml"
+#define KPITITLECOUNT 100
+
+field
+	ws-function-title						type string
+	ws-xml-file								pic x(256) type string
+
+object kpis-to-process
+	type is isam
+	record is
+		kp-id							like kpi-id
+		kp-desc							like kpi-description
+		kp-process						type boolean
+		kp-count						type number // used array elements
+		kp-title						like kpivt-title	occurs KPITITLECOUNT
+		kp-low-value					type number		occurs KPITITLECOUNT
+		kp-high-value					type number		occurs KPITITLECOUNT
+	end-record
+	key is kp-id
+
+// only used for datagrid screen
+object value-temp-table
+	type is isam
+	record is
+		vtt-i							type number
+		vtt-title						like kpivt-title
+		vtt-low-value					type number
+		vtt-high-value					type number
+	end-record
+	key is vtt-i
+
+object reporting-seq-detail-file-copy like reporting-seq-detail-file
+
+mode md-tag
+	prompt "Tag"
+	process correct
+mode md-process
+	prompt "Process"
+mode md-values
+	prompt "View Values"
+mode md-save
+	prompt "Save Values"
+mode md-restore
+	prompt "Restore Values"
+
+procedure main
+local
+	i									type number
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	set ws-xml-file =  concat(get-env('CUS'),"/nan/kpicrtspec.xml")
+	if not file-exists(ws-xml-file,FALSE)
+		set ws-xml-file =  concat(get-env('STD'),"/nan/kpicrtspec.xml")
+		if not file-exists(ws-xml-file,FALSE)
+			set ws-xml-file = XMLKPIFILE
+			message-box param-text("<<P1>><<BR>><<p2>>"
+				,"Xml file could not be found.  Using"
+				,ws-xml-file)
+				title is "KPI Create"
+				message-buttons  MSG_BOX_OK_CANCEL
+			if message-status() = MSG_BOX_CANCEL
+				exit
+			endif
+		endif
+	endif
+	// seed random
+	if random(tod()) endif
+	do i8proglog-write-log
+	if batched()
+		report "KPI Generation batched"
+			no-message
+		print "starts at" tod()
+		do initialise-kpis-to-process parameters FALSE
+		if param-cnt() = 0
+			print "Processing all KPI's 1,20-25,40 - 125"
+			select * from kpi-master
+				where kpi-id between 40 and 125
+				or kpi-id in (1,20,21,22,23,24,25)
+			detail
+				do kpi-generation parameters are sys-consolidation-division kpi-id
+			end-select
+		else
+			print "Processing batched KPI's"
+			for i = 1 to param-cnt()
+				do kpi-generation parameters are sys-consolidation-division num(get-param(i))
+			end-for
+		endif
+	else
+		report "KPI Generation"
+			no-message
+		print "starts at" tod()
+//		do kpimenu
+		do submit-via-queue entry once
+	endif
+	print "finishes at" tod()
+end-procedure
+
+menu kpimenu
+	window
+	tree-menu
+	title "Kpi Menu"
+detail
+	option "Submit KPIS via batch queue" @1,1
+		do submit-via-queue entry once
+	option "submit kpi's 1,20-25,40-125 in background" @2,1
+		message-box param-text("<<P1>><<BR>><<p2>>"
+			,"This is going to take a month of sundays"
+			,"Are you sure")
+			title is ws-function-title
+			message-buttons MSG_BOX_OK_CANCEL
+			icon MSG_BOX_WARNING
+			optional
+			bell 
+		if message-status() = MSG_BOX_OK
+//			do kpi-generation parameters are sys-consolidation-division 40
+			command 'probatch' parameters '-q' 's' '-b' '0'
+				"nan/crtkpidata"
+			message "job batched"
+		endif
+	option "Select from list of kpis" @3,1
+		do select-and-process
+end-menu
+
+screen submit-via-queue
+local
+	lf-no-months				type number
+	lf-notes					pic x(16000) type varchar
+	lf-queue-name				like report-seq-name
+	window
+	title "Manage Kpi's via Batch Queue"
+	responsive
+	no-ok-cancel
+before
+	set lf-notes =  "This function is based on creating the a batch queue (KPIS) and having the jobs"
+	string lf-notes appending " in the queue.  This setup has been done in SAB.  "
+	string lf-notes appending "  This is done by using the KPI Library function to create the rebuild and "
+	string lf-notes appending "  add it to the KPIS queue."
+	string lf-notes appending ascii-char(10)
+	string lf-notes appending ascii-char(10)
+	string lf-notes appending "The action now is to populate"
+	string lf-notes appending " the parameters with a range of dates for the kpi's to be calculated"
+	string lf-notes appending " adn submit the task to the background."
+	string lf-notes appending ascii-char(10)
+	string lf-notes appending "The process takes about 3 hours"
+detail	
+	screen-group // ----Notes ----------------------------
+		title "Notes"  // The title is optional
+		display lf-notes
+			scale 150
+			rows 8
+			columns 100
+			multi-line
+	end-screen-group // ---- Notes --------------------------------------
+	screen-group // ---- Parameters ----------------------------
+		title "Parameters"
+		accept lf-queue-name
+			title "Batch Queue Name"
+			default "KPIS"
+			help "The name of the batch queue that contains jobs to build the KPI's"
+			drop-down
+				width 38
+				concat-title
+				select rsh-report-seq-name, rsh-report-seq-description
+					from reporting-seq-header 
+			end-drop-down
+		accept  lf-no-months pic z(4)
+			title "Month Count"
+			default 24
+			help "Enter the number of months in the past to create kpis"
+	end-screen-group
+	screen-group
+		title "Action"
+		option "Queue Review"
+			rows 3
+			columns 20
+			do kpi-queue-review parameters lf-queue-name 
+		end-option
+		option "Update Dates and Submit"
+			rows 3
+			columns 20
+			do update-the-queue-and-submit parameters lf-queue-name lf-no-months
+		end-option
+	end-screen-group // ---- Action --------------------------------------
+end-screen
+
+object okpi-queue-review
+	type is memory
+	record is
+		oqr-seq-name					like report-seq-name
+		oqr-seq-no						like report-seq-number
+		oqr-kpi-no						like kpi-id
+		oqr-kpi-description				like kpi-description
+		oqr-kpi-status					like kpi-status-desc
+	end-record
+	key is oqr-seq-name oqr-seq-no
+
+
+screen kpi-queue-review
+parameters
+	lp-queue-name						like report-seq-name
+	window
+	title "KPI review"
+	datagrid
+	select * from okpi-queue-review
+	allowed search
+//	responsive
+before
+	// all of this shit is wholly because there is no CAST function ....
+	close okpi-queue-review and remove
+	open okpi-queue-review temporary
+	select * from reporting-seq-detail-file as t0
+		left join reporting-seq-file as t1 on t0.report-seq-name = t1.report-seq-name
+			and t0.report-seq-number = t1.report-seq-number
+		where t0.report-seq-name = :lp-queue-name
+		and t0.rsdf-param-seq-number = 2
+// for some bizarre reason this does not work...
+//		and t1.rs-program-name = "analytic/m8kpi"
+	detail
+		if rs-program-name != 'analytic/m8kpi'
+			continue
+		endif
+		get kpi-master
+			on index kpi-comp-code kpi-id
+			key is sys-consolidation-division num(rsdf-parameter)
+		on error ENOREC
+			initialise okpi-queue-review
+			set oqr-seq-name = report-seq-name
+			set oqr-seq-no = report-seq-number
+			set oqr-kpi-no = num(rsdf-parameter)
+			set oqr-kpi-description = concat("*** Invalid KPI : " rtrim(rsdf-parameter) " ***")
+			insert okpi-queue-review
+		else
+			initialise okpi-queue-review
+			set oqr-seq-name = report-seq-name
+			set oqr-seq-no = report-seq-number
+			set oqr-kpi-no = kpi-id
+			set oqr-kpi-description = kpi-description
+			set oqr-kpi-status = kpi-status-desc
+			insert okpi-queue-review
+		endon
+	end-select
+detail
+	accept oqr-seq-name col 1
+		title "Queue"
+		when screen-mode = search
+		show-value
+	accept oqr-seq-no col 2
+		title "Seq No"
+		when screen-mode = search
+		show-value
+	display oqr-kpi-no col 3
+		title "No"
+	display oqr-kpi-description col 4
+		title "description"
+	display oqr-kpi-status col 5
+		title "Status"
+end-screen
+
+procedure update-the-queue-and-submit
+parameters
+	lp-queue-name						like report-seq-name
+	lp-months							type number
+local
+	lf-this-date						type date
+	lf-commit							type number
+	lf-rollback-count					type number
+	i 									type number
+	//
+	select * from reporting-seq-file 
+		where report-seq-name = :lp-queue-name 
+		and rs-program-name = "analytic/m8kpi"
+	detail
+		select * from reporting-seq-detail-file
+			where report-seq-name = :lp-queue-name
+			and rsdf-param-seq-number  = 2
+		detail
+			set lf-commit = TRUE
+			transaction begin
+			save reporting-seq-detail-file
+			if rsdf-parameter in ( "1","3","4","5","20","21","22","23","24","25")
+				// these are the ones to update
+				// seed the loop with the last day of the current month
+				// (This makes the loop a little more logical - it can start at
+				// one instead of zero)
+				set lf-this-date = julian(days-in-month(month(today()),year(today())),month(today()),year(today()))
+				for i = 1 to lp-months 
+					set lf-this-date = add-months(lf-this-date,-1,true)
+					get reporting-seq-detail-file-copy
+						on index report-seq-name report-seq-number rsdf-param-seq-number
+						key is report-seq-name report-seq-number 105 + i
+						lock
+					on error ENOREC
+						initialise reporting-seq-detail-file-copy
+							leaving report-seq-name report-seq-number 
+						set rsdf-param-seq-number = 105 + i
+						set rsdf-parameter = str(lf-this-date)
+						insert reporting-seq-detail-file-copy
+						on error
+							set lf-commit = FALSE 
+						endon
+					else
+						set rsdf-parameter = str(lf-this-date)
+						update reporting-seq-detail-file-copy
+						on error
+							set lf-commit = FALSE 
+						endon
+					endon
+				end-for
+			elseif rsdf-parameter in ( "340")
+				// max of 12 months
+				set lf-this-date = julian(days-in-month(month(today()),year(today())),month(today()),year(today()))
+				for i = 1 to lp-months 
+					if i > 12 
+						break
+					endif
+					set lf-this-date = add-months(lf-this-date,-1,true)
+					get reporting-seq-detail-file-copy
+						on index report-seq-name report-seq-number rsdf-param-seq-number
+						key is report-seq-name report-seq-number 105 + i
+						lock
+					on error ENOREC
+						initialise reporting-seq-detail-file-copy
+							leaving report-seq-name report-seq-number 
+						set rsdf-param-seq-number = 105 + i
+						set rsdf-parameter = str(lf-this-date)
+						insert reporting-seq-detail-file-copy
+						on error
+							set lf-commit = FALSE 
+						endon
+					else
+						set rsdf-parameter = str(lf-this-date)
+						update reporting-seq-detail-file-copy
+						on error
+							set lf-commit = FALSE 
+						endon
+					endon
+				end-for
+			else
+				// KPIS that only have a single date - set to today
+				get reporting-seq-detail-file-copy
+					on index report-seq-name report-seq-number rsdf-param-seq-number
+					key is report-seq-name report-seq-number 5
+					lock
+				on error ENOREC
+					initialise reporting-seq-detail-file-copy
+						leaving report-seq-name report-seq-number 
+					set rsdf-param-seq-number = 5
+					set rsdf-parameter = str(today())
+					insert reporting-seq-detail-file-copy
+					on error
+						set lf-commit = FALSE 
+					endon
+				else
+					set rsdf-parameter = str(today())
+					update reporting-seq-detail-file-copy
+					on error
+						set lf-commit = FALSE 
+					endon
+				endon
+				//
+			endif
+			if lf-commit 
+				transaction commit
+			else
+				transaction rollback
+				set lf-rollback-count += 1
+			endif
+			restore reporting-seq-detail-file
+		end-select
+		if lf-rollback-count > 0
+			message-box param-text("There were errors.  <<p1>> sequence updates caused a rollback.  <<BR>> This error must be fixed before continuing"
+				,str(lf-rollback-count))
+				title is "KPI Update Error"
+				message-buttons  MSG_BOX_CANCEL
+				icon MSG_BOX_STOP
+			exit 1
+		endif
+	end-select
+	//
+	// The updates have been done and it is now time to submit the queue
+	//
+	spl 'sys/m8btchadm' parameters are "-submit" lp-queue-name
+	message-box param-text("<<P1>><<BR>><<p2>>"
+		,"Parameters have been updated and the job submitted to batch"
+		,"Use Queue admin to monitor progress")
+		title is "KPI rebuild"
+		message-buttons  MSG_BOX_OK
+		icon MSG_BOX_INFORMATION
+end-procedure
+
+procedure process-on-batch
+parameters
+	lp-id							like kp-id
+	command 'probatch' parameters '-q' 's' '-b' '0'
+		"nan/crtkpidata" str(lp-id)
+end-procedure
+
+procedure array-to-isam
+parameters are 
+	lp-rec-key						like kp-id
+local
+	i								type number
+	//
+	close value-temp-table and remove
+	open value-temp-table
+		temporary
+	if kp-id <> lp-rec-key
+		get kpis-to-process
+			on index kp-id
+			key is lp-rec-key
+	endif
+	for i = 1 to kp-count
+		initialise value-temp-table
+		set vtt-i = i
+		set vtt-title = kp-title[i]
+		set vtt-low-value = kp-low-value[i]
+		set vtt-high-value = kp-high-value[i]
+		insert value-temp-table
+	end-for
+end-procedure
+
+procedure isam-to-array
+// only used for datagrid maintenance
+parameters are
+	lp-rec-key						like kpi-id
+	get kpis-to-process
+		on index kp-id
+		key is lp-rec-key
+		lock
+	select * from value-temp-table
+	detail
+		set kp-low-value[vtt-i] = vtt-low-value
+		set kp-high-value[vtt-i] = vtt-high-value
+	end-select
+	update kpis-to-process
+end-procedure
+
+procedure initialise-kpis-to-process
+// only used for datagrid maintenance
+parameters
+	lp-from-xml						type boolean
+local
+	i								type number
+	lf-doc							type xml-handle
+	lf-root							type xml-handle
+	lf-record						type xml-handle
+	lf-values						type xml-handle
+	lf-array-item					type xml-handle
+	open kpis-to-process
+		temporary
+	if lp-from-xml
+		if file-exists(ws-xml-file,false)
+			set lf-doc = xml-parse-file(ws-xml-file)
+			if lf-doc = 0
+				message "Unable to load xml"
+				exit
+			endif
+			set lf-root = xml-get-root-node(lf-doc)
+			set lf-record = xml-get-first-child-node(lf-root)
+			while lf-record <> 0
+				initialise kpis-to-process
+				set kp-id = num(xml-node-text(xml-get-child-by-name(lf-record,"kp-id",spaces)))
+				set kp-desc = xml-node-text(xml-get-child-by-name(lf-record,"kp-desc",spaces))
+				set lf-values = xml-get-child-by-name(lf-record,"values",spaces)
+				set lf-array-item = xml-get-first-child-node(lf-values)
+				while lf-array-item <> 0
+					set i = num(xml-node-text(xml-get-child-by-name(lf-array-item,"arrayindex",spaces)))
+					if kp-count < i
+						set kp-count = i
+					endif
+					set kp-title[i] = xml-node-text(xml-get-child-by-name(lf-array-item,"kp-title",spaces))
+					set kp-low-value[i] = num(xml-node-text(xml-get-child-by-name(lf-array-item,"kp-low-value",spaces)))
+					set kp-high-value[i] = num(xml-node-text(xml-get-child-by-name(lf-array-item,"kp-high-value",spaces)))
+					//
+					set lf-array-item = xml-get-next-node(lf-array-item)
+				end-while
+				insert kpis-to-process
+				//
+				set lf-record = xml-get-next-node(lf-record)
+			endwhile
+		else
+			message "xml selected but no xml found"
+		endif
+	else
+		select *
+			from kpi-master
+			where kpi-id between 40 and 125
+			or kpi-id between 260 and 266
+			or kpi-id between 20 and 25
+			or kpi-id = 1 
+		detail
+			set kp-id = kpi-id
+			set kp-desc = kpi-description
+			set kp-process = FALSE
+			set kp-count = kpi-active-values
+			do get-title-array parameters are kp-id
+				returning kp-title
+			for i = 1 to kp-count
+				set kp-low-value[i] = 10000
+				set kp-high-value[i] = 50000
+			endfor
+			// overrides
+			switch kp-id
+			case 40
+				set kp-low-value[1] = 1
+				set kp-high-value[1] = 36
+			end-switch
+			insert kpis-to-process
+		end-select
+	endif
+end-procedure
+
+procedure save-to-xml
+local 
+	lf-doc							type xml-handle
+	lf-root							type xml-handle
+	lf-record						type xml-handle
+	lf-values						type xml-handle
+	lf-array-item					type xml-handle
+	i								type number
+	set lf-doc = xml-new-document("1.0","kpivalues")
+	set lf-root = xml-get-root-node(lf-doc)
+	select * from kpis-to-process
+	detail
+		set lf-record = xml-add-child-node(lf-root,"kpi",spaces) 
+		if xml-add-child-node-text(lf-record,"kp-id",spaces,str(kp-id)) endif
+		if xml-add-child-node-text(lf-record,"kp-desc",spaces,kp-desc) endif
+		set lf-values = xml-add-child-node(lf-record,"values",spaces)
+		for i = 1 to kp-count
+			set lf-array-item = xml-add-child-node(lf-values,"arrayitem",spaces)
+			if xml-add-node-attribute(lf-array-item,"Desc",spaces,kp-title[i]) endif
+			if xml-add-child-node-text(lf-array-item,"arrayindex",spaces,str(i)) endif
+			if xml-add-child-node-text(lf-array-item,"kp-title",spaces,kp-title[i]) endif
+			if xml-add-child-node-text(lf-array-item,"kp-low-value",spaces,str(kp-low-value[i])) endif
+			if xml-add-child-node-text(lf-array-item,"kp-high-value",spaces,str(kp-high-value[i])) endif
+		endfor
+	end-select
+	if xml-save-as-file(lf-doc,ws-xml-file,space,2)
+		message "File Saved"
+	else
+		message "Save Failed"
+	endif
+end-procedure
+
+procedure get-title-array
+parameters
+	lp-kpi-id						like kpi-id
+returning
+	lr-kpi-title					like kpivt-title occurs KPITITLECOUNT
+	select *
+		from kpi-value-titles
+		where kpi-comp-code = :sys-consolidation-division
+		and kpi-id = :lp-kpi-id
+	detail
+		set lr-kpi-title[kpivt-id] = kpivt-title
+	end-select
+end-procedure
+
+screen select-and-process
+	window
+	datagrid occurs 22
+	select * from kpis-to-process
+	allowed search md-tag md-process md-values md-save
+before
+	do initialise-kpis-to-process  parameters TRUE
+detail
+	if screenmode = md-save
+	 	do save-to-xml
+		get kpis-to-process first
+	endif
+	if screenmode = md-tag
+		if kp-process
+			set kp-process = false
+		else
+			set kp-process = true
+		endif
+	endif
+	if screenmode = md-process
+		select  * from kpis-to-process
+			where kp-process = True
+		detail
+			do process-on-batch parameters are kp-id
+		end-select
+		message "Jobs submitted to batch"
+	endif
+	if screenmode = md-values
+	 	do maintain-values parameters are kp-id
+	endif
+	accept  kp-id @1,1
+		title "ID"
+		when screenmode = search
+		show-value
+	display kp-desc @1,2
+		title 'Description'
+		colour if-then-else(kp-process,red,0)
+end-screen
+
+screen maintain-values
+parameters
+	lp-id						like kp-id
+	window
+	datagrid occurs 20
+	select * from value-temp-table
+	allowed search correct entry remove
+before
+	do array-to-isam parameters lp-id
+detail
+	accept vtt-i @1,1  pic zz9
+		title "ID"
+		when screenmode in { entry search}
+		show-value
+	accept vtt-title @1,2
+		when screenmode = entry
+		show-value
+		title "Desc"
+	accept vtt-low-value @1,3
+		title "Low"
+	accept vtt-high-value @1,4
+		title "high"
+after
+	do isam-to-array parameters lp-id
+end-screen
+
+
+procedure kpi-generation
+parameters
+	lp-coy-code							like sys-consolidation-division
+	lp-id								like kpi-id
+local
+	lf-time-sequence					like sctd-sequential-period
+	lf-time-sequence-desc				like kpi-time-sequence-desc
+	lf-start							type date
+	lf-stop								type date
+	lf-today							type date
+	lf-history-record-added				type boolean
+	i									type number
+	j									type number
+	//
+	// Setup
+	//
+	set lf-history-record-added = false
+	print "starting generation for kpi " lp-id " for " lp-coy-code
+	get kpi-master
+		on index kpi-comp-code kpi-id
+		key is lp-coy-code lp-id
+		lock
+	on error
+		print "Cannot get kpi master record" error-description(file-status())
+		exit
+	endon
+	get kpis-to-process
+		on index kp-id
+		key is lp-id
+	on error
+		print "cannot process this kpi - missing kpis-to-process"
+	endon
+	print kpi-description
+	if lp-id between 25 and 125
+	or lp-id between 260 and 266
+// newkpi:
+		print "Processing Kpi " lp-id
+	else
+		print "Skipping ... cannot deal with this one (" lp-id ")"
+		exit
+	endif
+ 	set kpi-status = 2
+	do decode-kpi-status parameter kpi-status returning kpi-status-desc
+	set kpi-log = spaces
+	update kpi-master
+	//
+	//
+	get system-control-time-dimension
+		on index sctd-type sctd-date
+		key is spaces today()
+	on error
+	endon
+	//
+	switch on kpi-trend-frequency
+	case 3
+		set lf-time-sequence = sctd-sequential-period
+		set lf-time-sequence-desc = param-text('<<P1>>-<<P2>> <<P3>>',sctd-year,zstr(sctd-period,2,0),sctd-period-desc)
+	case 2
+		set lf-time-sequence = sctd-sequential-week
+		set lf-time-sequence-desc = param-text('<<P1>>-<<P2>> <<P3>>',sctd-year,zstr(sctd-week-of-year,2,0),sctd-week-desc)
+	case 1
+		set lf-time-sequence = sctd-sequential-day
+		set lf-time-sequence-desc = param-text('<<P1>>-<<P2>> <<P3>>',sctd-year,sctd-date,spaces)
+	endswitch
+	//
+	// processing
+	//
+	// Delete all first
+	//
+	sql-delete kpi-history
+		where kpi-comp-code = :lp-coy-code
+		and kpi-id = :lp-id
+	sql-delete kpi-history-detail
+		where kpi-comp-code = :lp-coy-code
+		and kpi-id = :lp-id
+	// Loop through the drill paths
+	//
+	initialise kpi-history
+	select * 
+		from kpi-drill-path
+		where kpi-comp-code = lp-coy-code
+		and kpi-id = lp-id
+	detail
+		print "Processing Drill path" kpidp-description
+		//
+		// Add records
+		//
+		// Loop Through Dates
+		// The kpi-trend-frequency has the values 1,2 and 3 for Day week
+		// period repsectively.
+		//
+		// At this stage we will only do period ones.
+		if kpi-trend-frequency <> 3
+			print "Trend Frequency not Period"
+			exit
+		endif
+		// get end of period closest to today
+		// get today
+		set lf-today = today() // so you can use database-sql
+		select lf-stop = max(sctd-date)
+			from kpi-dim-time
+			where sctd-date <= :lf-today
+			database-sql
+		end-select
+		// stop at the last day of the previouse month
+		set lf-stop = julian(1,month(lf-stop),year(lf-stop)) - 1
+		// get end of the first month in the dimensions table
+		select lf-start = min(sctd-date)
+			from kpi-dim-time
+		end-select
+		set lf-start = addmonth(lf-start,1,0)
+		set lf-start = julian(1,month(lf-start),year(lf-start))
+		set lf-start -= 1
+		//  At this point the start date is the last day in the first month end in the table
+		//  and the stop date is the last month end in the table.
+		print "Generating values between " lf-start " and " lf-stop
+		repeat
+			set lf-start = add-month(lf-start,1,1)
+			get system-control-time-dimension
+				on index sctd-type sctd-date
+				key is spaces lf-start
+			initialise kpi-history-detail
+			set kpi-comp-code = lp-coy-code
+			set kpi-id = lp-id
+			set kpih-date-time = date-time(lf-start,0,1)
+			set kpihd-id = kpidp-id
+			set kpih-date = lf-start
+//			get kpi-dim-time 
+//				on index sctd-date
+//				key is lf-start
+			set kpihd-time-sequence = sctd-sequential-period
+			set kpihd-time-sequence-desc = str-concat(sctd-year-desc-1,
+							"-",
+							zstr(sctd-cal-period,2,0),
+							concat(" ",sctd-cal-period-desc))
+			// now step through the levels:
+			// There are only 8 possible combinations of fields:
+			//
+			// Warehouse,Item Code,
+			// Class,Group,Item Code
+			// Sales Rep,Customer Code,
+			// Territory Class,Territory,Customer Code
+			// Supplier Code,,
+			// Customer Code,,
+			// Item Code,,
+			// Item Code,Warehouse,
+			// 
+			// so this is all we deal with
+			if kpidp-field-desc[1] = "Warehouse"
+			and kpidp-field-desc[2] = "Item Code"
+			and kpidp-field-desc[3] = spaces
+//				print "processing warehouse item code"
+				select * from system-table
+					where sys-tbl-type = "WH"
+					and sys-tbl-code like "W%"
+				detail
+					do insert-history-detail parameters are 
+						1 sys-tbl-code sys-description 
+					select * from stock-warehouse-detail
+						where whse-code = :sys-tbl-code
+					detail
+						get stock-master
+							on index stock-code
+							key is stock-code
+						do insert-history-detail parameters are 
+							2 stock-code stk-description 
+					end-select
+				end-select
+			elseif kpidp-field-desc[1] = "Class"
+			and kpidp-field-desc[2] = "Item Group"
+			and kpidp-field-desc[3] = "Item Code"
+				print "Processing Class Item Group"
+				select * from system-table
+					where sys-tbl-type = "OG"
+				detail
+					do insert-history-detail parameters are 
+						1 sys-tbl-code sys-description 
+					select * from system-table
+						where sys-tbl-type = 'PG'
+						and substring(sys-tbl-alpha-1,5,6) = :kpihd-level[1]
+						local-sql
+					detail
+						do insert-history-detail parameters are
+							2 sys-tbl-code sys-description 
+						select * from stock-master
+							where stock-group = :sys-tbl-code
+						detail
+							do insert-history-detail parameter are 
+								3 stock-code stk-description 
+						end-select
+					end-select
+				end-select
+			elseif kpidp-field-desc[1] = "Sales Rep"
+			and kpidp-field-desc[2] = "Customer Code"
+			and kpidp-field-desc[3] = spaces
+				print "Processing sales rep customer code"
+				select * from rep-master
+				detail
+					do insert-history-detail parameter are 
+						1 rep-code rep-description 
+					select * from deb-master
+						where rep-code = :rep-code
+					detail
+						do insert-history-detail parameter are 
+							2 accountcode shortname 
+					end-select
+				end-select
+			elseif kpidp-field-desc[1] = "Territory Class"
+			and kpidp-field-desc[2] = "Territory"
+			and kpidp-field-desc[3] = "Customer Code"
+				print "Processing territory class territory"
+				select * from system-table
+					where sys-tbl-type = "TG"
+				detail
+					do insert-history-detail parameter are 
+						1 sys-tbl-code sys-description 
+					select *
+						from system-table
+						where sys-tbl-type = 'TC'
+						and substring(sys-tbl-alpha-1,5,2) = :kpihd-level[1]
+						local-sql
+					detail
+						do insert-history-detail parameter are 
+							2 sys-tbl-code sys-description 
+						select * from deb-master
+							where rep-code = :rep-code
+						detail
+							do insert-history-detail parameter are 
+								3 accountcode shortname 
+						end-select
+					end-select
+				end-select
+			elseif kpidp-field-desc[1] = "Supplier Code"
+			and kpidp-field-desc[2] = spaces
+			and kpidp-field-desc[3] = spaces
+				print "Processing Spplier code"
+				select *
+					from cre-master
+				detail
+					do insert-history-detail parameter are 
+						1 cre-accountcode cr-shortname 
+				end-select
+			elseif kpidp-field-desc[1] = "Customer Code"
+			and kpidp-field-desc[2] = spaces
+			and kpidp-field-desc[3] = spaces
+				print "Processing customer Code"
+				select *
+					from deb-master
+				detail
+					do insert-history-detail parameter are 
+						1 accountcode shortname 
+				end-select
+			elseif kpidp-field-desc[1] = "Item Code"
+			and kpidp-field-desc[2] = spaces
+			and kpidp-field-desc[3] = spaces
+				print "Processing Class Item code"
+				select *
+					from stock-master
+				detail
+					do insert-history-detail parameter are 
+						1 stock-code stk-description 
+				end-select
+			elseif kpidp-field-desc[1] = "Item Code"
+			and kpidp-field-desc[2] = "Warehouse"
+			and kpidp-field-desc[3] = spaces
+				select * from stock-master
+				detail
+					do insert-history-detail parameters are 
+						1 stock-code stk-description 
+					select * from system-table
+						where sys-tbl-type = 'WH'
+						and sys-tbl-code like 'W%'
+					detail
+						do insert-history-detail parameters are 
+							2 sys-tbl-code sys-description 
+					end-select
+				end-select
+			elseif kpidp-field-desc[1] = "Branch"
+			and kpidp-field-desc[2] = "Project Type"
+			and kpidp-field-desc[3] = "Project Code"
+				// Branch
+				select * from system-table
+					where sys-tbl-type = 'JB'
+				detail
+					do insert-history-detail parameters are 
+						1	sys-tbl-code sys-description
+					// type
+					select * from system-table
+						where sys-tbl-type = 'JP'
+					detail
+						do insert-history-detail parameters are 
+							2	sys-tbl-code sys-description
+						// project
+						for j = 1 to 20
+							do insert-history-detail parameters are 
+								3	str-concat('TS' format-picture(j,"9999")) 
+									concat("Sample for " str-concat('TS' format-picture(j,"9999")) )
+						end-for
+					end-select
+				end-select
+			elseif kpidp-field-desc[1] = "Branch"
+			and kpidp-field-desc[2] = "Customer Code"
+			and kpidp-field-desc[3] = "Project Code"
+				// Branch
+				select * from system-table
+					where sys-tbl-type = 'JB'
+				detail
+					do insert-history-detail parameters are 
+						1	sys-tbl-code sys-description
+					// Customer
+					select distinct accountcode  from job-cost-master
+						where job-branch =  :sys-tbl-code
+					detail
+						get deb-master
+							on index accountcode
+							key is accountcode
+						on error
+							set shortname = '** Not Found **'
+						endon
+						do insert-history-detail parameters are 
+							2	accountcode shortname
+						// project
+						for j = 1 to 20
+							do insert-history-detail parameters are 
+								3	str-concat('TS' format-picture(j,"9999")) 
+									concat("Sample for " str-concat('TS' format-picture(j,"9999")) )
+						end-for
+					end-select
+				end-select
+			elseif kpidp-field-desc[1] = "Manager"
+			and kpidp-field-desc[2] = "Project Code"
+				select distinct jcm-project-manager user-employee-name
+					from job-cost-master
+					inner join system-user-control on jcm-project-manager = user-id
+				detail
+					do insert-history-detail parameters are 
+						1	jcm-project-manager user-employee-name
+					select *
+						from job-cost-master
+						where jcm-project-manager = :jcm-project-manager
+					detail
+						do insert-history-detail parameters are 
+							2	job-code job-cost-description
+					end-select
+				end-select
+			elseif kpidp-field-desc[1] = "Grand Parent"
+			and kpidp-field-desc[2] = "Parent"
+			and kpidp-field-desc[3] = "Project Code"
+				print "Not yet implemented"
+// newkpi:
+// Add new drill paths here (new elseif before this else)
+			else
+				print "Cannot deal with drill path " kpihd-id
+			endif
+			//
+			get kpi-history
+				on index kpi-comp-code kpi-id kpih-date-time
+				key is lp-coy-code lp-id  kpih-date-time
+			on error ENOREC
+				initialise kpi-history
+					leaving kpi-comp-code kpi-id kpih-date-time
+				set kpih-date = lf-start
+				set kpih-time-sequence = sctd-sequential-period
+				set kpih-time-sequence-desc = str-concat(sctd-year-desc-1,
+								"-",
+								zstr(sctd-cal-period,2,0),
+								concat(" ",sctd-cal-period-desc))
+				for i = 1 to kpi-active-values
+					set kpih-value[i] = RANDOM_BETWEEN(10000,50000)
+				end-for
+				insert kpi-history
+			endon
+		until lf-start > lf-stop
+		end-repeat
+	end-select // drill path
+	//
+	// completion
+	//
+	get kpi-master
+		on index kpi-comp-code kpi-id
+		key is lp-coy-code lp-id
+	on error
+		message "Cannot get kpi master record" error-description(file-status())
+		exit
+	endon
+ 	set kpi-status = 1
+	do decode-kpi-status parameter kpi-status returning kpi-status-desc
+	set kpi-log = spaces
+	set kpi-date = lf-stop
+	set kpi-last-calculated = sys-time()
+	for i = 1 to kpi-active-values
+		set kpi-value[i] = RANDOM_BETWEEN(10000,50000)
+	end-for
+	update kpi-master
+		no-warning
+end-procedure
+
+
+procedure decode-kpi-status
+	parameter
+		lp-status			like kpi-status
+	returning
+		lr-desc				like kpi-status-desc
+	//
+	if lp-status = 0
+		set lr-desc = 'Inactive'
+	elseif lp-status = 1
+		set lr-desc = 'Active'
+	elseif lp-status = 2
+		set lr-desc = 'Calculating'
+	elseif lp-status = 3
+		set lr-desc = 'Calc. Facts & Dimensions'
+	endif
+endprocedure //decode-kpi-status -----------------------------
+
+procedure insert-history-detail
+// Big note:
+// This routine assumes that you have NOT initialised kpi-history-detail
+// That would be a really bad idea
+//
+parameters 
+	lp-level							type number
+	lp-code								pic x(30) type string
+	lp-desc								pic x(30) type string
+local
+	i									type number
+	//
+	set kpihd-value[*] = 0
+	set kpihd-level-no = lp-level
+	if lp-level = 1
+		set kpihd-level[*] = spaces
+		set kpihd-level-desc[*] = spaces
+		set kpihd-level[1] = lp-code
+		set kpihd-level-desc[1] = lp-desc
+		set kpihd-key = str-concat("_",kpihd-level[1],"_")
+	endif
+	//
+	if lp-level = 2
+		set kpihd-level[2] = lp-code
+		set kpihd-level-desc[2] = lp-desc
+		set kpihd-key = str-concat("_",kpihd-level[1],"_")
+		string  kpihd-key appending str-concat("_",kpihd-level[2],"_")
+	endif
+	if lp-level = 3
+		set kpihd-level[3] = lp-code
+		set kpihd-level-desc[3] = lp-desc
+		set kpihd-key = str-concat("_",kpihd-level[1],"_")
+		string  kpihd-key appending str-concat("_",kpihd-level[2],"_")
+		string  kpihd-key appending str-concat("_",kpihd-level[3],"_")
+	endif
+	//
+	for i = 1 to kpi-active-values
+		set kpihd-value[i] = RANDOM_BETWEEN(kp-low-value[i],kp-high-value[i])
+	endfor
+	insert kpi-history-detail
+end-procedure
+

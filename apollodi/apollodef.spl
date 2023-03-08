@@ -1,0 +1,102 @@
+#ifndef APOLLODEF
+#define APOLLODEF
+
+object reportdef
+	type is memory
+	record
+		ap-name			pic x(20)			
+		ap-desc			pic x(40)
+		ap-spl-name		pic x(40)
+		ap-primary		like obj-name	// this is the primary file
+		ap-monitor		like fld-name  // this is the field that gets displayed during the run
+		ap-skeleton		pic x(20)  /// name of skeleton to use when generating
+		ap-full-pgm		pic x(200) // full path to program
+		ap-xml			pic x	// XML Support Required
+		ap-module		pic x(10)
+		ap-function		pic x(10)
+		ap-excel		pic x // type of xl export - Spaces - none, D - DDE, O-ole
+		ap-build-file	pic x // type of build file - Spaces - SQL - M - Manual
+		ap-di-project	pic x(20)
+	end-record
+	key is ap-name
+
+object reportfil
+	type is memory
+	record is
+		ap-name			
+		ap-obj-name 	like obj-name
+		ap-fld-name		like fld-name
+		ap-array-offset	pic 9999
+		ap-fld-source	pic x  // B BMS C Cus D Distributor
+		ap-sort-seq		pic 9999
+		ap-total-flg	pic x
+		ap-group		pic 9999
+		ap-col			pic 9999
+		ap-print-pos	pic 9999
+		ap-print-pic	pic x(20) // pic clause to be displayed
+		ap-col-head		pic x(15) occurs 3 // column headings
+		ap-prompt		pic x(30) // for prompt on the header screen
+		ap-help			pic x(60) // help message on the selection screen
+		ap-suppress-dup	pic x
+		ap-xml-hide		pic x // spaces - no xml hiding, C - Can Hide, H-Hidden
+		ap-dict			pic x // B Bms C CUs
+		ap-print-line 	pic 9999 // can be the same as the sort order or 0 for normal detail
+		ap-sqlstmt-seq	pic 9999 // sequence fields are specified in the sql stmt.
+		ap-suppress-prt	pic x // suppress printing - select only
+	endrecord
+	key is ap-name ap-obj-name ap-fld-name
+	key is ap-name ap-sort-seq
+	key is ap-name ap-col
+	key is ap-name ap-group
+	key is ap-name ap-print-line ap-col
+
+object reportsel
+	type is memory
+	record is 
+		ap-name
+		ap-sel-seq						pic 99
+		ap-fld-name
+		ap-operator						pic xx  // GE EQ LE LT GT LK
+		ap-default						pic x(30)  // default value on the screen
+		ap-sel-prompt					pic x(30)
+		ap-ws-fld-name					pic x(30)
+		ap-sel-pic						pic x(20) // used for ws- selection criteria.yy
+	end-record
+	key is ap-name ap-sel-seq ap-fld-name
+
+object reportcal
+	type is memory
+	record is
+		ap-name
+		ap-calc-fld-name				pic x(100) type string
+		ap-type							pic xx
+		ap-level						pic 9999
+		ap-expression					pic x(500) type string
+		ap-calc-pic						pic x(50) type string
+		ap-calc-fld-title				pic x(100) type string
+	end-record
+	key is ap-name ap-calc-fld-name ap-type ap-level
+
+object reportsql
+	type is memory
+	record is
+		ap-name
+		ap-sql-seq		pic 9(6)
+		ap-sql-text		pic x(1024) type string
+	end-record
+	key is ap-name ap-sql-seq
+
+object reporttxt
+	type is memory
+	record is
+		ap-name
+		ap-txt-type		pic x(10)
+		// USER= user notes
+		// DESIGN= designer notes
+		// COMPILE= compile errors
+		ap-txt-seq		pic 9(6)
+		ap-txt-line		pic x(1024) type string
+	end-record
+	key is ap-name ap-txt-type ap-txt-seq
+
+#endif

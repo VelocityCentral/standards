@@ -1,0 +1,18 @@
+//
+// just to see results of program for appservices
+//
+
+menu main
+local
+	lf-result						pic x(1024) type string
+detail
+	option "Create sample" @1,1
+		spl "edi/crtsampleords" returning lf-result
+		message lf-result
+	option "run import " @2,1
+		spl "edi/edidemo" returning lf-result
+		message lf-result
+end-menu
+	
+ 
+

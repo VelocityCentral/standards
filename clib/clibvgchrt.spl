@@ -1,0 +1,694 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : 
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2020
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: clib/clibvgchrt.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 18Jul20  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+
+#define MAX_SERIES 5
+#define VALID_CHART_TYPES ('LineChart', 'Histogram', 'PieChart')
+/*
+
+	This documentation is in RST format.  To view this as a nice pdf goto
+	https://overbits.herokuapp.com/rsteditor/ or rst.ninjs.org  and paste this content.
+
+==========
+clibvgchrt
+==========
+
+This clib will display a google chart in the middle of a pronto page.
+This documentation describes how to use and call the clib routines.
+
+Handling errors - clibvgchrt-get-last-error 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    When an error occurs the display-chart routine will exit with a non-zero exit
+	code.  This should be checked. 
+	If a non-zero exit code is encountered, then the calling program should make
+	a call to clibvgchrt-get-last-error to get the last created error message.
+
+clibvgchrt-display-chart 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	The purpose of this routine is to provide a single clib to enable creation of 
+	google charts.
+
++------+------------+------------------------------------------------------------+
+| Seq  | Type       | Description                                                |
++======+============+============================================================+
+| 1    | Blob       | Xml Blob of the chart specification                        |
+|      |            |                                                            |
+|      |            | See blow for details                                       |
++------+------------+------------------------------------------------------------+
+| 2    | Number     | Left hand screen position                                  |
++------+------------+------------------------------------------------------------+
+| 3    | Number     | First Line of screen                                       |
++------+------------+------------------------------------------------------------+
+| 4    | Number     | width of box                                               |
++------+------------+------------------------------------------------------------+
+| 5    | Number     | height of box                                              |
++------+------------+------------------------------------------------------------+
+
+	I tossed around multiple procedure calls to setup the chart data but it 
+	got so complicated that I ditched it all and decided on using XML as the interface.
+	So the basic premise is that the calling program creates and xml document that
+	contains all the things that are needed for the chart and the saves the document
+	to a blob and passes the blob as the main parameter of the chart definition.
+
+	The xml needs to look something like this:
+
+.. code-block:: xml
+
+	<?xml version="1.0"?>
+	<clibvgchrt>
+	  <title>Test Chart</title>
+	  <charttype>LineChart</charttype>
+	  <htitle>Date</htitle>
+	  <vtitle>000's Dollars</vtitle>
+	  <alegend>Sales</alegend>
+	  <blegend>Budget</blegend>
+	  <chartheight>100</chartheight>
+	  <data>
+		<point label="X1">
+		  <a>317</a>
+		  <b>256</b>
+		</point>
+		<point label="X2">
+		  <a>176</a>
+		  <b>313</b>
+		</point>
+		... Repeated as many times as requried  ...
+	  </data>
+	</clibvgchrt>
+
+
+The following rules apply:
+
+#.	Up to Five data series can appear on a chart (unless it is a pie chart)
+#.  Each series is labelled a-e.
+#.  For each data series, there must be a legend and it must start with the series letter 
+	followed by the word "legend"
+#.  all xml tags must be in lowercase.
+
+
+
+
+The following chart describes the options:
+
+
++----------------+------------+--------------------------------------------------------------------+
+| Tag            |Mandatory   | Description                                                        |
+|                |Optional    |                                                                    |
++================+============+====================================================================+
+|title           |    M       | The title to appear at the top of the chart                        |
++----------------+------------+--------------------------------------------------------------------+
+|charttype       |    O       | One of Histogram, LineChart, PieChart.  (Case is important)        |
+|                |            | If not specified then LineChart will be selected                   |
++----------------+------------+--------------------------------------------------------------------+
+|htitle          |    O       | Horizontal (x) axis title                                          |
++----------------+------------+--------------------------------------------------------------------+
+|vtitle          |    O       | Vertical (y) axis title                                            |
++----------------+------------+--------------------------------------------------------------------+
+|xlegend         |    M       |  For each data series, there must be a legend and it must start    | 
+|                |            |  with the series letter followed by the word legend                |
+|                |            |                                                                    |
+|                |            |  e.g. alegend, blegend, clegend                                    |
+|                |            |                                                                    |
+|                |            |  The program will use the number of these items to determine the   |
+|                |            |  the number of data series expected.  If the number of series      |
+|                |            |  in the point nodes do not match this number an error is raised    |
+|                |            |                                                                    |
++----------------+------------+--------------------------------------------------------------------+
+|chartheight     |    O       | Overrides the program calculated height (the pgm will attempt to   |
+|                |            | calculate the right height based on the passed parameters)         |
++----------------+------------+--------------------------------------------------------------------+
+|Data            |    M       | One of these items to hold the collection of data points           |
++----------------+------------+--------------------------------------------------------------------+
+| Point          |    M       | One of these for each item to be charted                           |
+|                |            | Note that each point must contain an attribute "label" that        |
+|                |            | defines the horizontal (x) axis label.                             |
++----------------+------------+--------------------------------------------------------------------+
+|  x             |    M       | Within each point there should be one of these for each series     |
+|                |            | Being graphed.  The "x" to be replaced with onr of the lowercase   |
+|                |            | characters a-e representing each series                            |
+|                |            |                                                                    |
++----------------+------------+--------------------------------------------------------------------+
+	
+Limitations:  
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+#.  There is a limit of 500 data points per series.
+#.	A maximum of 5 Series
+#.	Historgrams, Linecharts and Pie charts only
+
+Sample Program
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Here is a sample Pronto program showing how to create the xml and pass it to the clib::
+
+	procedure testit
+	window no-hide
+	local
+		lf-chrtblob					type blob
+		lf-error					pic x(512) type string
+		do create-xml-chart returning  lf-chrtblob
+		do clibvgchrt-display-chart parameters are lf-chrtblob,3,3,20,70
+		if exit-status != 0
+			do clibvgchrt-get-last-error returning lf-error
+			message lf-error
+		endif
+		pause
+	end
+
+	procedure create-xml-chart
+	returning 
+		lr-chrtblob					type blob
+	local
+		lf-doc						type xml-handle
+		lf-root						type xml-handle
+		lf-data						type xml-handle
+		lf-point					type xml-handle
+		i 							type number
+		//
+		set lf-doc = xml-new-document(spaces,"clibvgchrt")
+		set lf-root = xml-get-root-node(lf-doc)
+		if xml-add-child-node-text(lf-root,"title",spaces,"Sales") endif
+		if xml-add-child-node-text(lf-root,"charttype",spaces,"LineChart") endif
+		if xml-add-child-node-text(lf-root,"htitle",spaces,"Date") endif
+		if xml-add-child-node-text(lf-root,"vtitle",spaces,"000's Dollars") endif
+		if xml-add-child-node-text(lf-root,"alegend",spaces,"Sales") endif
+		if xml-add-child-node-text(lf-root,"blegend",spaces,"Budget") endif
+		if xml-add-child-node-text(lf-root,"chartheight",spaces,"500") endif
+		if xml-add-child-node-text(lf-root,"chartwidth",spaces,"600") endif
+		set lf-data = xml-add-child-node(lf-root,"data",spaces) 
+		for i = 1 to 12
+			set lf-point = xml-add-child-node(lf-data,"point",spaces) 
+			if xml-add-node-attribute(lf-point, "label", spaces,
+				format-picture(julian(1,i,2020),"mmm")) endif
+			if xml-add-child-node-number(lf-point,"a", spaces,RANDOM_BETWEEN(100,500),0) endif
+			if xml-add-child-node-number(lf-point,"b", spaces,RANDOM_BETWEEN(200,400),0) endif
+		end-for
+		if xml-save-as-text(lf-doc,lr-chrtblob,spaces) endif
+	end-procedure
+
+
+Notes for this code
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+See https://developers.google.com/chart for development notes of how how to create the chart.
+
+The generated html should something like this:
+
+.. code-block:: html
+
+
+	<html>
+	<head>
+	<script type="text/javascript" src="https://www.google.com/jsapi"></script>
+	<script type="text/javascript">
+	google.load("visualization", "1", {packages:["corechart"]});
+	google.setOnLoadCallback(drawChart);
+
+	function drawChart() {
+	var data = new google.visualization.DataTable();
+	data.addColumn('string', 'As At Date');
+	data.addColumn('number', 'Sales History');
+	data.addColumn('number', 'Exponential Smoothing');
+	data.addRows([
+	 ["31-JUL-2018",0,null]
+	 ,["31-AUG-2018",0,null]
+	 ,["30-SEP-2018",12,null]
+	 ,["31-OCT-2018",24,null]
+	 ,["30-NOV-2018",36,null]
+	 ,["31-DEC-2018",30,null]
+	 ,["31-JAN-2019",24,null]
+	 ,["28-FEB-2019",12,null]
+	 ,["31-MAR-2019",0,null]
+	 ,["30-APR-2019",0,null]
+	 ,["31-MAY-2019",0,null]
+	 ,["30-JUN-2019",0,null]
+	 ,["31-JUL-2019",0,null]
+	 ,["31-AUG-2019",0,null]
+	 ,["30-SEP-2019",12,null]
+	 ,["31-OCT-2019",24,null]
+	 ,["30-NOV-2019",35,null]
+	 ,["31-DEC-2019",23,null]
+	 ,["31-JAN-2020",12,null]
+	 ,["29-FEB-2020",11,null]
+	 ,["31-MAR-2020",0,null]
+	 ,["30-APR-2020",0,null]
+	 ,["31-MAY-2020",0,null]
+	 ,["30-JUN-2020",0,null]
+	 ,["16-JUL-2020",0,null]
+	 ,["31-JUL-2020",null,0]
+	 ,["31-AUG-2020",null,0]
+	 ,["30-SEP-2020",null,10]
+	 ,["31-OCT-2020",null,19]
+	 ,["30-NOV-2020",null,27]
+	 ,["31-DEC-2020",null,20]
+	 ,["31-JAN-2021",null,16]
+	 ,["28-FEB-2021",null,8]
+	 ,["31-MAR-2021",null,0]
+	 ,["30-APR-2021",null,0]
+	 ,["31-MAY-2021",null,0]
+	 ,["30-JUN-2021",null,0]
+	 ,["31-JUL-2021",null,0]
+	]);
+
+	var options = {
+	height: 259.736842,
+	chartArea: {left:62, top: 13.263158},
+	hAxis : { textStyle : {fontSize: 12.157895 }},
+	tooltip: {isHtml: true},
+	series: {0:{color: '#4285F4'},1:{color: '#FF7042'},
+	2:{color: '#F4B400'},3:{color: '#0F9D58'},
+	4:{color: '#AB47BC'},5:{color: '#00ACC1'}}
+
+	};
+
+	var chart = new google.visualization.LineChart(document.getElementById('chart1'));
+
+	chart.draw(data, options);
+
+	}
+	</script>
+	</head>
+	<body style="font-family: Tahoma; font-size:66.315789%;background-color:white">
+	<div style="padding-left:60px;">Item: <b>BV200 - Chocolate Flavoured Milk</b>
+	&nbsp&nbsp&nbsp&nbspWarehouse: <b>W02</b>&nbsp&nbsp&nbsp&nbspTime Bucket: 
+	<b>Financial Period</b>&nbsp&nbsp&nbsp&nbspPublished Forecast</div>
+	<div id="chart1"></div>
+	</body>
+	</html>
+
+*/
+ 
+#include "../include/i8proglogparam.spl"
+#include "../include/igetbasenm.spl"
+
+field
+	ws-command							pic x(512) type var-char
+	ws-last-error						pic x(512) type string
+	ws-previous-proclient-tmp-file		pic x(512) type var-char
+
+object tmp-text
+	type text
+	record is
+		tmp-text						pic x(1024)
+	endrecord
+
+object tmp-ole-id
+	type is memory
+	record
+		toi-tag							pic x(20)
+		toi-ole-id						type ole-interface
+	endrecord
+	key is toi-tag
+	
+#define I(TXT) \
+	set tmp-text = TXT\
+	insert tmp-text
+
+
+
+procedure library-init
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8proglogparam-write-log parameters are "clibvgchrt"
+end-procedure
+
+procedure clibvgchrt-get-last-error export
+returning 
+	lr-err								like ws-last-error
+	set lr-err = ws-last-error
+end-procedure
+
+procedure clibvgchrt-display-chart export
+parameters
+	lp-xml-chart						type blob
+	lp-row								type number
+	lp-col								type number
+	lp-depth							type number
+	lp-height							type number
+	do build-file parameters lp-xml-chart lp-height
+	if exit-status != 0
+		exit 1
+	endif
+	do launch-html parameters are
+		lp-row  lp-col lp-depth lp-height
+end-procedure
+
+procedure launch-html
+parameter
+	lp-row								pic 999.99
+	lp-col								pic 999.99
+	lp-depth							pic 999.99
+	lp-width							pic 999.99
+returning
+	lr-temp-file						pic x(256) type string
+//
+local field
+	lf-ole-status						pic s9(10)
+	lf-j								type numeric
+	lf-file-name						pic x(256) type string
+	lf-launch-method					pic 9
+	lf-tag								pic x(20)
+	lf-temp-dir							pic x(512) type var-char
+	lf-ole-ids-open						type boolean
+	//
+	set lf-file-name = filename(tmp-text)
+	set lf-launch-method = 3
+	set lf-tag = 'GOOGLE_TAG'
+	set lf-temp-dir = get-registry-value("HKEY_CURRENT_USER\Environment\TEMP")
+	//
+	if WORKSTATION_INTERACTION_OK
+	and not USING_THICKCLIENT
+		//do this before we turn off local agent
+		do clear-previous-proclient-tmp-file
+	endif
+	//
+	//some ole commands don't work with local agent on, so we turn it off here
+	web-client-local-agent off
+	//
+	close tmp-text
+	if USING_THICKCLIENT
+		set lr-temp-file = lf-file-name
+	else
+		if USING_WEBCLIENT
+			do igetbasenm-get-basename
+				parameters
+					lf-file-name
+				returning
+					lr-temp-file
+		elseif WORKSTATION_INTERACTION_OK
+			for lf-j = strlen(lf-file-name) down to 1
+				if substring(lf-file-name,lf-j,lf-j) = '/'
+					set lf-file-name = substring(lf-file-name,lf-j + 1,strlen(lf-file-name))
+					break
+				endif
+			endfor
+			//
+			if substring(lf-temp-dir,strlen(lf-temp-dir),strlen(lf-temp-dir)) != "\"
+				set lr-temp-file = strconcat(lf-temp-dir,'\',lf-file-name)
+			else
+				set lr-temp-file = strconcat(lf-temp-dir,lf-file-name)
+			endif
+			//
+			set ws-previous-proclient-tmp-file = lr-temp-file
+		endif
+		//
+		command 'proclientft'
+			parameters
+				'-s'
+				'-q'
+				file-name(tmp-text)
+				lr-temp-file
+	endif
+	//
+	if lf-launch-method = 1
+		if set_background_image(lr-temp-file)
+		endif
+	elseif lf-launch-method = 2
+		command lr-temp-file
+			external
+			no-wait
+	elseif lf-launch-method = 3
+		if not lf-ole-ids-open
+			set lf-ole-ids-open = TRUE
+			open tmp-ole-id temporary
+		endif
+		get tmp-ole-id
+			on index toi-tag
+			key is lf-tag
+		on error
+			set toi-ole-id = ole-create-control("Shell.Explorer",lp-row,lp-col,lp-depth,lp-width)
+			set toi-tag = lf-tag
+			insert tmp-ole-id
+		endon
+		if not ole-put-property(toi-ole-id,"ProntoEmbedInIframe","true")			
+		endif
+		if not ole-call-method(toi-ole-id,"Navigate2",lf-ole-status,lr-temp-file)
+			//
+			// Something has killed the existing ole-id (probably a clear and redrawn over the top
+			// this commonly occurs with 'tabbed' screens that re-use the same screen real-estate
+			//
+			if ole-release(toi-ole-id)
+			endif
+			get tmp-ole-id
+				on index toi-tag
+				key is lf-tag
+				lock
+			on error
+			else
+				set toi-ole-id = ole-create-control("Shell.Explorer",lp-row,lp-col,lp-depth,lp-width)
+				update tmp-ole-id
+			endon
+			if not ole-put-property(toi-ole-id,"ProntoEmbedInIframe","true")			
+			endif				
+			if not ole-call-method(toi-ole-id,"Navigate2",lf-ole-status,lr-temp-file)
+			endif
+		endif
+	endif
+	//
+	web-client-local-agent on
+endprocedure //launch-html ----------------------------------------------------------
+
+procedure get-series-count 
+parameters are 
+	lp-point							type xml-handle
+returning 
+	lr-series-count						type  number
+	set lr-series-count = 1
+	repeat
+	until xml-get-child-by-name(lp-point,ascii-char(96 + lr-series-count),spaces) = 0
+		set lr-series-count += 1
+		if lr-series-count > MAX_SERIES 
+			exit
+		endif
+	end-repeat
+	set lr-series-count -= 1
+end-procedure
+
+procedure clear-previous-proclient-tmp-file
+	//
+	if ws-previous-proclient-tmp-file > spaces
+		command ws-command parameters '/C' 'del' '/F' ws-previous-proclient-tmp-file
+			external
+	endif
+endprocedure //clear-proclient-tmp-files ----------------------------------------------------------
+
+procedure build-file
+parameters
+	lp-xml-chart						type blob
+	lp-height							type number
+local
+	lf-doc								type xml-handle
+	lf-root								type xml-handle
+	lf-data								type xml-handle
+	lf-point							type xml-handle
+	lf-series							type xml-handle
+	lf-misc-node						type xml-handle
+	lf-point-count						type number
+	lf-series-count						type number
+	lf-column-count						type number
+	lf-file-name						pic x(512) type string
+	lf-one-html-point					pic x(128) type string
+	lf-loop-check						type number
+	lf-misc-string						pic x(512) type string
+	i 									type number
+	//
+	open tmp-text temporary truncate
+	on error
+		set ws-last-error = 'Unable to create temporary table:'
+		string ws-last-error appending error-description(file-status())
+		exit 1
+	endon
+	set lf-file-name = strconcat(file-name(tmp-text),'.html')
+	close tmp-text
+	open tmp-text truncate temporary
+		file is lf-file-name
+	on error
+		set ws-last-error = 'Unable to create temporary html table:'
+		string ws-last-error appending error-description(file-status())
+		exit 1
+	endon
+	//
+	// Read the xml
+	//
+	set lf-doc = xml-parse-text(lp-xml-chart)
+	if lf-doc = 0
+		set ws-last-error = 'Unable to parse the xml chart passed'
+		exit 1
+	endif
+	set lf-root = xml-get-root-node(lf-doc)
+	if lf-root = 0
+		set ws-last-error = 'Unable to get root node of xml chart'
+		exit 1
+	endif
+	//
+	I('<html>')
+  	I('<head>')
+	I('<script							type="text/javascript" src="https://www.google.com/jsapi"></script>')
+	I('<script							type="text/javascript">')
+	I('google.load("visualization", "1", {packages:["corechart"]});')
+	I('google.setOnLoadCallback(drawChart);')
+    I(' ')
+    I('function drawChart() {')
+    //
+    //
+	I('var data = new google.visualization.DataTable();')
+	I("data.addColumn('string', 'As At Date');")
+	//
+	// ---------------Series Legends ------------------------------
+	//
+	set i = 1
+	set lf-column-count = 0
+	repeat
+		set lf-misc-node = xml-get-child-by-name(lf-root,concat(ascii-char(96 + i),"legend"),spaces)
+	until lf-misc-node = 0
+		set lf-column-count += 1
+		I(concat("data.addColumn('number','",  xml-node-text(lf-misc-node), "');")  )
+		set i += 1
+	end-repeat
+	//
+	// ---------------- DATA Series  --------------------------------------------------
+	//
+	I('data.addRows([') 
+	// ) handy comment line to make the following code colour coded in gvim.
+	// 
+	// Rows HERE
+	set lf-data = xml-get-child-by-name(lf-root,"data",spaces)
+	if lf-data = 0
+		set ws-last-error = "No data in chart"
+		exit 1
+	endif
+	set lf-point = xml-get-first-child-node(lf-data)
+	// determine the number of data series:
+	do get-series-count parameters are lf-point returning lf-series-count
+	if lf-series-count != lf-column-count
+		message 'The number of series does not match the number of columns'
+		exit 1
+	endif
+	while lf-point != 0 and xml-node-name(lf-point) = "point"
+		set lf-point-count += 1
+		if lf-point-count > 500
+			set ws-last-error = "Infinte loop in data series detected"
+			exit 1
+		endif
+		set lf-one-html-point = spaces
+		if lf-point-count > 1
+			string lf-one-html-point appending ","
+		endif
+		//  We need to build a line that looks like this : ,["30-SEP-2018",12,null]
+ 		string lf-one-html-point appending '["'
+		string lf-one-html-point appending xml-get-node-attribute(lf-point,"label")
+		string lf-one-html-point appending '",'
+		// now look for series
+		for i = 1 to lf-series-count
+			set lf-series = xml-get-child-by-name(lf-point,ascii-char(96 + i),spaces)
+			if lf-series = 0
+				string lf-one-html-point appending "null"
+			else
+				string lf-one-html-point appending xml-node-text(lf-series)
+			endif
+			if i < lf-series-count
+				string lf-one-html-point appending ","
+			endif
+		endfor
+		string lf-one-html-point appending "]"
+		I(lf-one-html-point)
+		set lf-point = xml-get-next-node(lf-point)
+	end-while
+	I(']);')
+	I(" ")
+	//
+	// ----------------------- Chart Options -----------------------
+	//
+	I('var options = {')
+//	I(param-text('height: <<P1>>,',(235 * get-system-metrics(2)) / 19))
+	set lf-misc-node = xml-get-child-by-name(lf-root,"chartheight",spaces)
+	if lf-misc-node != 0
+		I(param-text('height : <<P1>>, ', xml-node-text(lf-misc-node)))
+	else
+		I(param-text('height: <<P1>>,',(6 * lp-height * get-system-metrics(2)) / 19))
+	endif
+	I(param-text('chartArea: {left:62, top: <<P1>>},',(12 * get-system-metrics(2)) / 19))
+	// x axis
+	I('hAxis : { ') 
+	I(param-text('textStyle : {fontSize: <<P1>> },',(11 * get-system-metrics(2)) / 19))
+	set lf-misc-node = xml-get-child-by-name(lf-root,"htitle",spaces)
+	if lf-misc-node != 0
+		I(param-text('title : "<<P1>>" ', xml-node-text(lf-misc-node)))
+	endif
+	I('},')
+	// y axis
+	I('vAxis : { ') 
+	I(param-text('textStyle : {fontSize: <<P1>> },',(11 * get-system-metrics(2)) / 19))
+	set lf-misc-node = xml-get-child-by-name(lf-root,"vtitle",spaces)
+	if lf-misc-node != 0
+		I(param-text('title : "<<P1>>" ', xml-node-text(lf-misc-node)))
+	endif
+	I('},')
+	// toop tip
+	I('tooltip: {isHtml: true},')
+	I("series: {0:{color: '#4285F4'},1:{color: '#FF7042'},2:{color: '#F4B400'},3:{color: '#0F9D58'},4:{color: '#AB47BC'},5:{color: '#00ACC1'}}")
+    I('};')
+	//
+	I(" ")
+	// 
+	// ---------------Chart type ----------------------
+	//
+	// Modifiy the line below to determine the chart type
+	//
+	set lf-misc-node = xml-get-child-by-name(lf-root,"charttype",spaces)
+	if lf-misc-node = 0
+		I("var chart = new google.visualization.LineChart(document.getElementById('chart1'));")
+	else
+		// specified chart type
+		if xml-node-text(lf-misc-node) not in VALID_CHART_TYPES
+			set ws-last-error = 'Invalid Chart type'
+			exit 1
+		else
+			set lf-misc-string = "var chart = new google.visualization."
+			string lf-misc-string appending xml-node-text(lf-misc-node)
+			string lf-misc-string appending "(document.getElementById('chart1'));"
+			I(lf-misc-string)
+		endif
+	endif
+	I(" ")
+	I("chart.draw(data, options);")
+	//I("chart.draw(data);")
+	I(" ")
+    I('}')
+	//
+    I('</script>')
+  	I('</head>')
+  	//
+  	//now the HTML to render...
+  	//
+  	I(param-text('<body style="font-family: Tahoma; font-size:<<P1>>%;background-color:white">',(60 * get-system-metrics(2)) / 19))
+	//
+	//  ----------------- Chart title -------------------------------------
+	//
+	set lf-misc-node = xml-get-child-by-name(lf-root,"title",spaces)
+	if lf-misc-node = 0
+		set ws-last-error = "Unable to find chart title"
+		exit 1
+	endif
+	I(param-text('<div style="padding-left:60px;"><<P1>></div>',xml-node-text(lf-misc-node)))
+	I('<div id="chart1"></div>')
+  	I('</body>')
+	I('</html>')
+	// ) //
+end-procedure
+
+//end of file

@@ -1,0 +1,123 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : EDI Error Codes 
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2011
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: edierrcode.spl
+//
+// Methods:
+//
+// Maintenance
+// (P1) -m
+//
+// Enquiry
+// (P1) -e
+// (R1) Return code (optional)
+//
+// Modification History
+// Date		Who	SDR		What
+// 22Feb12	mdr	77		Adapted for GD Rutter
+// 27Apr11	mdr 		Written	
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include '../include/i8secabt.spl'
+#include '../include/i8proglog.spl'
+#include '../include/i8secok.spl'
+
+field
+	ws-function-title					type string
+
+mode md-select
+	prompt 'Select'
+	help 'Press [ENTER] to select marked code'
+	currency
+
+procedure main
+returning 
+	lr-edi-error-code					like v-edi-error-code
+	local field
+		lf-ok							type boolean
+	get system-control
+		first
+	on error
+		abort 'No Control Record'
+	endon
+	if get-param(1) = '-m'
+		do i8secabt-check-abort
+			parameters are sys-consolidation-division login-id() 'ZEDI' 'M050'
+			returning ws-function-title
+		do i8proglog-write-log
+		do error-screen search entry correct remove 
+	else
+		do i8secok-check-ok
+			parameters are sys-consolidation-division login-id() 'ZEDI' 'E050'
+			returning lf-ok ws-function-title
+		do i8proglog-write-log
+		do error-screen md-select search returning lr-edi-error-code
+	endif
+end-procedure
+
+screen error-screen 
+returning 
+	lr-edi-error-code					like v-edi-error-code
+	window @1,1 to @22,53
+	title is ws-function-title
+	select * from edi-error-codes
+		order by v-edi-error-code
+	datagrid occurs 21
+	review-from-start
+before
+detail
+	accept v-edi-error-code @1,1 pic z(8)
+		title 'Error'
+		help 'Enter an error'
+		show-value
+		when screenmode() in {search entry}
+	validation
+		if v-edi-error-code <= ZERO 
+			message 'An error code greater then zero must be entered'
+			re-enter
+		endif
+		if screenmode() = entry
+			get edi-error-codes
+				lookup
+				on index v-edi-error-code
+			on error
+			else
+				message 'This error code already exists'
+				re-enter
+			endon
+		endif
+	end-validations
+	accept v-edi-error-description @1,2
+		title 'Description'
+		help 'Enter a description of the error'
+	validation
+		if v-edi-error-description = SPACES 
+			message 'An error description must be entered'
+			re-enter
+		endif
+	end-validations
+	accept v-edi-error-type @1,3 pic x(6)
+		title 'Type'
+		help 'Enter the type of error - E-Error, W-Warning, D-Disable'
+	validation 
+		if v-edi-error-type not in ('E' 'W' 'D')
+			message 'Error type not E-Error or W-Warning or D-Disable'
+			re-enter
+		endif
+	end-validations
+	confirm default is no
+		when screenmode() = remove
+	confirmed
+		if screenmode() = md-select
+			set lr-edi-error-code = v-edi-error-code
+			exit
+		endif
+	end-confirm
+end-screen

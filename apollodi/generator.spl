@@ -1,0 +1,2079 @@
+//#include 'apdictdef.spl'
+#include 'apollodef.spl'
+#include 'common.spl'
+//#define DEBUG
+
+#define DBGINSRC(A,B) \
+	set source-line = concat("// " B ":" get-field-value(B)) \
+	SQUIRT(A)
+
+#define MAXNOTELEN 100
+
+#define SQUIRT(A)   \
+	if A != 0 \
+		set seq-no = A \
+		set A += .00001 \
+		insert skeleton-work \
+			on error \
+			endon \
+	endif
+
+#define SQUIRT_NO_INC(A)   \
+	if A != 0 \
+		set seq-no = A \
+		insert skeleton-work \
+			on error \
+			endon \
+	endif
+
+#define SQUIRT_DEFINE(A) \
+	if A != 0 \
+		set seq-no = A \
+		do format-squirt-line-for-define \
+			parameters are source-line \
+			returning source-line \
+		if source-line != spaces \
+			insert skeleton-work \
+				on error \
+				endon \
+		endif \
+	endif
+
+#define STRFLD(A)	substring(A,1,str-len(A))
+
+#define TAB ascii-char(9)
+#define MAX_TOT_FLDS 200
+#define MAX_COLS 500
+#define MAX_SECONDARY_FILES 100
+#define SQLQUOTE concat('"',ascii-char(39),'"')
+#define SQLQUOTELEADINGSPACE concat('" ',ascii-char(39),'"')
+
+
+object skeleton-work
+	type is isam
+	record is
+		seq-no			pic 99999.99999
+		source-line		pic x(200) type string
+	end-record
+	key is seq-no
+
+object skeleton-source
+	type is text
+	record is
+		source-line
+	end-record
+
+object final-program
+	type is text
+	record is
+		source-line
+	end-record
+
+
+field
+	ws-sqlstmt							like seq-no
+	ws-header							like seq-no
+	ws-define							like seq-no
+//	ws-include							like seq-no
+//	ws-object							like seq-no
+	ws-field							like seq-no
+	ws-select							like seq-no
+	ws-select-accept					like seq-no
+	ws-select-pre760					like seq-no
+	ws-select-accept-pre760				like seq-no
+	ws-parameter						like seq-no
+	ws-appserv-para						like seq-no
+	ws-column							like seq-no
+	ws-detail-print						like seq-no
+	ws-detail-print-select				like seq-no
+	ws-detail-print-before				like seq-no
+	ws-detail-print-after				like seq-no
+	ws-detail-print-local				like seq-no
+	ws-pass-1-monitor					like seq-no
+	ws-pass-2-monitor					like seq-no
+	ws-selection-print					like seq-no
+	ws-selection-notes					like seq-no
+	ws-detail-print-grand-total			like seq-no
+	ws-dg-rows							like seq-no
+	ws-dg-select						like seq-no
+	ws-dg-local							like seq-no
+	ws-report							like seq-no
+	ws-secabt							like seq-no
+	ws-ss-columns						like seq-no
+	ws-ss-headings						like seq-no
+	ws-ss-sql							like seq-no
+	ws-ss-data							like seq-no
+	ws-ss-totals						like seq-no
+	ws-ss-local							like seq-no
+	ws-ss-mainheading					like seq-no
+
+
+procedure main
+	parameters are l-name	like ap-name
+local 
+	l-apollo-dir					pic x(100) type string
+	lf-ok							type boolean
+	lf-skeleton-name				pic x(100) type string
+	lf-xml-filename					pic x(1024) type string
+	lf-message						pic x(1024) type string
+//	report "Generator Audit"
+	set ws-current-dictionary = get-env('PRODICT')
+	//
+	//  Set the global preferences.  These are stored in ws-pref global
+	//  variables and defined in common
+	//
+	do get-global-preferences
+	do para-check-value parameters are "-xml"
+		returning lf-xml-filename
+	if not file-exists(lf-xml-filename,FALSE)
+		message-box param-text("<<P1>><<BR>><<p2>>"
+			,"xml file does not exist"
+			,lf-xml-filename)
+			title is "Apollo Generator"
+			message-buttons MSG_BOX_CANCEL
+			icon MSG_BOX_STOP
+		exit
+	endif
+	do open-empty-files
+	do load-from-xml parameters are lf-xml-filename
+		returning l-name lf-ok lf-message
+	if not lf-ok
+		message "load failed"
+		exit
+	endif
+	do validate-report
+		parameters are l-name
+		returning lf-ok lf-message
+	if not lf-ok
+		string lf-message appending param-text("<<BR>>Press OK to continue or Cancel to Exit")
+		message-box lf-message
+			title is "Apollow Generator"
+			message-buttons MSG_BOX_OK_CANCEL
+			icon MSG_BOX_STOP
+		if message-status = MSG_BOX_CANCEL
+			exit
+		endif
+	endif
+	do recalc-col-headings
+	//
+	do get-apollo-dir returning l-apollo-dir
+	if pattern(ap-skeleton ,"?*spl")
+		set lf-skeleton-name =  str-concat(l-apollo-dir,"/",ap-skeleton)
+	else
+		set lf-skeleton-name = str-concat(l-apollo-dir,"/",ap-skeleton,".spl")
+	endif
+	open skeleton-source
+		file is lf-skeleton-name
+	on error
+		//  try adding cus
+		string lf-skeleton-name inserting  str-concat(get-env("CUS"),"/") at 1
+		open skeleton-source
+			file is lf-skeleton-name
+		on error
+			//
+			// code for no source
+			//
+			message-box param-text("Lost the Skeleton: <<p1>><<BR>><<p2>>"
+				lf-skeleton-name,error-description(file-status()))
+				title is "Apollo"
+				message-buttons MSG_BOX_CANCEL
+				icon MSG_BOX_STOP
+				bell 
+			exit
+		endon
+	endon
+	open final-program
+		file is ap-full-pgm
+		truncate permanent
+	on error 
+		abort "Cant create the final program" error-description(file-status())
+	endon
+	open skeleton-work
+		temporary
+	do build-skeleton
+	do insert-bits
+	do write-final
+	message rtrim(ap-full-pgm) " Generated (" rtrim(l-name) ")"
+	do save-as-xml parameters are l-name lf-xml-filename 
+end-procedure
+
+procedure build-skeleton
+	set seq-no = 0
+	extract skeleton-source
+		all
+	detail
+		set seq-no += 1
+		if substring(source-line,1,2) = "**"
+			switch uppercase(substring(source-line,4,str-len(source-line)))
+			case "HEADER"
+				set ws-header = seq-no
+			case "DEFINE"
+				set ws-define = seq-no
+//			case "OBJECT"
+//				set ws-object = seq-no
+			case "FIELD"
+				set ws-field = seq-no
+			case "SELECT"
+				set ws-select = seq-no
+			case "SELECT ACCEPT"
+				set ws-select-accept = seq-no
+			case "SELECT_PRE760"
+				set ws-select-PRE760 = seq-no
+			case "SELECT ACCEPT_PRE760"
+				set ws-select-accept-pre760 = seq-no
+			case "PARAMETER"
+				set ws-parameter = seq-no
+			case "APPSERV PARA"
+				set ws-appserv-para = seq-no
+			case "COLUMN"
+				set ws-column = seq-no
+			case "DETAIL PRINT"
+				set ws-detail-print = seq-no
+			case "DETAIL PRINT SELECT"
+				set ws-detail-print-select = seq-no
+			case "DETAIL PRINT BEFORE"
+				set ws-detail-print-before = seq-no
+			case "DETAIL PRINT AFTER"
+				set ws-detail-print-after = seq-no
+			case "DETAIL PRINT LOCAL"
+				set ws-detail-print-local = seq-no
+			case "PASS 1 MONITOR"
+				set ws-pass-1-monitor = seq-no
+			case "PASS 2 MONITOR"
+				set ws-pass-2-monitor = seq-no
+			case "SELECTION PRINT"
+				set ws-selection-print = seq-no
+			case "SELECTION NOTES"
+				set ws-selection-notes = seq-no
+			case "DETAIL PRINT GRAND TOTAL"
+				set ws-detail-print-grand-total = seq-no
+			case "DG ROWS"
+				set ws-dg-rows = seq-no
+			case "DG LOCAL"
+				set ws-dg-local = seq-no
+			case "DG SELECT"
+				set ws-dg-select = seq-no
+			case "REPORT"
+				set ws-report = seq-no
+			case "SECABT"
+				set ws-secabt = seq-no
+			case "SQLSTMT"
+				set ws-sqlstmt = seq-no
+			case "SS LOCAL"
+				set ws-ss-local = seq-no
+			case "SS MAINHEADING"
+				set ws-ss-mainheading = seq-no
+			case "SS COLUMNS"
+				set ws-ss-columns = seq-no
+			case "SS HEADINGS"
+				set ws-ss-headings = seq-no
+			case "SS SQL"
+				set ws-ss-sql = seq-no
+			case "SS DATA"
+				set ws-ss-data = seq-no
+			case "SS TOTALS"
+				set ws-ss-totals = seq-no
+			end-switch
+		else
+			insert skeleton-work
+		endif
+	end-extract
+end-procedure
+
+procedure insert-bits
+	do recalc-print-positions
+	do insert-header
+	do insert-define
+	do insert-field
+	do insert-select
+	do insert-parameter
+	do insert-appserv-parameter
+	do insert-column
+	do insert-detail-print
+//  No longer required - three select statements
+//  so put it in a #define
+//	do insert-print-select
+	do insert-sql-define
+	do insert-monitors
+	do insert-dg-rows
+	do insert-dg-local
+	do insert-report
+	do insert-secabt
+//	do insert-sqlstmt
+	do insert-notes
+	do insert-spreadsheet
+end-procedure
+
+procedure insert-header
+	set source-line = str-concat("// ",ap-spl-name," - ",ap-desc)
+	SQUIRT(ws-header)
+end-procedure
+
+procedure insert-define
+local x	type number
+	//
+	// count the number of parameters
+	//
+	set x = 0
+	extract reportsel
+		on index ap-name ap-sel-seq ap-fld-name
+		key is ap-name 0 spaces
+		next same ap-name 
+	detail
+		set x += 1
+	end-extract
+	set source-line = concat("#define NO_OF_SELECTION_PARAMETERS '"
+	,str(x)
+	,"'")
+	SQUIRT(ws-define)
+	set source-line = concat("#define REPORT_NAME '",STRFLD(ap-desc),"'")
+	SQUIRT(ws-define)
+end-procedure
+
+procedure insert-field
+local 	
+	x									type number
+	picclause							pic x(30) type string
+	extract reportsel
+		lock
+		on index ap-name ap-sel-seq ap-fld-name
+		key is ap-name 0 spaces
+		next same ap-name
+	detail
+		// get currency  on report-fil - required for picture-string
+		select * from reportfil
+			where ap-name = :ap-name
+			and ap-fld-name = :ap-fld-name
+			order by ap-name ap-obj-name ap-fld-name
+		detail
+			break
+		end-select
+		//
+		set x += 1
+		if ap-ws-fld-name = spaces
+			set ap-ws-fld-name = concat("ws-",STRFLD(ap-fld-name),"-",str(x))
+		endif
+		update reportsel
+		on error endon
+		if pattern(ap-fld-name,"^ws-")
+			set source-line = concat(TAB,ap-ws-fld-name,TAB,TAB,TAB,ap-sel-pic)
+		else
+			do picture-string parameters are ap-fld-name returning picclause
+			if substring(picclause,1,2) = "-s"
+				string	picclause deleting at 1
+				string	picclause replacing '9' at 1
+			endif
+			if substring(picclause,1,1) = "s"
+				string	picclause replacing '9' at 1
+			endif
+			if substring(picclause,1,1) = "z"
+				string	picclause replacing '9' at 1
+			endif
+			if substring(picclause,1,1) = "d"
+				set source-line = concat(TAB,ap-ws-fld-name," type date ")
+			else
+				set source-line = concat(TAB,ap-ws-fld-name," pic ",picclause)
+			endif
+		endif
+		SQUIRT(ws-field)
+	end-extract
+	//
+	// Define last values fields for suppress duplicate
+	//
+	extract reportfil
+		on index ap-name ap-sort-seq
+		key is ap-name 0
+		next same ap-name
+		where ap-suppress-dup = YES
+	detail
+		set source-line = concat(TAB,"ws-last-",ap-fld-name,TAB,TAB,TAB,"like ",ap-fld-name)
+		SQUIRT(ws-field)
+	end-extract
+end-procedure
+
+procedure insert-select
+local
+	l-line-no			type number
+	l-last-fld-name		like fld-name
+	l-last-ap-ws-fld-name like ap-ws-fld-name
+	l-xml-tag-name				pic x(200) type string
+	if ap-xml = YES
+		set source-line = concat(TAB,TAB,TAB
+			,"tag  'options_print'")
+		SQUIRT(ws-selection-print)
+	endif
+	set l-line-no = 3
+	extract reportsel
+		on index ap-name ap-sel-seq ap-fld-name
+		key is ap-name 0 spaces
+		next same ap-name
+	detail
+		do get-dict-field parameters are ap-fld-name spaces
+		if pattern(ap-fld-name,"^ws-") 
+			do get-fld-type-from-pic parameters are ap-sel-pic returning fld-type
+		endif
+//
+// Set the default values that appear in the before section 
+//
+		if ap-default = spaces
+			if pattern(ap-operator,">")
+				set source-line = concat(TAB,
+					,"set ", STRFLD(ap-ws-fld-name) , " = "
+					,"min-value("
+					,STRFLD(ap-ws-fld-name)
+					,")"
+					)
+				SQUIRT(ws-select)
+				SQUIRT(ws-select-pre760)
+			else
+				set source-line = concat(TAB,
+					,"set ", STRFLD(ap-ws-fld-name) , " = "
+					,"max-value("
+					,STRFLD(ap-ws-fld-name)
+					,")"
+					)
+				SQUIRT(ws-select)
+				SQUIRT(ws-select-pre760)
+			endif
+		else
+			switch fld-type
+			case "A"
+				set source-line = concat(TAB,
+					,"set ", STRFLD(ap-ws-fld-name) , " = "
+					"'",str-concat(ap-default),"'")
+				SQUIRT(ws-select)
+				SQUIRT(ws-select-pre760)
+			case "D"
+				switch ap-default
+				case "FDFY"
+					set source-line = concat(TAB,
+						,"set ", STRFLD(ap-ws-fld-name) , " = "
+						,"sys-period-start[1]")
+					SQUIRT(ws-select)
+					SQUIRT(ws-select-pre760)
+				case "LDFY"
+					set source-line = concat(TAB,
+						,"set ", STRFLD(ap-ws-fld-name) , " = "
+						,"addmonths(sys-period-start[12],1,TRUE) - 1")
+					SQUIRT(ws-select)
+					SQUIRT(ws-select-pre760)
+				case "FDLM"
+					set source-line = concat(TAB,
+						,"set ", STRFLD(ap-ws-fld-name) , " = "
+						,"addmonths(julian(1,month(today),year(today)),-1,TRUE)")
+					SQUIRT(ws-select)
+					SQUIRT(ws-select-pre760)
+				case "LDPP"
+					set source-line = concat(TAB,
+						,"set ", STRFLD(ap-ws-fld-name) , " = "
+						,"addmonths("
+						,STRFLD(l-last-ap-ws-fld-name)
+						,",1,TRUE) - 1"
+						)
+					SQUIRT(ws-select)
+					SQUIRT(ws-select-pre760)
+				case "TODAY"
+					set source-line = concat(TAB,
+						,"set ", STRFLD(ap-ws-fld-name) , " = "
+						,"today()")
+					SQUIRT(ws-select)
+					SQUIRT(ws-select-pre760)
+				else
+					set source-line = concat(TAB,
+						,"set ", STRFLD(ap-ws-fld-name) , " = "
+						,str-concat(ap-default))
+					SQUIRT(ws-select)
+					SQUIRT(ws-select-pre760)
+				end-switch
+			else
+				set source-line = concat(TAB,
+					,"set ", STRFLD(ap-ws-fld-name) , " = "
+					,str-concat(ap-default))
+				SQUIRT(ws-select)
+				SQUIRT(ws-select-pre760)
+			end-switch
+		endif
+//--------------------------------------------------------------------------------
+		set source-line = concat(TAB,
+			,"accept "
+			,STRFLD(ap-ws-fld-name))
+		if pronto-release() < 7.6
+		string source-line appending
+			concat(
+			," @"
+			,str(l-line-no)
+			,",25")
+		endif
+		SQUIRT(ws-select-accept)
+		SQUIRT(ws-select-accept-pre760)
+		set l-line-no += 1
+		set source-line = concat(TAB,TAB,
+			,"// add remove following lines as necessary"
+			)
+		SQUIRT(ws-select-accept)
+		SQUIRT(ws-select-accept-pre760)
+	//
+		set source-line = concat(TAB,TAB,
+			,"title '",str-concat(ap-sel-prompt)," :'"
+			)
+		SQUIRT(ws-select-accept)
+		SQUIRT(ws-select-accept-pre760)
+		set source-line = concat(TAB,TAB,
+			,"optional "
+			)
+		SQUIRT(ws-select-accept)
+		SQUIRT(ws-select-accept-pre760)
+		set source-line = concat(TAB,TAB,
+			,'help "'
+			,STRFLD(ap-sel-prompt)
+			,'"'
+			)
+		SQUIRT(ws-select-accept)
+		SQUIRT(ws-select-accept-pre760)
+		if fld-type = "A"
+			set source-line = concat(TAB,TAB,
+				,"uppercase"
+				)
+			SQUIRT(ws-select-accept)
+			SQUIRT(ws-select-accept-pre760)
+//			if pattern(ap-operator,"<")
+//				set source-line = concat(TAB,TAB,
+//					,"fill with trailing '~'"
+//					)
+//				SQUIRT(ws-select-accept)
+//			endif
+		endif
+		//
+		set source-line = concat(TAB,TAB,
+			,"default " ,STRFLD(ap-ws-fld-name)
+			)
+		SQUIRT(ws-select-accept)
+		SQUIRT(ws-select-accept-pre760)
+		if pattern(ap-operator,"<") and pronto-release() >= 7.6
+			set source-line = concat(TAB,TAB, "next column")
+			SQUIRT(ws-select-accept)
+			SQUIRT(ws-select-accept-pre760)
+		endif
+//
+		set source-line = concat(TAB,"before-accept")
+		SQUIRT(ws-select-accept)
+		SQUIRT(ws-select-accept-pre760)
+		if ap-default in {  spaces  }
+			if pattern(ap-operator,"<")
+				if fld-type = "A"
+				and l-last-fld-name = ap-fld-name
+					set source-line = concat(TAB,TAB,
+						,"set "
+						,STRFLD(ap-ws-fld-name)
+						," = max-presentation-value("
+						,STRFLD(ap-ws-fld-name)
+						,")"
+						)
+					SQUIRT(ws-select-accept)
+					SQUIRT(ws-select-accept-pre760)
+					set source-line = concat(TAB,TAB,
+						,"string "
+						,STRFLD(ap-ws-fld-name)
+						," replacing rtrim("
+						,STRFLD(l-last-ap-ws-fld-name)
+						,") at 1"
+						)
+					SQUIRT(ws-select-accept)
+					SQUIRT(ws-select-accept-pre760)
+				elseif fld-type = "D"
+				and l-last-fld-name = ap-fld-name
+					set source-line = concat(TAB,TAB,
+						," set "
+						,STRFLD(ap-ws-fld-name)
+						," =  max-value("
+						,STRFLD(ap-ws-fld-name)
+						,")"
+						)
+					SQUIRT(ws-select-accept)
+					SQUIRT(ws-select-accept-pre760)
+				else
+					set source-line = concat(TAB,TAB,
+						," set "
+						,STRFLD(ap-ws-fld-name)
+						," =  max-value("
+						,STRFLD(ap-ws-fld-name)
+						,")"
+						)
+					SQUIRT(ws-select-accept)
+					SQUIRT(ws-select-accept-pre760)
+				endif
+			endif
+		endif
+		set source-line = concat(TAB,"end-before-accept")
+		SQUIRT(ws-select-accept)
+		SQUIRT(ws-select-accept-pre760)
+//
+		//
+		// Print criteria on last page
+		//
+		do swap-character parameters is ap-ws-fld-name "-" "_"
+			returning l-xml-tag-name
+		if ap-xml = YES
+			set source-line = concat(TAB,TAB
+				,"print '"
+				,ap-sel-prompt
+				,ap-operator
+				," : ' in col 22 ")
+			SQUIRT(ws-selection-print)
+			set source-line = concat(TAB,TAB,TAB
+				," tag is '"
+				,"prompt_",l-xml-tag-name,"'")
+			SQUIRT(ws-selection-print)
+			set source-line = concat(TAB,TAB,TAB
+				,ap-ws-fld-name
+				, " tag is '",l-xml-tag-name,"'"
+				)
+			SQUIRT(ws-selection-print)
+		else
+			set source-line = concat(TAB,TAB
+				,"print '"
+				,ap-sel-prompt
+				,ap-operator
+				," : ' in col 22 "
+				,ap-ws-fld-name
+				)
+			SQUIRT(ws-selection-print)
+		endif
+		set l-last-fld-name = fld-name
+		set l-last-ap-ws-fld-name = ap-ws-fld-name
+	end-extract
+end-procedure
+
+procedure insert-notes
+local
+	lf-this-line					like ap-txt-line
+	i								type number
+	lf-infinite-loop-trap			type number
+	if ap-xml = YES
+		set source-line = concat(TAB,TAB,TAB
+			,"tag  'options_print'")
+		SQUIRT(ws-selection-print)
+	endif
+	select * from reporttxt
+		where ap-name = :ap-name 
+		and ap-txt-type  = "USER"
+		order by ap-name ap-txt-type ap-txt-seq
+	before
+		set source-line = concat(TAB,'print "Notes" in col 5')
+		SQUIRT(ws-selection-notes)
+		if ap-xml = YES
+			set source-line = concat(TAB,TAB,'section "notes_head"')
+			SQUIRT(ws-selection-notes)
+		endif
+	detail
+		if ap-txt-line = spaces
+			set source-line = concat(TAB,'print " " in col 10')
+			SQUIRT(ws-selection-notes)
+			if ap-xml = YES
+				set source-line = concat(TAB,TAB,'section "notes_line"')
+				SQUIRT(ws-selection-notes)
+			endif
+		else
+			set lf-this-line = ap-txt-line
+			// before we do anything remove any single or double quotes
+			// because they will screw up the generated code.
+			for i = strlen(lf-this-line) down to 1
+				if substring(lf-this-line,i,i) in ( "'", '"')
+					string lf-this-line deleting i to i
+				endif
+			end-for
+			set lf-infinite-loop-trap = 0
+			while lf-this-line <> spaces and lf-infinite-loop-trap < 10000
+				set lf-infinite-loop-trap += 1
+				if str-len(lf-this-line) <= MAXNOTELEN
+					set source-line = concat(TAB,'print "',rtrim(lf-this-line), '" in col 10')
+					set lf-this-line = spaces
+					SQUIRT(ws-selection-notes)
+					if ap-xml = YES
+						set source-line = concat(TAB,TAB,'section "notes_line"')
+						SQUIRT(ws-selection-notes)
+					endif
+				else
+					for i = MAXNOTELEN down to 1 
+						if substring(lf-this-line,i,i) = " "
+							set source-line = concat(TAB,'print "',substring(lf-this-line,1, i - 1), '" in col 10')
+							set lf-this-line = substring(lf-this-line,i + 1, str-len(lf-this-line))
+							break
+						endif
+					end-for
+					if i = 1 // then we found no break
+						set source-line = concat(TAB,'print "',rtrim(lf-this-line), '" in col 10')
+						set lf-this-line = spaces
+					endif
+					SQUIRT(ws-selection-notes)
+					if ap-xml = YES
+						set source-line = concat(TAB,TAB,'section "notes_line"')
+						SQUIRT(ws-selection-notes)
+					endif
+				endif
+			end-while
+		endif
+	end-select
+end-procedure
+
+procedure insert-parameter
+	extract reportsel
+		on index ap-name ap-sel-seq ap-fld-name
+		key is ap-name 0 spaces
+		next same ap-name
+	detail
+		do get-dict-field parameters are ap-fld-name spaces
+		if pattern(ap-fld-name,"^ws-") 
+			do get-fld-type-from-pic parameters are ap-sel-pic returning fld-type
+		endif
+		switch fld-type
+		case 'A'
+			set source-line = concat(TAB
+				,"RBTCHPROC_LOAD_SET_ALPHA("
+				,STRFLD(ap-ws-fld-name)
+				,")"
+				)
+			SQUIRT(ws-parameter)
+		case 'D'
+			set source-line = concat(TAB
+				,"RBTCHPROC_LOAD_SET_DATE("
+				,STRFLD(ap-ws-fld-name)
+				,")"
+				)
+			SQUIRT(ws-parameter)
+		else
+			set source-line = concat(TAB
+				,"RBTCHPROC_LOAD_SET_NUM("
+				,STRFLD(ap-ws-fld-name)
+				,")"
+				)
+			SQUIRT(ws-parameter)
+		end-switch
+	end-extract
+end-procedure
+
+procedure insert-appserv-parameter
+	extract reportsel
+		on index ap-name ap-sel-seq ap-fld-name
+		key is ap-name 0 spaces
+		next same ap-name
+	detail
+		do get-dict-field parameters are ap-fld-name spaces
+		if pattern(ap-fld-name,"^ws-") 
+			do get-fld-type-from-pic parameters are ap-sel-pic returning fld-type
+		endif
+		switch fld-type
+		case 'A'
+			set source-line = concat(TAB,TAB
+				,"set " 
+				,STRFLD(ap-ws-fld-name)
+				," = get-param(lf-para-no)" 
+				)
+			SQUIRT(ws-appserv-para)
+		case 'D'
+			set source-line = concat(TAB,TAB
+				,"set " 
+				,STRFLD(ap-ws-fld-name)
+				," = date2julian(get-param(lf-para-no))" 
+				)
+			SQUIRT(ws-appserv-para)
+		else
+			set source-line = concat(TAB,TAB
+				,"set " 
+				,STRFLD(ap-ws-fld-name)
+				," = num(get-param(lf-para-no))" 
+				)
+			SQUIRT(ws-appserv-para)
+		end-switch
+		set source-line = concat(TAB,TAB,"set lf-para-no += 1")
+		SQUIRT(ws-appserv-para)
+	end-extract
+end-procedure
+
+procedure insert-detail-print
+local
+	l-tot-fields							like ap-fld-name occurs MAX_TOT_FLDS
+	l-tot-fields-pos						like ap-print-pos occurs MAX_TOT_FLDS
+	l-tot-fields-pic						like ap-print-pic occurs MAX_TOT_FLDS
+	l-num-tot-fields						type number
+	x										type number
+	l-pic-clause							pic x(20) type string
+	l-break-clause							pic x(200) type string
+	l-xml-tag-name							pic x(200) type string
+	l-col-heading							pic x(100) 
+	l-highest-sort							type number
+	l-highest-group							type number
+	lf-current-seq							like ap-sort-seq
+	lf-col-head								like doc-line
+	lf-first-time							type boolean
+	lf-data-type							pic x(50) type string
+	//
+	// Determine Total Fields.  
+	//
+	set l-num-tot-fields = 0
+	extract reportfil
+		on index ap-name ap-obj-name ap-fld-name
+		key is ap-name spaces spaces
+		next same ap-name
+	detail
+		if ap-sort-seq > l-highest-sort
+			set l-highest-sort = ap-sort-seq
+		endif
+		if ap-group > l-highest-group
+			set l-highest-group = ap-group
+		endif
+		if ap-total-flg = YES and l-num-tot-fields < MAX_TOT_FLDS
+			set l-num-tot-fields += 1
+			set l-tot-fields[l-num-tot-fields] = ap-fld-name
+			set l-tot-fields-pos[l-num-tot-fields] = ap-print-pos
+			do picture-string parameters are ap-fld-name returning l-tot-fields-pic[l-num-tot-fields]
+		endif
+	end-extract
+	if l-highest-group = 0
+		set l-highest-group = l-highest-sort
+	endif
+	// ** l-num-tot-fields now contains the number of fields totalled.
+	//
+	// Just the extract bit
+	//
+	set source-line = concat(TAB,"detail")
+	SQUIRT(ws-detail-print)
+	//
+	// Grand Totals 
+	//
+	if ap-xml = YES
+		set source-line = concat(TAB,"report section 'grand_total'")
+		SQUIRT(ws-detail-print-grand-total)
+	endif
+	set source-line = concat(TAB,"print 'GRAND TOTAL' nonewline")
+	SQUIRT(ws-detail-print-grand-total)
+	if ap-xml = YES
+		set source-line = concat(TAB,TAB,"tag 'grand_total_prompt'")
+		SQUIRT(ws-detail-print-grand-total)
+	endif
+	// 
+	// add any local defined fields
+	//
+	select * from reportfil
+		where  ap-obj-name = "*"
+	detail
+		do get-calc-data-type-from-pic
+			parameters are ap-print-pic
+			returning lf-data-type 
+		set source-line = concat(TAB,ap-fld-name,TAB,TAB,TAB,lf-data-type)
+		if substring(ap-fld-name,1,2) = 'ws'
+			SQUIRT(ws-field)
+		else
+			SQUIRT(ws-detail-print-local)
+		endif
+	end-select
+	//
+	for x = 1 to l-num-tot-fields
+		//
+		set source-line = concat(TAB,"lf-grand-"
+			,STRFLD(l-tot-fields[x]), " type number")
+		SQUIRT(ws-detail-print-local)
+		//
+		// accumulate grand total
+		//
+		set source-line = concat(TAB,TAB,"set lf-grand-"
+			,STRFLD(l-tot-fields[x])
+			, " += "
+			, STRFLD(l-tot-fields[x]))
+		SQUIRT(ws-detail-print)
+		// 
+		// print grand total
+		//
+		set source-line = concat(TAB,"print lf-grand-"
+			,STRFLD(l-tot-fields[x])
+			, " in col ",str(l-tot-fields-pos[x])
+			, " pic '",r-trim(l-tot-fields-pic[x]),"'"
+			," nonewline")
+		SQUIRT(ws-detail-print-grand-total)
+		if ap-xml = YES
+			do swap-character
+				parameters are STRFLD(l-tot-fields[x]) "-" "_"
+				returning l-xml-tag-name
+			set source-line = concat(TAB,TAB,"tag is '",l-xml-tag-name,"'")
+			SQUIRT(ws-detail-print-grand-total)
+		endif
+	end-for
+	if ap-xml = YES
+		set source-line = concat(TAB,"report section finished")
+		SQUIRT(ws-detail-print-grand-total)
+	endif
+	//
+	// Break Totals
+	//
+	set l-break-clause = spaces
+	set x = 0
+	set ws-detail-print-after += .00100  // after must be descending entered
+	//
+	select *
+		from reportfil
+		where ap-name = :ap-name
+		and ap-sort-seq != 0
+		and ap-sort-seq <= l-highest-group
+		order by ap-name ap-sort-seq
+	detail
+		set x += 1
+		do get-dict-field parameters are ap-fld-name spaces
+		set l-break-clause = concat(l-break-clause," ",str-concat(ap-obj-name,".",ap-fld-name))
+		set source-line = concat(TAB,"BEFORE" ,l-break-clause)
+		SQUIRT(ws-detail-print-before)
+		if ap-xml-hide <> spaces
+			set source-line = concat(TAB,TAB,"report section 'lev_" str(ap-sort-seq) "b4'")
+			SQUIRT(ws-detail-print-before)
+			set source-line = concat(TAB,TAB,'print " " in col 4 ',l-break-clause)
+			SQUIRT(ws-detail-print-before)
+			set source-line = concat(TAB,TAB,"report section 'lev_" str(ap-sort-seq) "wrpr'")
+			SQUIRT(ws-detail-print-before)
+			if ap-xml-hide = "C"
+				set source-line = concat(TAB,TAB,TAB,"can-hide")
+			else
+				set source-line = concat(TAB,TAB,TAB,"hidden")
+			endif
+			SQUIRT(ws-detail-print-before)
+		endif
+		//
+		// start of sub headings
+		set lf-current-seq = ap-sort-seq
+		save reportfil
+//		DBGINSRC(ws-detail-print-before,"ap-name")
+//		DBGINSRC(ws-detail-print-before,"lf-current-seq")
+		select *
+			from rfcopy
+			where ap-name = :ap-name
+			and ap-print-line = lf-current-seq
+			order by ap-name ap-print-line ap-col
+		before
+			set source-line = "// put the sub headings here"
+			SQUIRT(ws-detail-print-before)
+			if ap-xml = YES
+				set source-line = concat(TAB,TAB,"report section 'sub_head_",str(lf-current-seq),"'")
+				SQUIRT(ws-detail-print-before)
+			endif
+			set source-line = concat(TAB,TAB,"need 2")
+			SQUIRT(ws-detail-print-before)
+			set source-line = concat(TAB,TAB,"print")
+			SQUIRT(ws-detail-print-before)
+		before ap-print-line
+			set lf-first-time = TRUE
+		detail
+			do picture-string parameters are ap-fld-name returning l-pic-clause
+			do get-fld-col-head parameters are ap-fld-name ap-fld-source
+				returning lf-col-head
+			if lf-first-time
+				set source-line = concat(TAB,TAB,TAB,"'",lf-col-head,":' in col 1 ")
+				set lf-first-time = FALSE
+			else
+				set source-line = concat(TAB,TAB,TAB,"'",lf-col-head,":' in col "
+						,format-picture(ap-print-pos - str-len(lf-col-head) - 2,"zz9"))
+			endif
+			SQUIRT(ws-detail-print-before)
+			if ap-suppress-dup = YES
+				set source-line = concat(TAB,TAB,TAB,"if-then-else(ws-last-"
+						,ap-fld-name, " = ", ap-fld-name
+						,if-then-else(ap-array-offset = 0," ",concat("[",str(ap-array-offset),"]"))
+						,",spaces,"
+					,ap-fld-name,") in col "
+					,format-picture(ap-print-pos,"zz9")
+					," pic '",rtrim(l-pic-clause),"'")
+			else
+				set source-line = concat(TAB,TAB,TAB,ap-fld-name
+					,if-then-else(ap-array-offset = 0," ",concat("[",str(ap-array-offset),"]"))
+					," in col "
+					,format-picture(ap-print-pos,"zz9")
+					," pic '",rtrim(l-pic-clause),"'")
+			endif
+			SQUIRT(ws-detail-print-before)
+			if ap-xml = YES
+				do swap-character
+					parameters are ap-fld-name "-" "_"
+					returning l-xml-tag-name
+				set source-line = concat(TAB,TAB,TAB,TAB,"tag is '",l-xml-tag-name,"'")
+				SQUIRT(ws-detail-print-before)
+			endif
+		after
+			set source-line = concat(TAB,TAB,"skip")
+			SQUIRT(ws-detail-print-before)
+			if ap-xml = YES
+				set source-line = concat(TAB,TAB,"report section finished")
+				SQUIRT(ws-detail-print-before)
+			endif
+		end-select
+		restore reportfil
+		// end of subheadings
+		//
+		if l-num-tot-fields > 0
+			set source-line = concat(TAB,"AFTER",l-break-clause)
+			set ws-detail-print-after -= ( x * .00100)
+			SQUIRT(ws-detail-print-after)
+			if ap-xml-hide <> spaces
+				set source-line = concat(TAB,TAB,"report section finished // wrapper")
+				SQUIRT(ws-detail-print-after)
+				set source-line = concat(TAB,TAB,"report section finished // subheading")
+				SQUIRT(ws-detail-print-after)
+			endif
+			if ap-xml = YES
+				do swap-character
+					parameters are l-break-clause " " "_"
+					returning l-xml-tag-name
+				do swap-character
+					parameters are l-xml-tag-name "-" "_"
+					returning l-xml-tag-name
+				do swap-character
+					parameters are l-xml-tag-name "." "_"
+					returning l-xml-tag-name
+//				set source-line = concat(TAB,TAB,"report section '/",l-xml-tag-name,"'")
+				set source-line = concat(TAB,TAB,"report section '",l-xml-tag-name,"'")
+				SQUIRT(ws-detail-print-after)
+				set source-line = concat(TAB,TAB,"need 3")
+				SQUIRT(ws-detail-print-after)
+			endif
+			set source-line = concat(TAB,TAB ,"skip ")
+			SQUIRT(ws-detail-print-after)
+			set l-col-heading = spaces
+			for x = 1 to 3
+				if l-col-heading = spaces
+					set l-col-heading = ap-col-head[x]
+				else
+					string l-col-heading inserting ap-col-head[x]
+						at str-len(l-col-heading) + 2
+				endif
+			end-for
+			if l-col-heading = spaces
+				set l-col-heading = fld-col-name
+			endif
+			if ap-xml  = YES
+				if l-num-tot-fields > 0
+					set source-line = concat(TAB,TAB ,"print 'Total for "
+						,str-concat(l-col-heading),":'")
+					SQUIRT(ws-detail-print-after)
+					set source-line = concat(TAB,TAB,TAB,TAB,"tag 'Total_prompt'")
+					SQUIRT(ws-detail-print-after)
+					set source-line = concat(TAB,TAB,TAB,STRFLD(ap-fld-name)," nonewline")
+					SQUIRT(ws-detail-print-after)
+					do swap-character
+						parameters are STRFLD(ap-fld-name) "-" "_"
+						returning l-xml-tag-name
+					set source-line = concat(TAB,TAB,TAB,TAB,"tag '",l-xml-tag-name,"'")
+					SQUIRT(ws-detail-print-after)
+				else
+					set source-line = "// must mave a blank line for xml otherwise it crashes"
+					SQUIRT(ws-detail-print-after)
+					set source-line = concat(TAB,TAB,"print ' ' no-newline")
+					SQUIRT(ws-detail-print-after)
+				endif
+			else
+				if l-num-tot-fields > 0
+					set source-line = concat(TAB,TAB ,"print 'Total for "
+						,str-concat(l-col-heading)," ' ",STRFLD(ap-fld-name)," nonewline")
+					SQUIRT(ws-detail-print-after)
+				endif
+			endif
+		endif
+		for x = 1 to l-num-tot-fields
+			//
+			// local defintion
+			//
+			set source-line = concat(TAB,"lf-",STRFLD(ap-fld-name)
+				,"-",STRFLD(l-tot-fields[x]), " type number")
+			SQUIRT(ws-detail-print-local)
+			//
+			// initialisation in before statement
+			//
+			set source-line = concat(TAB,TAB,"set lf-",STRFLD(ap-fld-name)
+				,"-",STRFLD(l-tot-fields[x]), " = 0")
+			SQUIRT(ws-detail-print-before)
+			// 
+			// detail accumulation of total
+			//
+			set source-line = concat(TAB,TAB,"set lf-",STRFLD(ap-fld-name)
+				,"-",STRFLD(l-tot-fields[x])
+				, " += "
+				, STRFLD(l-tot-fields[x]))
+			SQUIRT(ws-detail-print)
+			// 
+			// printing of totals at break
+			//
+			set source-line = concat(TAB,TAB,"print lf-"
+				,STRFLD(ap-fld-name),"-",STRFLD(l-tot-fields[x])
+				, " in col ",str(l-tot-fields-pos[x])
+				, " pic '",rtrim(l-tot-fields-pic[x]),"'"
+				," nonewline")
+			SQUIRT(ws-detail-print-after)
+			if ap-xml = YES
+				do swap-character
+					parameters are str-concat("lf-",ap-fld-name,"-",l-tot-fields[x]) "-" "_"
+					returning l-xml-tag-name
+				set source-line = concat(TAB,TAB,TAB,"tag is '",l-xml-tag-name,"'")
+				SQUIRT(ws-detail-print-after)
+			endif
+		end-for
+		if l-num-tot-fields > 0
+			set source-line = concat(TAB,TAB,"skip // flush print line")
+			SQUIRT(ws-detail-print-after)
+			set source-line = concat(TAB,TAB,"skip // Then space")
+			SQUIRT(ws-detail-print-after)
+			if ap-xml = YES
+				set source-line = concat(TAB,TAB,"report section finished"," //",l-break-clause)
+				SQUIRT(ws-detail-print-after)
+			endif
+		endif
+	end-select
+	//
+	// Detial line and totals
+	//
+	if ap-xml = YES
+		set source-line = concat(TAB,TAB,"report section 'detail_line'")
+		SQUIRT(ws-detail-print)
+	endif
+	set source-line = concat(TAB,TAB,"print")
+	SQUIRT(ws-detail-print)
+	select * from reportfil
+		where ap-name = :ap-name
+		and ap-print-line = 0
+		and ap-suppress-prt <> YES
+		order by ap-name ap-print-line ap-col
+	detail
+		do picture-string parameters are ap-fld-name returning l-pic-clause
+		if ap-suppress-dup = YES
+			set source-line = concat(TAB,TAB,TAB,"if-then-else(ws-last-"
+					,ap-fld-name, " = ", ap-fld-name
+					,if-then-else(ap-array-offset = 0," ",concat("[",str(ap-array-offset),"]"))
+					,",spaces,"
+				ap-fld-name,") in col "
+				,format-picture(ap-print-pos,"zz9")
+				," pic '",rtrim(l-pic-clause),"'")
+		else
+			set source-line = concat(TAB,TAB,TAB,ap-fld-name
+				,if-then-else(ap-array-offset = 0," ",concat("[",str(ap-array-offset),"]"))
+				," in col "
+				,format-picture(ap-print-pos,"zz9")
+				," pic '",l-pic-clause,"'")
+		endif
+		SQUIRT(ws-detail-print)
+		if ap-xml = YES
+			do swap-character
+				parameters are ap-fld-name "-" "_"
+				returning l-xml-tag-name
+			set source-line = concat(TAB,TAB,TAB,TAB,"tag is '",l-xml-tag-name,"'")
+			SQUIRT(ws-detail-print)
+		endif
+	end-select
+	if ap-xml = YES
+		set source-line = concat(TAB,TAB,"report section finished")
+		SQUIRT(ws-detail-print)
+	endif
+	//
+	// remember the last values
+	//
+	extract reportfil
+		on index ap-name ap-sort-seq
+		key is ap-name 0
+		next same ap-name
+		where ap-suppress-dup = YES
+	detail
+		set source-line = concat(TAB,TAB,"set ws-last-",ap-fld-name," = ",ap-fld-name
+			,if-then-else(ap-array-offset = 0," ",concat("[",str(ap-array-offset),"]"))
+			)
+		SQUIRT(ws-detail-print)
+	end-extract
+end-procedure
+
+procedure recalc-print-positions
+local
+	lf-next-pos							type number
+	lf-pic-clause						pic x(20) type string
+	lf-col-head							like doc-line
+	lf-first-time						type boolean
+	lf-print-pos-used					type number
+	lf-max-col-head-length				type number
+	i									type number
+	set lf-next-pos = 1
+	select *
+		from reportfil
+		where ap-name = :ap-name
+		and ap-suppress-prt <> YES
+		order by ap-name ap-print-line ap-col
+		for update
+	before ap-print-line
+		set lf-next-pos = 1
+		set lf-first-time = TRUE
+	detail
+		if ap-print-pic = spaces
+			do picture-string parameters are ap-fld-name 
+				returning lf-pic-clause lf-print-pos-used
+		else
+			set lf-pic-clause = ap-print-pic
+		endif
+		set lf-max-col-head-length = 0
+		if ap-print-line <> 0
+			do get-fld-col-head parameters are ap-fld-name ap-fld-source
+				returning lf-col-head
+		else
+			for i = 1 to occurence(ap-col-head)
+				if ap-col-head[i] <> spaces
+				and str-len(ap-col-head[i]) > lf-max-col-head-length
+					set lf-max-col-head-length = str-len(ap-col-head[i])
+				endif
+			end-for
+		endif
+//	recalculate the print pos based on the picure string.	
+		do get-col-width-from-pic parameters are lf-pic-clause
+			returning lf-print-pos-used
+		//------
+		if lf-first-time 
+			if ap-print-line = 0
+				set ap-print-pos = 1
+			else
+				set ap-print-pos = str-len(lf-col-head) + 4
+			endif
+			set lf-first-time = FALSE
+		else
+			if ap-print-line = 0
+				set ap-print-pos = lf-next-pos
+			else
+				set ap-print-pos = lf-next-pos + str-len(lf-col-head) + 4
+			endif
+		endif
+		update reportfil
+		on error
+			message "Could not update reportfil with new print pos:" error-description(file-status())
+		endon
+		//------
+// if the print line is a sub heading then you need to add in the lenght of
+// the heading because they are spreead acroos the lien :  Account: blah Name:
+// blah blah
+		if ap-print-line = 0
+//			if str-len(lf-col-head) > lf-print-pos-used
+			if lf-max-col-head-length > lf-print-pos-used
+				set lf-next-pos += lf-max-col-head-length + 2
+			else
+				set lf-next-pos += lf-print-pos-used + 2
+			endif
+		else
+			set lf-next-pos += str-len(lf-col-head) + lf-print-pos-used + 4
+		endif
+	end-select
+end-procedure
+
+procedure get-col-width-from-pic
+parameters 
+	lp-pic-clause						pic x(30) type string
+returning
+	lr-col-width						type number
+local
+	lf-bracket-start					type number
+	lf-bracket-end						type number
+	if pattern(lp-pic-clause, "[()]") then
+		set lr-col-width = str-len(lp-pic-clause)
+		// get the number of repeated chars
+		set lf-bracket-start = pattern(lp-pic-clause,"(")		
+		set lf-bracket-end = pattern(lp-pic-clause,")")		
+		// remove the len of the chars between the brackets inc the
+		// brackets
+		set lr-col-width -= ((lf-bracket-end - lf-bracket-start) + 1)
+		// now add in the number
+		set lr-col-width += num(substring(lp-pic-clause,lf-bracket-start + 1, lf-bracket-end - 1)) - 1
+	else
+		set lr-col-width = str-len(lp-pic-clause)
+	endif
+	// We can now store 4k varchars in a table so we need to be able to
+	// override the maximum number of print positions
+	if lr-col-width > MAX_PRINT_POS_PER_FIELD
+		set lr-col-width = MAX_PRINT_POS_PER_FIELD
+	endif
+end-procedure
+
+procedure insert-column
+local 
+	l-col-head 							type boolean occurs 3
+	l-any-col-head 						type boolean 
+	x 									type number
+	l-col-number 						type number
+	l-no-col-lines						type number
+	lf-print-pos-used					type number
+	lf-pic-clause						pic x(20) type string
+	lf-col-width						type number
+	set l-col-head[*] = FALSE
+	select *
+		from reportfil
+		where ap-name = :ap-name
+		and ap-suppress-prt <> YES
+		order by ap-name ap-col
+	detail
+		if ap-col-head[1] != spaces and ap-print-line = 0
+			set l-col-head[1] = TRUE
+		endif
+		if ap-col-head[2] != spaces and ap-print-line = 0
+			set l-col-head[2] = TRUE
+		endif
+		if ap-col-head[3] != spaces and ap-print-line = 0
+			set l-col-head[3] = TRUE
+		endif
+	end-select
+	if l-col-head[2]
+		set source-line = concat(TAB,"print ")
+		SQUIRT_NO_INC(ws-column + (MAX_COLS / 100000 ))
+	endif
+	if l-col-head[3]
+		set source-line = concat(TAB,"print ")
+		SQUIRT_NO_INC(ws-column + ((MAX_COLS + MAX_COLS) / 100000) )
+	endif
+	set l-col-number = 0
+	select *
+		from reportfil
+		where ap-name = :ap-name
+		and ap-print-line = 0
+		and ap-suppress-prt <> YES
+		order by ap-name ap-print-line ap-col
+	detail
+		set l-col-number += 1
+		do picture-string parameters are ap-fld-name returning lf-pic-clause
+			lf-print-pos-used
+		do get-dict-field parameters are ap-fld-name spaces
+		if ap-print-pic = spaces
+			do get-fld-type-from-pic parameters are lf-pic-clause returning fld-type
+		else
+			do get-fld-type-from-pic parameters are ap-print-pic returning fld-type
+		endif
+		if ap-print-pic = spaces
+			set lf-col-width = lf-print-pos-used
+		else
+			do get-col-width-from-pic parameters are ap-print-pic returning lf-col-width
+		endif
+		//
+		set l-col-head[*] = FALSE
+		set l-any-col-head = FALSE
+		for x = 1 to 3
+			if ap-col-head[x] != spaces
+				set l-any-col-head = TRUE
+				set l-col-head[x] = TRUE
+			endif
+		end-for
+		if l-any-col-head
+			for x = 1 to 3
+				if l-no-col-lines < x
+					set l-no-col-lines = x
+				endif
+				if l-col-head[x]
+					if fld-type = "A"
+						set source-line = concat(TAB,TAB,'"',STRFLD(ap-col-head[x]),'" in col '
+							,format-picture(ap-print-pos,"zzz9"))
+					else
+						set source-line = concat(TAB,TAB,'right-justify("',STRFLD(ap-col-head[x]),'",'
+							,str(lf-col-width)
+							,') in col '
+							,format-picture(ap-print-pos,"zzz9")
+							,' pic x(' 
+							,str(lf-col-width)
+							,') right')
+//							,str(lf-print-pos-used)
+					endif
+					SQUIRT_NO_INC(ws-column +  ((MAX_COLS * (x - 1)) / 100000)   )
+					set ws-column += .00001
+				endif
+			endfor
+		else
+			set source-line = concat(TAB,TAB,'"',STRFLD(fld-col-name),'" in col '
+				,format-picture(ap-print-pos,"zzz9"))
+			SQUIRT(ws-column)
+		endif
+	end-select
+	if ap-xml <> YES
+		set source-line = concat(TAB,"print 132'-'")
+		SQUIRT_NO_INC(ws-column + 0.1)
+//		SQUIRT_NO_INC(ws-column + ((MAX_COLS * (l-no-col-lines)) / 100000))
+	endif
+	//
+	// re-initialise all suppress duplicate fields
+	//
+	extract reportfil
+		on index ap-name ap-sort-seq
+		key is ap-name 0
+		next same ap-name
+		where ap-suppress-dup = YES
+		and ap-suppress-prt <> YES
+	detail
+		set source-line = concat(TAB,"set ws-last-",ap-fld-name, " = max-value(ws-last-", ap-fld-name,")")
+		SQUIRT(ws-column)
+	end-extract
+end-procedure
+
+
+procedure write-final
+#ifdef DEBUG
+	report "apollo Debug"
+		full-xml
+#endif
+	extract skeleton-work
+		on index seq-no
+	detail
+#ifdef DEBUG
+		report section "file_line"
+		print seq-no source-line
+		report section finished
+#endif
+		insert final-program
+		on error endon
+	end-extract
+#ifdef DEBUG
+	report finished	
+#endif
+end-procedure
+
+procedure insert-print-select
+local
+	lf-order-by-found							type boolean
+	lf-selection-count							type number
+	lf-where-count								type number
+	lf-where-clause-added						type boolean
+	set lf-order-by-found = false
+	set lf-where-clause-added = False
+	select lf-selection-count = count(*)
+		from reportsel
+	end-select
+	if lf-selection-count > 0 
+		// then we need to add a where clause
+		select lf-where-count = count(*)
+			from reportsql
+			where pattern(uppercase(ap-sql-text) ,  "WHERE") <> 0
+		end-select
+	endif
+	if ap-di-project = spaces
+		Set source-line = concat(TAB,TAB,TAB,"select * from temp-file")
+		SQUIRT(ws-detail-print-select)
+	else
+		// if there are no selection criteria in the project then
+		// we can just output the sql 
+		select * 
+			from reportsql
+			where ap-name = :ap-name
+		detail
+		// then we do the select here
+			if uppercase(ltrim(rtrim(ap-sql-text))) = "ORDER BY"
+			or uppercase(ltrim(rtrim(ap-sql-text))) = "GROUP BY"
+				set lf-order-by-found = TRUE
+			endif
+			// Read through the sql looking for either order by or group-by
+			if (uppercase(ltrim(rtrim(ap-sql-text))) <> "ORDER BY"
+			and uppercase(ltrim(rtrim(ap-sql-text))) <> "GROUP BY")
+			or lf-where-clause-added
+				// if either we are not up to inserting the where clause or we
+				// have already done it then just bang out the line.
+				set source-line = concat(TAB,ap-sql-text)
+				SQUIRT(ws-detail-print-select)
+				SQUIRT(ws-dg-select)
+				SQUIRT(ws-ss-sql)
+			else
+				//  Bang out the where clause 
+				set source-line = concat(TAB,TAB)
+				select * from reportsel
+					where ap-name = :ap-name
+				before 
+					if lf-where-count = 0
+						set source-line = concat(TAB,"WHERE")
+					else
+						set source-line = concat(TAB,TAB,"AND")
+					endif
+				detail
+					// need to find object for field
+					select * from reportfil
+						where ap-name = :ap-name
+						and ap-fld-name = :ap-fld-name
+					detail
+						string source-line appending concat(" ",rtrim(ap-obj-name),".",rtrim(ap-fld-name)
+							" "
+							rtrim(ap-operator)
+							" :"
+							ap-ws-fld-name)
+						SQUIRT(ws-detail-print-select)
+						SQUIRT(ws-dg-select)
+						SQUIRT(ws-ss-sql)
+						break // only wnat the first one
+					end-select
+					set source-line = concat(TAB,TAB,"AND")
+//				after
+//					set source-line = concat(TAB,TAB,"and")
+//					SQUIRT(ws-detail-print-select)
+//					SQUIRT(ws-dg-select)
+				end-select
+				set lf-where-clause-added = true
+				// finally do the "ORDER BY" Line:
+				set source-line = concat(TAB,ap-sql-text)
+				SQUIRT(ws-detail-print-select)
+				SQUIRT(ws-dg-select)
+				SQUIRT(ws-ss-sql)
+			endif
+		end-select
+// lets not do this, it will only cause programs with outer joins to fail to
+// compile.
+//		set source-line = concat(TAB,"database-sql")
+//		SQUIRT(ws-detail-print-select)
+//		SQUIRT(ws-dg-select)
+		set source-line = concat(TAB,"detail")
+		SQUIRT(ws-detail-print-select)
+	endif
+end-procedure
+
+procedure insert-sql-define
+local
+	lf-order-by-found							type boolean
+	lf-selection-count							type number
+	lf-where-count								type number
+	lf-where-clause-added						type boolean
+	set lf-order-by-found = false
+	set lf-where-clause-added = False
+	select lf-selection-count = count(*)
+		from reportsel
+	end-select
+	if lf-selection-count > 0 
+		// then we need to add a where clause
+		select lf-where-count = count(*)
+			from reportsql
+			where pattern(uppercase(ap-sql-text) ,  "WHERE") <> 0
+		end-select
+	endif
+	set source-line = "#define SQLSTMT \"
+	SQUIRT_NO_INC(ws-define)
+	if ap-di-project = spaces
+		Set source-line = concat(TAB,"select * from temp-file \")
+		SQUIRT(ws-define)
+	else
+		// if there are no selection criteria in the project then
+		// we can just output the sql 
+		select * 
+			from reportsql
+			where ap-name = :ap-name
+		detail
+		// then we do the select here
+			if uppercase(ltrim(rtrim(ap-sql-text))) = "ORDER BY"
+			or uppercase(ltrim(rtrim(ap-sql-text))) = "GROUP BY"
+				set lf-order-by-found = TRUE
+			endif
+			// Read through the sql looking for either order by or group-by
+			if (uppercase(ltrim(rtrim(ap-sql-text))) <> "ORDER BY"
+			and uppercase(ltrim(rtrim(ap-sql-text))) <> "GROUP BY")
+			or lf-where-clause-added
+				// if either we are not up to inserting the where clause or we
+				// have already done it then just bang out the line.
+				set source-line = concat(TAB,ap-sql-text)
+				SQUIRT_DEFINE(ws-define)
+			else
+				//  Bang out the where clause 
+				set source-line = concat(TAB)
+				select * from reportsel
+					where ap-name = :ap-name
+				before 
+					if lf-where-count = 0
+						set source-line = concat(TAB,"WHERE")
+					else
+						set source-line = concat(TAB,TAB,"AND")
+					endif
+				detail
+					// need to find object for field
+					select * from reportfil
+						where ap-name = :ap-name
+						and ap-fld-name = :ap-fld-name
+					detail
+						string source-line appending concat(" ",rtrim(ap-obj-name),".",rtrim(ap-fld-name)
+							" "
+							rtrim(ap-operator)
+							" :"
+							ap-ws-fld-name)
+						SQUIRT_DEFINE(ws-define)
+						break // only wnat the first one
+					end-select
+					set source-line = concat(TAB,TAB,"AND")
+				end-select
+				set lf-where-clause-added = true
+				// finally do the "ORDER BY" Line:
+				set source-line = concat(TAB,ap-sql-text)
+				SQUIRT_DEFINE(ws-define)
+			endif
+		end-select
+	endif
+end-procedure
+
+procedure insert-monitors
+	if ap-monitor <> spaces
+		set source-line = concat(TAB,TAB,TAB
+			,"display "
+			,STRFLD(ap-monitor)
+			," @23,54 foreground prompts")
+	else
+		set source-line = concat(TAB,TAB,TAB
+			,"display 'Extract Data'"
+			," @23,54 foreground prompts")
+	endif
+	SQUIRT(ws-pass-2-monitor)
+end-procedure
+
+procedure insert-dg-rows
+local
+	l-pic-clause				pic x(20) type string
+	l-col						type number
+	set l-col = 1
+	select * from reportfil
+		where ap-name = :ap-name
+		order by ap-name ap-col
+	detail
+		do picture-string parameters are ap-fld-name returning l-pic-clause
+		set source-line = concat(TAB,"display "
+			,ap-fld-name 
+			,if-then-else(ap-array-offset = 0," ",concat("[",str(ap-array-offset),"]"))
+			," @1,",str(l-col)
+			,if-then-else(ap-print-pic <> spaces, concat( " pic ", ap-print-pic), " ")
+			)
+		SQUIRT(ws-dg-rows)
+		if ap-col-head[1] != spaces
+			set source-line = concat(TAB,TAB,'Title "'
+				,concat(STRFLD(ap-col-head[1])
+					," "
+					,STRFLD(ap-col-head[2])
+					," "
+					,STRFLD(ap-col-head[3]))
+				,'"')
+			SQUIRT(ws-dg-rows)
+		else
+			set source-line = concat(TAB,TAB,"Title "
+				,'"'
+				,str-concat(ap-fld-name)
+				,'"'
+				)
+			SQUIRT(ws-dg-rows)
+		endif
+		set l-col += 1
+	end-select
+end-procedure
+
+procedure insert-report
+local
+	lf-max-width				type number
+	select * from reportfil
+		where ap-name = :ap-name
+		order by ap-name,ap-print-pos
+	detail
+		do get-col-width-from-pic parameters are ap-print-pic
+			returning lf-max-width
+		set lf-max-width += ap-print-pos
+	end-select
+	if lf-max-width < 132
+		set lf-max-width = 132
+	endif
+	// at the end of the loop lf-max-with holds the width of the report
+	if lf-max-width > 300
+		set lf-max-width = 300
+	endif
+	set source-line = concat(TAB,TAB,"width ",str(lf-max-width))
+	SQUIRT(ws-report)
+	if ap-xml = YES
+		set source-line = str-concat(TAB,TAB,"full-xml")
+		SQUIRT(ws-report)
+	endif
+end-procedure
+
+procedure insert-secabt
+	set source-line = str-concat(TAB,TAB,"sys-consolidation-division login-id()" 
+		,' "',str-concat(ap-module),'"'
+		,' "',str-concat(ap-function),'"')
+	SQUIRT(ws-secabt)
+end-procedure
+
+procedure current-apollo-dir
+returning
+	lr-dir								pic x(256) type string
+local
+	i									type number
+	//
+	for i = strlen(get-param(0)) down to 1
+		if substring(get-param(0),i,i) in { "/" "\" }
+			set lr-dir = substring(get-param(0),1,i - 1)
+			exit
+		endif
+	end-for
+end-procedure
+
+procedure recalc-col-headings
+local
+	lf-doc-line							like doc-line
+	extract reportfil
+		lock
+		on index ap-name ap-print-line ap-col
+		key is ap-name 0
+		next same ap-name
+	detail
+		if  ap-col-head[1] = spaces
+		and ap-col-head[2] = spaces
+		and ap-col-head[3] = spaces
+			do get-fld-col-head
+				parameters are ap-fld-name ap-fld-source
+				returning lf-doc-line
+			do split-col-head parameters are doc-line
+				returning ap-col-head
+			update reportfil
+		endif
+	end-extract
+end-procedure
+
+
+procedure toggle-hyphen
+parameters
+	lp-fld-name								like ap-fld-name
+returning
+	lr-fld-name								like ap-fld-name
+local
+	i										type number
+	for i = 1 to str-len(lp-fld-name)
+		if sub-string(lp-fld-name,i,i) = "-"
+			string lr-fld-name appending "_"
+		elseif substring(lp-fld-name,i,i) = "_"
+			string lr-fld-name appending "-"
+		else
+			string lr-fld-name appending sub-string(lp-fld-name,i,i)
+		endif
+	end-for
+end-procedure
+
+procedure get-parameter-string
+parameters are 
+	lp-para-no							like ap-sel-seq
+returning
+	lr-source-line						like source-line
+local
+	lf-fld-type							pic x
+	lf-sel-fld						pic x(30) type string
+	//
+	select * from reportsel
+		where ap-name = :ap-name
+		and ap-sel-seq = lp-para-no
+	detail
+		set lr-source-line = concat(TAB,"string lr-sql appending concat")
+		if pattern(ap-fld-name,"^ws-") 
+			do get-fld-type-from-pic parameters are ap-sel-pic returning lf-fld-type
+		else
+			do get-dict-field parameters are ap-fld-name spaces
+			set lf-fld-type = fld-type
+		endif
+		if ap-ws-fld-name = spaces
+			set lf-sel-fld = ap-fld-name
+		else
+			set lf-sel-fld = ap-ws-fld-name
+		endif
+		switch lf-fld-type
+		case "A"
+			string lr-source-line appending concat('(',SQLQUOTELEADINGSPACE
+				,",str-concat(",lf-sel-fld,"),",SQLQUOTE,")")
+		case "D"
+			string lr-source-line appending concat('(',SQLQUOTELEADINGSPACE
+				,",format-picture(",lf-sel-fld,',"mm/dd/yyyy"),',SQLQUOTE,")")
+		else
+			string lr-source-line appending concat("(str(",lf-sel-fld,"))")
+		endswitch
+	end-select
+end-procedure
+
+procedure insert-dg-local
+local
+	lf-data-type								pic x(50) type string
+	lf-local-inserted							type boolean
+//
+	// 
+	// add any local defined fields
+	//
+	select * from reportfil
+		where  ap-obj-name = "*"
+	before
+		if not lf-local-inserted
+			set source-line = "local"
+			SQUIRT(ws-dg-local)
+		endif
+	detail
+		do get-calc-data-type-from-pic
+			parameters are ap-print-pic
+			returning lf-data-type 
+		set source-line = concat(TAB,ap-fld-name,TAB,TAB,TAB,lf-data-type)
+		if substring(ap-fld-name,1,2) <> 'ws'
+			SQUIRT(ws-dg-local)
+		endif
+	end-select
+end-procedure
+
+procedure get-calc-data-type-from-pic
+parameters 
+	lp-pic							pic x(40) type string
+returning
+	lr-data-type					pic x(50) type string
+	//
+	if pattern(lp-pic,"v99")
+	or pattern(lp-pic,"s") = 1
+	or pattern(lp-pic,"-") = 1
+	or pattern(lp-pic,"$") = 1
+	or pattern(lp-pic,"9") = 1
+	or pattern(lp-pic,"z") = 1
+		set lr-data-type = "type number"
+	elseif pattern(uppercase(lp-pic),"YY")
+	or pattern(uppercase(lp-pic),"MM")
+	or pattern(uppercase(lp-pic),"DD")
+		set lr-data-type = "type date"
+	else
+		set lr-data-type = "type string pic x(1024)"
+	endif
+end-procedure
+
+procedure validate-report
+parameters
+	lp-name							like ap-name
+returning
+	lr-ok							type boolean
+	lr-message						pic x(1024) type string
+local
+	lf-found-where					type boolean
+	lf-count						type number
+//
+	set lr-ok = FALSE
+	get reportdef
+		on index ap-name
+		key is lp-name
+	on error
+		set lr-message = "No reportdef"
+		exit
+	endon
+	if ap-module = spaces
+	or ap-function = spaces
+		set lr-message = "Either the module or function code are blank."
+		exit
+	endif
+	set lf-found-where = FALSE
+	select lf-count = count(*)
+		from reportsel
+		where ap-name = :lp-name
+	end-select
+	//
+	// todo
+	//  validate target directory and program name
+	set lr-ok = TRUE
+end-procedure
+
+procedure insert-spreadsheet
+	// add any locally defined variables
+	do insert-ss-local
+	// add the mainheading
+	do insert-ss-mainheading
+	// add the columns
+	do insert-ss-columns
+	// add the headings
+	do insert-ss-headings
+	// add the sql - Nothing to do here - it is done as part of insert-print-select
+	// add the data 
+	do insert-ss-data
+	// add the totals
+	do insert-ss-totals
+end-procedure
+
+procedure insert-ss-local
+local
+	lf-data-type								pic x(50) type string
+	lf-local-inserted							type boolean
+//
+	// 
+	// add any local defined fields
+	//
+	select * from reportfil
+		where  ap-obj-name = "*"
+	before
+		if not lf-local-inserted
+			set source-line = "local"
+			SQUIRT(ws-ss-local)
+		endif
+	detail
+		do get-calc-data-type-from-pic
+			parameters are ap-print-pic
+			returning lf-data-type 
+		set source-line = concat(TAB,ap-fld-name,TAB,TAB,TAB,lf-data-type)
+		if substring(ap-fld-name,1,2) <> 'ws'
+			SQUIRT(ws-ss-local)
+		endif
+	end-select
+end-procedure
+
+procedure insert-ss-mainheading
+local
+	lf-col-count					type number
+	select lf-col-count = count(*)
+		from reportfil
+		where ap-name = :ap-name
+		and ap-suppress-prt <> YES
+	end-select
+	set source-line = concat(TAB,
+		'do clibvods-fill-a-cell-alpha-span parameters "MAINHEAD" REPORT_NAME ' 
+		str(lf-col-count)
+		)
+	SQUIRT(ws-ss-mainheading)
+end-procedure
+
+procedure insert-ss-columns
+local
+	lf-print-line-seq				type number
+	lf-print-size					type number
+	lf-pic-string					type string
+	lf-print-pos					type number
+	// Be careful of this loop.  It has to look at the NEXT column
+	// in order to deal with a particular field.  So the loop is always
+	// on the column AFTER the one we are dealing with
+	select *
+		lf-print-line-seq = if-then-else(ap-print-line = 0, 9999, ap-print-line)
+		from reportfil
+		where ap-name = :ap-name
+		and ap-suppress-prt <> YES
+		order by ap-name 
+			lf-print-line-seq 
+			ap-col
+	detail
+		do picture-string parameters are ap-fld-name returning lf-pic-string
+			lf-print-pos
+		if lf-print-pos > 20
+			set source-line = concat(TAB,
+				"do clibvods-add-sheet-column parameters '8cm' 1"
+				" // " ap-fld-name "/" str(lf-print-pos) "/" lf-pic-string )
+		else
+			set source-line = concat(TAB,
+				"do clibvods-add-sheet-column parameters spaces 1"
+				" // " ap-fld-name "/" str(lf-print-pos) "/" lf-pic-string)
+		endif
+		SQUIRT(ws-ss-columns)
+	end-select
+end-procedure
+
+procedure insert-ss-headings
+local
+	lf-print-line-seq				type number
+	lf-heading						pic x(60) type string
+	select *
+		lf-print-line-seq = if-then-else(ap-print-line = 0, 9999, ap-print-line)
+		from reportfil
+		where ap-name = :ap-name
+		and ap-suppress-prt <> YES
+		order by ap-name 
+			lf-print-line-seq 
+			ap-col
+	detail
+		set lf-heading = ap-col-head[1]
+		string lf-heading appending concat(" " ap-col-head[2])
+		string lf-heading appending concat(" " ap-col-head[3])
+		set source-line = CONCAT(TAB,
+		"do clibvods-fill-a-cell-alpha parameters lf-header-style"
+			" '" lf-heading "'")
+		SQUIRT(ws-ss-headings)
+	end-select
+end-procedure
+
+procedure insert-ss-data
+local
+	lf-print-line-seq				type number
+	lf-heading						pic x(60) type string
+	lf-pic-string					type string
+	lf-print-pos					type number
+	lf-data-type					pic x(40) type string
+	select *
+		lf-print-line-seq = if-then-else(ap-print-line = 0, 9999, ap-print-line)
+		from reportfil
+		where ap-name = :ap-name
+		and ap-suppress-prt <> YES
+		order by ap-name 
+			lf-print-line-seq 
+			ap-col
+	detail
+		do picture-string parameters are ap-fld-name returning lf-pic-string
+			lf-print-pos
+		do get-calc-data-type-from-pic parameter are lf-pic-string returning
+			lf-data-type
+		switch lf-data-type
+		case "type number"
+			if pattern(lf-pic-string,"\$")
+				set source-line = concat(TAB,TAB,
+					'do clibvods-fill-a-cell-numeric parameters "mycurrency"  '
+					 ap-fld-name )
+			else
+				set source-line = concat(TAB,TAB,
+					"do clibvods-fill-a-cell-numeric parameters lf-detail-style "
+					ap-fld-name )
+			endif
+		case "type date"
+			set source-line = concat(TAB,TAB,
+				"do clibvods-fill-a-cell-date parameters lf-detail-style "
+				ap-fld-name )
+		else
+			set source-line = concat(TAB,TAB,
+				"do clibvods-fill-a-cell-alpha parameters lf-detail-style "
+				ap-fld-name )
+		end-switch
+		SQUIRT(ws-ss-data)
+	end-select
+end-procedure
+
+procedure insert-ss-totals
+local
+	lf-print-line-seq				type number
+	lf-heading						pic x(60) type string
+	lf-pic-string					type string
+	lf-print-pos					type number
+	lf-data-type					pic x(40) type string
+	lf-col-seq						type number
+	select *
+		lf-print-line-seq = if-then-else(ap-print-line = 0, 9999, ap-print-line)
+		from reportfil
+		where ap-name = :ap-name
+		and ap-suppress-prt <> YES
+		order by ap-name 
+			lf-print-line-seq 
+			ap-col
+	detail
+		do picture-string parameters are ap-fld-name returning lf-pic-string
+			lf-print-pos
+		set lf-col-seq += 1
+		if ap-total-flg != YES
+			set source-line = concat(TAB,TAB,
+				"do clibvods-fill-a-cell-alpha parameters spaces spaces")
+			SQUIRT(ws-ss-totals)
+		else
+			if pattern(lf-pic-string, "\$")
+				set source-line = concat(TAB,TAB,
+					'do clibvods-fill-a-cell-formula parameters "mycurrency" ')
+			else
+				set source-line = concat(TAB,TAB,
+					"do clibvods-fill-a-cell-formula parameters lf-total-style")
+			endif
+			SQUIRT(ws-ss-totals)
+			set source-line = concat(TAB,TAB,TAB,
+				'concat("SUBTOTAL(9;[.' 
+				ascii-char(64 + lf-col-seq) 
+				'" '
+				"str(lf-data-start-for-totals)"
+				' ":.'
+				ascii-char(64 + lf-col-seq) 
+				'"  str(lf-row) "])")'
+				)
+			SQUIRT(ws-ss-totals)
+		endif
+	end-select
+end-procedure
+
+procedure format-squirt-line-for-define
+parameters 
+	lp-in							pic x(1024) type string
+returning 
+	lr-out							pic x(1024) type string
+	set lr-out = lp-in
+	//
+	// Check for comments
+	//
+	if pattern(lr-out,"//") > 0
+		string lr-out deleting pattern(lr-out,"//") to str-len(lr-out)
+	endif
+	if lr-out != spaces
+		string lr-out appending " \"
+	endif
+end-procedure

@@ -1,0 +1,3455 @@
+
+
+
+
+OLD version that uses strings for date and numberic fill-a-cell
+
+
+////////////////////////////////////////////////////////////////////////////////
+// Program : Velocity ODS file creator
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2020
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: clib/clibvods.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 28May20  rjb         written 
+//   This is built largely around clib100.
+////////////////////////////////////////////////////////////////////////////////
+ 
+/*
+
+	This documentation is in RST format.  To view this as a nice pdf goto
+	https://overbits.herokuapp.com/rsteditor/ or rst.ninjs.org and paste this content.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|           |           |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+
+	Alternatively
+
+	 =========== =========== ======================================================== 
+	  Direction   Data Type   Description                                             
+	 =========== =========== ======================================================== 
+	 =========== =========== ======================================================== 
+
+========
+clibvods
+========
+
+Introduction
+~~~~~~~~~~~~
+
+Clibvods is a tool to create spreadsheets without using ole.  There are two predominate standards xlsx and ods.  
+Xlsx is used by Microsoft and ods is used by open office.
+
+The two types are very similar - both are simply a collection of xml files that have been compressed.  
+The exact files can be seen by using a standard "unzip" program.  
+
+ODS can be opened by Excel.
+
+The major benefit of using this clib is that it is not based on ole connections.  
+It is significantly faster than using clib100 for excel.  
+It can also be ran in background task that cannot be done with clib100 (for excel).  
+Finally it has some extra features not supported by clib100 for ODS - in particular control over column widths.
+
+Clibvods is a copy of clib100 with a few changes.  Anything to do with reading existing files has been removed.  
+It does not read files.
+
+The biggest changes are:
+
+	*  is the ability to control the width of a column 
+	*  the ability for one cell to span multiple columns.
+	*  removal of the need to get the column count exactly right (this is managed within the clib)
+	*  Fixed bugs in the currency style that was creating incorrect number of decimal places and integer places
+	   (decimal places now a parameter)
+	*  Added the wrap text parameter to the create sytle function and set the default for headings to wrap text
+
+Note that programs will nearly always need to reference i8ods for some of the standards.
+
+Note that apollodi in 760 has been updated to create nice spreadsheet using these calls.
+
+Styles
+~~~~~~
+Be careful how styles work.  
+The easiest thing to do is to look at i8ods.spl.  Stick to those and if you need new ones look at 
+clibvods-create-xxxx-style
+
+It is important to understand the difference between cell styles and data styles.  Data styles control
+things such as number of decimal places, currency symbols, separators, date formats.
+Cell styles controls things like the font, size, colour and borders.
+
+If you need to create your own DATA style (clibvods-create-numeric-style, -create-currency-style), then you will
+also need to create a cell style.  The cell style specifies the data style to use.
+
+The general idea is that a single spreadsheet uses a limited number of styles for numbers for all cells.  
+
+See the example below.
+
+A Note on Vertical Alignment
+----------------------------
+If you are going to use wrap text in any style then it makes sense to set the overall vertical alignment to 
+"middle". (IMHO - bottom alignment looks shite).  Therefore set this as the default as the FIRST thing.
+(clibvods-set-default-vertical-align).  The only time you might change this is to then set any headings to
+"middle".
+
+Neither Excel nor any of the open office products implement any kind of automatic row height or col width
+function.  (There is a keyword in the ods spec - use-optimal-row-height but this does not do anything).
+
+Usage
+~~~~~
+
+It is important to note that columns are written out in sequence 
+starting at the top left moving across and then down to the next row.  
+Individual columns are not directly addressable.  (i.e. one cell is inserted followed by the next adjacent cell.) 
+
+The overall process is :
+
+	+----------------------------+------------------------------------------------------------------------------+
+    |clibvods-start-export       | Call once at the start                                                       |
+    |                            | (if changing default vertical alignment then the call to vertical-alignment  |
+    |                            | must occur before calling start-export)                                      |
+	+----------------------------+------------------------------------------------------------------------------+
+    |Cllibvods-create-xxxx-style |Call as many times as necessary to establish any styles (formatting)          |
+	|                            |that will be used in the sheet.  Be sure to create column styles that         |
+	|                            |might be necessary to control column widths.                                  |
+	+----------------------------+------------------------------------------------------------------------------+
+	|Clibvods-add-sheet          |Call once immediately after start and again if a further sheet is to be added |
+	+----------------------------+------------------------------------------------------------------------------+
+	|Clibvods-add-sheet-column   |There must be EXACTLY 16384 columns in the sheet.                             |
+	|                            |The clib will look after this for you (unlike clib100)                        |
+	|                            |The first parameter is the column style (and hence width)                     |
+	|                            |The second parameter to this routine is the number of columns.                |
+	|                            |                                                                              |
+	|                            |Routine is opional                                                            |
+	+----------------------------+------------------------------------------------------------------------------+
+	|Clibvods-add-sheet-row      |Call each time a new ROW is added to the sheet                                |
+	+----------------------------+------------------------------------------------------------------------------+
+	|Clibvods-fill-a-cell-xxxx   |Add new cells - left to right.                                                |
+	|                            |Where xxxx is one of : alpha,numeric,date,currency,formula,alpha-repeat       |
+	|                            |                                                                              |
+	+----------------------------+------------------------------------------------------------------------------+
+	|Clibvods-finish-export      |Finish the job and save the file.                                             |
+	+----------------------------+------------------------------------------------------------------------------+
+
+Numerics
+--------
+
+Although there is a fill-a-cell-numeric and fill-a-cell-currency the second parameter which contains the 
+cell contents is a STRING.  Be WARNED:  Even though it is string , it must not contains spaces.  
+Do not use picture strings that contain things like "z" - ensure the string is full of numerics 
+(not even any leading spaces).
+
+Parameters
+----------
+
+    +-----------------------------------+-----------------------------------------------------------+
+    |clibvods-start-export              | Name of the folder to contain the temporary file.         |
+    |                                   | Note that the file file name is a parameter of            |
+    |                                   | clibvods-finish-export                                    |
+    +-----------------------------------+-----------------------------------------------------------+
+    |Clibvods-add-sheet                 |1)A sheet name                                             |
+    |                                   |2)Boolean indicating whether sheet should be cleared first |
+    +-----------------------------------+-----------------------------------------------------------+
+    |Cllibvods-create-column-style      |1)A Style Name                                             |
+    |                                   |2)The width and uom of the column (eg. "8cm")              |
+    +-----------------------------------+-----------------------------------------------------------+
+    |Clibvods-add-sheet-column          |1)Column Style name                                        |
+    |                                   |2)Count of number of columns to add of this style          |
+    +-----------------------------------+-----------------------------------------------------------+
+    |Clibvods-add-sheet-row             |                                                           |
+    +-----------------------------------+-----------------------------------------------------------+
+    |Clibvods-fill-a-cell-alpha         |1)Style name                                               |
+    |                                   |2)Value                                                    |
+    +-----------------------------------+-----------------------------------------------------------+
+    |Clibvods-finish-export             |The final filename for the spreadsheet.                    |
+    +-----------------------------------+-----------------------------------------------------------+
+
+Styles
+------
+
+There are limitations on some of the styles.  
+
+You can change what the standard currency style looks like but you 
+cannot have multiple different currency styles (this is a limitation of the clib not ods in general).
+
+Formulas
+--------
+
+Formulas are defined like :
+
+::
+
+	concat("[.C" str(lf-row) "]*[.D" str(lf-row)"]")
+
+or :
+
+::
+
+	concat("SUBTOTAL(9;[.g5:.g"  str(lf-row) "])")
+
+
+If unsure how to express a forumla the best thing to do is to create an ODS file using excel with
+the formulas you want.  Open the file with 7zip and open the contents.xml file.  Find the formula expression
+and copy it.
+
+
+clibvods-get-last-error
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	Returns the text of the last error message
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   Out     |String 1k  |Text of last error message                              |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvods-start-export
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 500 |The folder in which to create the work file.            |
+	|           |           |Note that the final name is specified when              |
+	|           |           |clibvods-finish-export is called.                       |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvods-set-default-vertical-align
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	Sets the default vertical alignment value.  If not specified the default is 
+	"Automatic".  This effectively means "bottom".
+	
+	** Routine must be specified before calling start-export **
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 40  |Must be one of Automatic, middle or top.                |
+	|           |           |Bottom alignment is acheived using "automatic"          |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvods-create-font-style
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	Use this to create a new font style.  The need for this is unclear.
+	It is possible to create a cell style that specifies a font that has not been
+	previously defined. 
+
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 40  |Font Name                                               |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |String 40  |Family Name                                             |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvods-create-currency-style
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	Used to create different currency sympbols.  Generally used in startup by the clib
+	itself.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      | String 40 | Style Name                                             |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      | String 40 | Currency symbol   (May be spaces)                      |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      | String 40 | Currency Language (May be spaces)                      |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      | String 40 | Currency Country  (May be spaces)                      |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      | Boolan    | True indicates the use of thousands separators         |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      | Integer   | Number of Decimal Places                               |
+	+-----------+-----------+--------------------------------------------------------+
+
+
+clibvods-create-numeric-style
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	USe to create numeric styles.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      | String 40 | Style Name                                             |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      | String 40 | Decimal Places                                         |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      | String 40 | Min Integer Digits                                     |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      | Boolan    | True indicates the use of thousands separators         |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvods-create-column-style
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	Use this to create new column styles.  Use is to change the width of a column.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|  In       | String 40 |The name of the style                                   |
+	+-----------+-----------+--------------------------------------------------------+
+	|  In       | String 40 |The width including the unit of measure.  e.g.:         |
+	|           |           |                                                        |
+	|           |           |8cm                                                     |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvods-create-cell-style
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	Use this when you want some special formatting for cells.
+
+	Note that all colours are specified in Hex Strings. See clibvods-rgbcolour-to-hexcolour
+	for a mechanism to get a hex string from rgb
+
+	** Note that any value of spaces will apply the default. **
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|    In     |String 40  |The name to give to this style.                         |
+	|           |           |                                                        |
+	|           |           |It is important not to use names already specified in   |
+	|           |           |i8ods.spl.                                              |
+	+-----------+-----------+--------------------------------------------------------+
+	|    In     |String 40  |Border Thickness  ("thick", "thin")                     |
+	+-----------+-----------+--------------------------------------------------------+
+	|    In     |String 40  |Border Colour                                           |
+	+-----------+-----------+--------------------------------------------------------+
+	|    In     |String 40  |Background Colour                                       |
+	+-----------+-----------+--------------------------------------------------------+
+	|    In     |String 40  |Foreground Colour                                       |
+	+-----------+-----------+--------------------------------------------------------+
+	|    In     |String 40  |Text alignment.  One of "center","left", "right" or     |
+	|           |           |"justify"                                               |
+	+-----------+-----------+--------------------------------------------------------+
+	|    In     |String 40  |Font Weight.  e.g. "Bold"                               |
+	+-----------+-----------+--------------------------------------------------------+
+	|    In     |String 40  |Font Size.  e.g. "20pt"                                 |
+	+-----------+-----------+--------------------------------------------------------+
+	|    In     |String 40  |Font Name.  e.g. "Letter Gothic"                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|    In     |String 40  |Data Style. The name of style previously create (or     |
+	|           |           |created by the startup of the clib).  spaces will use   |
+	|           |           |the default style                                       |
+	+-----------+-----------+--------------------------------------------------------+
+	|    In     | Boolean   |True to indicate a top border is to be applied          |
+	+-----------+-----------+--------------------------------------------------------+
+	|    In     | Boolean   |True to indicate a bottom border is to be applied       |
+	+-----------+-----------+--------------------------------------------------------+
+	|    In     | Boolean   |True to indicate a left border is to be applied         |
+	+-----------+-----------+--------------------------------------------------------+
+	|    In     | Boolean   |True to indicate a right border is to be applied        |
+	+-----------+-----------+--------------------------------------------------------+
+	|    In     | Boolean   |True to indicate Text should be wrapped in the cell     |
+	+-----------+-----------+--------------------------------------------------------+
+	|    In     |String 40  |Vertical align value.  must be one of                   |
+	|           |           |spaces automatic middle top                             |
+	+-----------+-----------+--------------------------------------------------------+
+
+	See the examples below for a good example
+
+
+clibvods-add-sheet
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Adds a new worksheet to the spreadsheet
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|  In       |String 40  |The name of sheet that appears in the tabs at the bottom|
+	+-----------+-----------+--------------------------------------------------------+
+	|  In       |Boolean    |Clear the sheet.  Normally True                         |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvods-add-sheet-column
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	Each sheet must always contain 16384 Columns, but the clib will look after this for you.
+	Call tthis only if you want to add column with different attributes (like the width)
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	| In        |String 40  | The style name                                         |
+	+-----------+-----------+--------------------------------------------------------+
+	| In        |Integer    |The number of these columns to add.                     |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvods-add-sheet-row
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	Adds the next row to the spreadsheet.
+
+	No Parameters
+	
+clibvods-add-sheet-row-repeat
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	Add multiple blank rows
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|  In       | Integer   |Number of rows to add                                   |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvods-fill-a-cell-alpha
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	Puts a string in the next cell.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 40  |The name of the style.  Spaces for no Style             |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |string 10k |The contents of the cell                                |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvods-fill-a-cell-alpha-span
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	Add a string to a cell and span multiple columns (a.k.a "Merge and Centre")
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 40  |The name of the style.  Spaces for no Style             |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |string 10k |The contents of the cell                                |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |Integer    |The number of columns to span                           |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvods-fill-a-cell-alpha-repeat
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	Add the same string to multiple columns.  This is mostly used for add spaces
+	to jump a number of columns.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 40  |The name of the style.  Spaces for no Style             |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |string 10k |The contents of the cell                                |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |Integer    |The number of columns to Jump                           |
+	+-----------+-----------+--------------------------------------------------------+
+
+
+clibvods-fill-a-cell-numeric
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	Adds a number to a cell.  The parameters are the same as fill-a-cell-alpha
+	Note that the value must be passed as a string.
+
+clibvods-fill-a-cell-date
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	Adds a number to a cell.  The parameters are the same as fill-a-cell-alpha
+	Note that the value must be passed as a string.
+
+clibvods-fill-a-cell-currency
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	Adds a number to a cell.  The parameters are the same as fill-a-cell-alpha
+	Note that the value must be passed as a string.
+
+clibvods-fill-a-cell-formula
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	Adds a number to a cell.  The parameters are the same as fill-a-cell-alpha
+	Note that the value must be passed as a string.
+
+	Note also that formulas must be expressed in the manner used by ODS (not excel)
+
+	See above for examples.
+
+clibvods-fill-a-cell-formula-percent
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	This is the same as clibvods-fill-a-cell-formula except the result will be displayed
+	as a percentage.  if the result of the calculation is (eg) .234 then the spreadsheet
+	will display "23.4%".
+
+	If the result of the formula is a percent then use this function.  Note that you 
+	may well want to create a style for the result as well (esp for controlling the number
+	of decimal places).
+
+clibvods-finish-export
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	
+	Complete the spreadsheet.  
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|  In       |String 500 |The full path to the final file.                        |
+	+-----------+-----------+--------------------------------------------------------+
+
+
+clibvods-get-row-column-by-cell
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	Hard to determine how to use this procedure.  Kept for consistency with clib100
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|  In       |String 40  |Row coordinates.  e.g. "A1"                             |
+	+-----------+-----------+--------------------------------------------------------+
+	|  Out      |Integer    |Row Number                                              |
+	+-----------+-----------+--------------------------------------------------------+
+	|  Out      |String 40  |Column Name                                             |
+	+-----------+-----------+--------------------------------------------------------+
+	|  Out      |Integer    |Column Number                                           |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvods-rgbcolour-to-hexcolour
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	Used to convert rgb numbers to a hex code
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|  In       | Integer   | Red                                                    |
+	+-----------+-----------+--------------------------------------------------------+
+	|  In       | Integer   | Green                                                  |
+	+-----------+-----------+--------------------------------------------------------+
+	|  In       | Integer   | Blue                                                   |
+	+-----------+-----------+--------------------------------------------------------+
+	|  Out      |String 40  | Hex colour string                                      |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvods-public-override-file-upload-url
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	Not used in the clib.
+
+clibvods-public-override-export-folder-name
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	Not used in the clib.
+
+clibvods-public-override-read-folder-name
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	Not used in the clib.
+
+clibvods-public-override-export-filename
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	Not used in the clib.
+
+
+clibvods-transfer-file-to-pc-web-client
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	Transfer any file to the local machine.
+	Only uses web client.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|  In       |String 1k  |Full path name                                          |
+	+-----------+-----------+--------------------------------------------------------+
+
+Sample 
+~~~~~~
+
+Sample Code::
+
+	procedure test1
+		//
+		do clibvods-start-export parameters "/tmp"
+		do clibvods-add-sheet parameters "Stock" True
+		do clibvods-add-sheet-row
+		do clibvods-fill-a-cell-alpha parameters spaces "Stock Group"
+		do clibvods-fill-a-cell-alpha parameters spaces "Stock Code"
+		do clibvods-fill-a-cell-alpha parameters spaces "Stock Desc"
+		select * from stock-master order by stock-group stock-code
+		detail
+			do clibvods-add-sheet-row
+			do clibvods-fill-a-cell-alpha parameters spaces stock-group
+			do clibvods-fill-a-cell-alpha parameters spaces stock-code
+			do clibvods-fill-a-cell-alpha parameters spaces stk-description
+		end-select
+		do clibvods-finish-export parameters are "/tmp/test1.ods"
+		message "File created in /tmp"
+	end-procedure
+
+All the bells and whistles::
+
+	procedure test2
+	parameters
+		lp-whse-code					like whse-code
+	local
+		lf-row							type number
+		//
+		do clibvods-set-default-vertical-align parameters "Top"
+		do clibvods-start-export parameters "/tmp"
+		do clibvods-add-sheet parameters "Stock" True
+		do clibvods-create-column-style parameters "8cm" "8cm"
+		do clibvods-add-sheet-column parameters spaces 1
+		do clibvods-add-sheet-column parameters "8cm" 1
+		do clibvods-add-sheet-column parameters spaces 1
+		do clibvods-add-sheet-column parameters "8cm" 1
+		do clibvods-create-cell-style parameters
+			"MAINHEAD" //cell-name				
+				"thick" //border-thickness			
+				"#DD5044" //border-colour			
+				"#72F0FE" //background-color			
+				"#FFD662"//text-colour				
+				"center" //text-align
+				"Bold" //font-weight				
+				"Letter Gothic" //font-name				
+				"20pt" //font-size				
+				space //data-style	
+				TRUE //Top Border	
+				TRUE //Bottom Border
+				TRUE //Left Border
+				TRUE //Right Border
+				FALSE // Wrap text
+				"middle" // vertical align
+		do clibvods-create-cell-style parameters
+			"WRAP" //cell-name				
+				"thin" //border-thickness			
+				spaces //border-colour			
+				spaces //background-color			
+				spaces //text-color
+				spaces //text-align
+				spaces //font-weight				
+				spaces  //font-name				
+				spaces //font-size				
+				space //data-style	
+				TRUE //Top Border	
+				TRUE //Bottom Border
+				TRUE //Left Border
+				TRUE //Right Border
+				TRUE // Wrap text
+				"top" // vertical align
+		do clibvods-create-currency-style parameters
+			"curr2dp"
+			spaces
+			spaces
+			spaces
+			True
+			2
+		do clibvods-create-cell-style parameters
+			"mycurrency" //cell-name				
+				"thin" //border-thickness			
+				I8ODS_DEFAULT_DETAIL_BORDER_COLOUR //border-colour			
+				I8ODS_DEFAULT_DETAIL_BACK_COLOUR //background-color			
+				I8ODS_DEFAULT_DETAIL_TEXT_COLOUR //text-colour				
+				spaces //text-align
+				spaces //font-weight				
+				spaces //font-name				
+				spaces //font-size				
+				"curr2dp" //data-style	
+				TRUE //Top Border	
+				TRUE //Bottom Border
+				TRUE //Left Border
+				TRUE //Right Border
+				FALSE // Wrap
+				SPACES // vertical align
+		do clibvods-add-sheet-row
+		do clibvods-fill-a-cell-alpha-span parameters "MAINHEAD" "Warehouse Valuation" 7
+		do clibvods-add-sheet-row
+		do clibvods-fill-a-cell-alpha-repeat parameters spaces spaces 2 // jump two cells
+		do clibvods-fill-a-cell-alpha parameters spaces "Effective"
+		do clibvods-fill-a-cell-date parameters spaces format-picture(today(), "dd/mmm/yyyy")
+		do clibvods-add-sheet-row
+		do clibvods-add-sheet-row
+		do clibvods-fill-a-cell-alpha parameters I8ODS_CELL_STYLE_HEADER "Stock Group"
+		do clibvods-fill-a-cell-alpha parameters I8ODS_CELL_STYLE_HEADER "Group Desc"
+		do clibvods-fill-a-cell-alpha parameters I8ODS_CELL_STYLE_HEADER "Stock Code"
+		do clibvods-fill-a-cell-alpha parameters I8ODS_CELL_STYLE_HEADER "Stock Desc"
+		do clibvods-fill-a-cell-alpha parameters I8ODS_CELL_STYLE_HEADER "Qty"
+		do clibvods-fill-a-cell-alpha parameters I8ODS_CELL_STYLE_HEADER "Cost"
+		do clibvods-fill-a-cell-alpha parameters I8ODS_CELL_STYLE_HEADER "Value"
+		set lf-row = 4
+		select * 
+			from stock-master  as t0
+			inner join stock-warehouse-detail  as t1
+				on t0.stock-code = t1.stock-code 
+				and t1.whse-code = :lp-whse-code	
+			inner join system-table as t2
+				on t2.sys-tbl-type = "PG"
+				and t2.sys-tbl-code = t0.stock-group
+			order by t0.stock-group t0.stock-code
+		detail
+			do clibvods-add-sheet-row
+			set lf-row += 1
+			do clibvods-fill-a-cell-alpha parameters I8ODS_CELL_STYLE_DETAIL stock-group
+			do clibvods-fill-a-cell-alpha parameters "WRAP" sys-description
+			do clibvods-fill-a-cell-alpha parameters I8ODS_CELL_STYLE_DETAIL stock-code
+			do clibvods-fill-a-cell-alpha parameters "WRAP" stk-description
+			do clibvods-fill-a-cell-numeric parameters I8ODS_CELL_STYLE_DETAIL str(whse-qty-on-hand)
+			do clibvods-fill-a-cell-numeric parameters "mycurrency" str(whse-avg-cost)
+			do clibvods-fill-a-cell-formula parameters I8ODS_CELL_STYLE_CURRENCY 
+				concat("[.E" str(lf-row) "]*[.F" str(lf-row) "]")
+		end-select
+		//
+		do clibvods-add-sheet-row
+		do clibvods-fill-a-cell-alpha-repeat parameters spaces spaces 6 // jump two cells
+		do clibvods-fill-a-cell-formula parameters "mycurrency" 
+			concat("SUBTOTAL(9;[.g5:.g"  str(lf-row) "])")
+		do clibvods-finish-export parameters are "/tmp/test1.ods"
+		do clibvods-transfer-file-to-pc-web-client parameters are  "/tmp/test1.ods"
+	end-procedure
+
+
+
+
+*/
+
+#include "../include/bmsdef.spl"
+#include "../include/i8ods.spl"
+#include "../include/i8proglogparam.spl"
+
+#define MAX_COLUMN_ARRAY 100
+#define MAX_TEXT_LENGTH  128
+//
+#define CRANDLF			concat(ASCII-CHAR(13),ASCII-CHAR(10))
+#define QUOTES			ASCII-CHAR(34)
+#define COMMA			ASCII-CHAR(44)
+#define COLON			ASCII-CHAR(58)
+#define CAREUTRN		ASCII-CHAR(13)
+#define OPENSQRBRAKT	ASCII-CHAR(91)
+#define ENDSQRBRAKT		ASCII-CHAR(93)
+#define OPENCURBRAKT	ASCII-CHAR(123)
+#define ENDCURBRAKT		ASCII-CHAR(125)
+//
+#define DATAGRID_EXPORT_FOLDER "ProntoXiDatagrids"
+#define ALL_COMPANIES SPACES
+//
+
+object tmp-ods-cells
+	type memory
+	record
+		tmp-sheet-name		type string
+		tmp-sheet-no		pic 99
+		tmp-row-id			pic 9(7)
+		tmp-cell-no			pic 9(7)
+		tmp-cell-type		type varchar pic x(10)
+		tmp-cell-value		type varchar pic x(20)
+		tmp-cell-text		type varchar pic x(MAX_TEXT_LENGTH)
+	endrecord
+	key tmp-sheet-name tmp-row-id tmp-cell-no unique	
+	key tmp-sheet-no tmp-row-id tmp-cell-no unique	
+
+object like-tmp-ods-cells			like tmp-ods-cells
+
+field
+	ws-current-column					type numeric
+	ws-current-row						type numeric
+	ws-document-handle					type xml-handle
+	ws-root-node-handle					type xml-handle
+	ws-styles-node-handle				type xml-handle
+	ws-doc-type-node-handle				type xml-handle 
+	ws-sheet-node-handle				type xml-handle 
+	ws-sheet-row-node-handle			type xml-handle 
+	ws-sub-folder-name					type varchar pic x(500)
+	ws-tmp-folder-by-login-id			type varchar
+	ws-tmp-unique-sub-folder			type varchar
+	ws-sheets-list-only					type boolean
+	ws-current-cell-node-handle			type xml-handle 
+	ws-updating-sheet 					type boolean
+	ws-processing-ods-file				type boolean
+	ws-debug							type boolean
+	ws-last-data-row 					type numeric
+	ws-last-data-col 					type numeric
+    ws-using-web-client 				type boolean
+	ws-last-error						pic x(1024) type string
+	ws-columns-in-current-sheet			type number
+	ws-default-vertical-align			type string
+
+procedure library-init
+	if file-exists("clibvodsdebug.txt",0)
+		set ws-debug = TRUE
+    endif
+	do i8proglogparam-write-log parameters are "clibvods"
+    set ws-using-web-client = if-then-else(get-system-metrics(7) = 1,TRUE,FALSE)
+endprocedure //library-init ----------------------------------------------------------
+
+procedure main
+    set ws-using-web-client = if-then-else(get-system-metrics(7) = 1,TRUE,FALSE)
+	do sample-and-test
+end-procedure
+	
+procedure clibvods-get-last-error export
+returning
+	lr-message							like ws-last-error
+	set lr-message = ws-last-error
+end-procedure
+
+procedure clibvods-start-export	export no-override
+//////////////////////////////////////////////////////////////////////////////
+//<CLIB_DOC>
+//<DESC>
+// 	Starts creating an ods file.
+//  Note that an ods file is a collection of XML files.
+//  This procedure starts creating the internal XML structure for contnt.xml file
+//  At the end of adding data rows, clibvods-finish-export has to be called
+//  to complete the file creation
+//
+//<P1> Export sub folder name 
+//<R1> Flag to indicate ods file creation has started TRUE/FALSE.	
+//
+///////////////////////////////////////////////////////////////////////////////	
+	parameter
+		lp-export-sub-folder-name			type varchar pic x(500)
+	//	
+	set ws-processing-ods-file = TRUE 
+	if lp-export-sub-folder-name = spaces
+		set lp-export-sub-folder-name = concat('/tmp/ods_' str(pid()))
+	endif
+	set ws-sub-folder-name = lp-export-sub-folder-name
+	do clibvods-public-override-export-folder-name
+		parameters
+			ws-sub-folder-name
+		returning
+			ws-sub-folder-name
+	//
+	do write-xml-document-root 
+		parameter
+			"office:document-content"
+		returning
+			ws-document-handle						
+			ws-root-node-handle					
+	//
+	do write-xml-document-styles 
+		parameter
+			ws-root-node-handle					
+	//
+	do add-document-type
+		parameter
+			ws-styles-node-handle
+		returning
+			ws-doc-type-node-handle
+	//
+	do add-calculation-settings
+		parameter
+			ws-doc-type-node-handle
+	//
+	if ws-document-handle = ZERO						
+		set ws-last-error	 = "Failed to create work file"
+		exit 1
+	endif
+endprocedure //clibvods-start-export	----------------------------------------------------------
+
+procedure clibvods-set-default-vertical-align export
+parameters 	
+	lp-string						type string
+	if ws-processing-ods-file
+		set ws-last-error = "default-vertical-align must be called before start-export"
+		exit 1
+	endif
+	// note that bottom align is "automatic"
+	set lp-string = lowercase(lp-string)
+	if lp-string in ( "automatic" "top" "middle")
+		set ws-default-vertical-align = lp-string
+	else
+		set ws-last-error = "Vertical Align must be one of automatic, top, middle"
+		exit 1
+	endif
+end-procedure
+
+procedure clibvods-create-font-style export no-override
+//////////////////////////////////////////////////////////////////////////////
+//<CLIB_DOC>
+//<DESC>
+// This procedure is used to create font styles that are used in the ods file.
+//
+//<P1> Font style name (e.g. "Calibri")
+//<P2> Font style family	(e.g. "Calibri")
+//
+//<R1> Flag to indicate if the font style has been created TRUE/FALSE.
+//
+///////////////////////////////////////////////////////////////////////////////	
+	parameter
+		lp-font-style-name			type string
+		lp-font-style-family		type string
+	returning
+		lr-font-style-created		type boolean
+	local
+		lf-styles-node-handle		type xml-handle 
+		lf-level2-node-handle		type xml-handle
+	//
+	set lf-styles-node-handle = xml-get-child-by-name(ws-root-node-handle,'font-face-decls','office')
+	if lf-styles-node-handle = ZERO
+		set lf-styles-node-handle = XML-ADD-CHILD-NODE(ws-root-node-handle,'font-face-decls','office')
+	endif
+	//
+	set lf-level2-node-handle = XML-ADD-CHILD-NODE(lf-styles-node-handle,"font-face",'style')
+    set lr-font-style-created = lf-level2-node-handle			
+    if XML-ADD-NODE-ATTRIBUTE(lf-level2-node-handle,"name",'style',lp-font-style-name)
+    endif
+    if XML-ADD-NODE-ATTRIBUTE(lf-level2-node-handle,"font-family",'svg',lp-font-style-family)
+    endif
+    if XML-FREE-NODE-HANDLE(lf-styles-node-handle) <= 0
+    endif
+endprocedure //clibvods-create-font-style ----------------------------------------------------------
+
+procedure clibvods-create-currency-style export no-override
+//////////////////////////////////////////////////////////////////////////////
+//<CLIB_DOC>
+//<DESC>
+// This procedure is used to create currency styles that are used in the ods file.
+//
+//<P1> Curruncy style name (e.g. "N200")
+//<P2> Curruncy symbol (e.g. "$"). Default symbol will be used if this parameter is blank
+//<P3> Curruncy language (e.g. "en"). Default language will be used if this parameter is blank
+//<P4> Curruncy country (e.g. "au"). Default country will be used if this parameter is blank
+//<P5> Thousands seperator. TRUE/FALSE to indicate if the Thousands seperator is used.
+//
+//<R1> Flag to indicate if the currency style has been created TRUE/FALSE.
+//
+///////////////////////////////////////////////////////////////////////////////	
+	parameter
+		lp-currency-style-name		type string
+		lp-currency-symbol			type string
+		lp-currency-language		type string
+		lp-currency-country			type string
+		lp-thousands-seperator		type boolean		
+		lp-decimal-places			type number
+	returning
+		lr-currency-style-created	type boolean
+	local
+		lf-styles-node-handle		type xml-handle 
+		lf-level2-node-handle		type xml-handle
+		lf-level3-node-handle		type xml-handle
+	//
+   	set lf-styles-node-handle = xml-get-child-by-name(ws-root-node-handle,"automatic-styles",'office')
+	if lf-styles-node-handle = ZERO
+		set lf-styles-node-handle = XML-ADD-CHILD-NODE(ws-root-node-handle,"automatic-styles",'office')
+	endif
+	//
+   	set lf-level2-node-handle = XML-ADD-CHILD-NODE(lf-styles-node-handle,"currency-style",'number')
+   	set lr-currency-style-created =	lf-level2-node-handle
+   	//
+//    if XML-ADD-NODE-ATTRIBUTE(lf-level2-node-handle,"name",'style',I8ODS_DATA_STYLE_CURRENCY)
+ //   endif
+    if XML-ADD-NODE-ATTRIBUTE(lf-level2-node-handle,"name",'style',lp-currency-style-name)
+    endif
+	set lf-level3-node-handle = XML-ADD-CHILD-NODE(lf-level2-node-handle,"currency-symbol",'number')
+	if lp-currency-language != SPACES		
+		if XML-ADD-NODE-ATTRIBUTE(lf-level3-node-handle,"language",'number',lp-currency-language)
+		endif
+	endif
+	if lp-currency-country != SPACES
+		if XML-ADD-NODE-ATTRIBUTE(lf-level3-node-handle,"country",'number',lp-currency-country)
+		endif
+	endif
+	if lp-currency-symbol != SPACES			
+		if XML-MODIFY-NODE-TEXT(lf-level3-node-handle,lp-currency-symbol)
+		endif
+	endif
+	set lf-level3-node-handle = XML-ADD-CHILD-NODE(lf-level2-node-handle,"number",'number')
+// rjb - this is a bug in the original.  I think they meant decimal places not
+// integer digits.  I have changed this line and added decimal places as a
+// parameter.
+//  if XML-ADD-NODE-ATTRIBUTE(lf-level3-node-handle,"min-integer-digits",'number',"2")
+    if XML-ADD-NODE-ATTRIBUTE(lf-level3-node-handle,"min-integer-digits",'number',"1")
+    endif
+    if XML-ADD-NODE-ATTRIBUTE(lf-level3-node-handle,"decimal-places",'number',str(lp-decimal-places))
+    endif
+	if lp-thousands-seperator		
+		if XML-ADD-NODE-ATTRIBUTE(lf-level3-node-handle,"grouping",'number',"true")
+		endif
+	endif
+    if XML-FREE-NODE-HANDLE(lf-level2-node-handle) <= 0
+    endif
+    if XML-FREE-NODE-HANDLE(lf-styles-node-handle) <= 0
+    endif
+endprocedure //clibvods-create-currency-style -----------------------------
+
+procedure clibvods-create-numeric-style export no-override
+//////////////////////////////////////////////////////////////////////////////
+//<CLIB_DOC>
+//<DESC>
+// This procedure is used to create numeric styles that are used in the ods file.
+//
+//<P1> Numeric style name (e.g. "N300")
+//<P2> Number of decimal places. 
+//<P3> Minimum integer digits. (Prefix with ZEROs up to minimum integer digits)
+//<P4> Thousands seperator. TRUE/FALSE to indicate if the Thousands seperator is used.
+//
+//<R1> Flag to indicate if the numeric style has been created TRUE/FALSE.
+//
+///////////////////////////////////////////////////////////////////////////////	
+	parameter
+		lp-numeric-style-name		type string
+		lp-decimal-places			type string
+		lp-min-integer-digits		type string
+		lp-thousands-seperator		type boolean
+	returning
+		lr-numeric-style-created	type boolean
+	local
+		lf-styles-node-handle		type xml-handle 
+		lf-level2-node-handle		type xml-handle
+		lf-level3-node-handle		type xml-handle
+	//
+   	set lf-styles-node-handle = xml-get-child-by-name(ws-root-node-handle,"automatic-styles",'office')
+	if lf-styles-node-handle = ZERO
+		set lf-styles-node-handle = XML-ADD-CHILD-NODE(ws-root-node-handle,"automatic-styles",'office')
+	endif
+	//
+   	set lf-level2-node-handle = XML-ADD-CHILD-NODE(lf-styles-node-handle,"number-style",'number')
+   	set lr-numeric-style-created =	lf-level2-node-handle
+    if XML-ADD-NODE-ATTRIBUTE(lf-level2-node-handle,"name",'style',lp-numeric-style-name)
+    endif
+	set lf-level3-node-handle = XML-ADD-CHILD-NODE(lf-level2-node-handle,"number",'number')
+	if lp-decimal-places != SPACES			
+		if XML-ADD-NODE-ATTRIBUTE(lf-level3-node-handle,"decimal-places",'number',lp-decimal-places)
+		endif
+	endif
+	if lp-min-integer-digits != SPACES
+		if XML-ADD-NODE-ATTRIBUTE(lf-level3-node-handle,"min-integer-digits",'number',lp-min-integer-digits)
+		endif
+	endif
+	if lp-thousands-seperator		
+		if XML-ADD-NODE-ATTRIBUTE(lf-level3-node-handle,"grouping",'number',"true")
+		endif
+	endif
+    if XML-FREE-NODE-HANDLE(lf-level2-node-handle) <= 0
+    endif
+    if XML-FREE-NODE-HANDLE(lf-styles-node-handle) <= 0
+    endif
+endprocedure //clibvods-create-numeric-style ------------------------------
+
+procedure clibvods-create-column-style export no-override
+//////////////////////////////////////////////////////////////////////////////
+//<CLIB_DOC>
+//<DESC>
+// This procedure is used to create coloumn styles that are used in the ods file.
+//
+//<P1> Column style name (e.g. "co200")
+//<P2> Column width (e.g. "2cm")
+//
+//<R1> Flag to indicate if the column style has been created TRUE/FALSE.
+//
+///////////////////////////////////////////////////////////////////////////////		
+	parameter
+		lp-column-style-name		type string
+		lp-column-width				type string
+	returning
+		lr-column-style-created		type boolean
+	local
+		lf-styles-node-handle		type xml-handle 
+		lf-level2-node-handle		type xml-handle
+		lf-level3-node-handle		type xml-handle
+	//
+	set lf-styles-node-handle = xml-get-child-by-name(ws-root-node-handle,'automatic-styles','office')
+	if lf-styles-node-handle = ZERO
+		set lf-styles-node-handle = XML-ADD-CHILD-NODE(ws-root-node-handle,'automatic-styles','office')
+	endif
+	set lf-level2-node-handle = XML-ADD-CHILD-NODE(lf-styles-node-handle,"style",'style')
+   	set lr-column-style-created =	lf-level2-node-handle
+    if XML-ADD-NODE-ATTRIBUTE(lf-level2-node-handle,"name",'style',lp-column-style-name)
+    endif
+    if XML-ADD-NODE-ATTRIBUTE(lf-level2-node-handle,"family",'style',"table-column")
+    endif
+	set lf-level3-node-handle = XML-ADD-CHILD-NODE(lf-level2-node-handle,"table-column-properties",'style')
+    if XML-ADD-NODE-ATTRIBUTE(lf-level3-node-handle,"break-before",'fo',"auto")
+    endif
+    if XML-ADD-NODE-ATTRIBUTE(lf-level3-node-handle,"column-width",'style',lp-column-width)
+    endif
+    if XML-ADD-NODE-ATTRIBUTE(lf-level3-node-handle,"use-optimal-column-width",'style',"true")
+    endif
+    if XML-FREE-NODE-HANDLE(lf-styles-node-handle) <= 0
+    endif
+endprocedure //clibvods-create-column-style ----------------------------------------------------------
+
+procedure clibvods-create-cell-style export no-override
+//////////////////////////////////////////////////////////////////////////////
+//<CLIB_DOC>
+//<DESC>
+// This procedure is used to create cell styles that are used in the ods file.
+//
+//<P1> Cell style name (e.g. "ce200")
+//<P2> Border thickness (e.g. "thin")
+//<P3> Border colour	(e.g. "#BFBFBF")		
+//<P4> Background color	(e.g. "#FFFFCC")		
+//<P5> Text colour		(e.g. "#000000")		
+//<P6> Text align		(e.g. "start" "center" "end" "justify")
+//<P7> Font weight		(e.g. "bold")		
+//<P8> Font name		(e.g. "Arial")		
+//<P9> Font size		(e.g. "11pt")		
+//<P10> Data style		(e.g. "N0")		
+//<P11> Flag to indicate if Top border is set  
+//<P12> Flag to indicate if bottom border is set  
+//<P13> Flag to indicate if left border is set  
+//<P14> Flag to indicate if right border is set  
+//
+//<R1> Flag to indicate if the cell style has been created TRUE/FALSE.
+//
+///////////////////////////////////////////////////////////////////////////////		
+	parameter
+		lp-cell-style-name			type string   					// 1
+		lp-border-thickness			type string   					// 2
+		lp-border-colour			type string   					// 3
+		lp-background-color			type string   					// 4
+		lp-text-colour				type string   					// 5
+		lp-text-align				type string   					// 6
+		lp-font-weight				type string   					// 7
+		lp-font-name				type string   					// 8
+		lp-font-size				type string   					// 9
+		lp-data-style				type string   					// 10
+		lp-border-top				type boolean   					// 11
+		lp-border-bottom			type boolean   					// 12
+		lp-border-left				type boolean   					// 13
+		lp-border-right				type boolean   					// 14
+		lp-wrap-text				type boolean   					// 15
+		lp-vertical-align			type string   					// 16
+	returning
+		lr-cell-style-created		type boolean
+	local
+		lf-styles-node-handle		type xml-handle 
+		lf-level2-node-handle		type xml-handle
+		lf-level3-node-handle		type xml-handle
+		lf-style-exists				type boolean
+	//
+	set lp-vertical-align =  lowercase(lp-vertical-align)
+	if lp-vertical-align not in (spaces, "automatic", "top", "middle")
+		set ws-last-error = "Invalid Vertical Align Value"
+		exit 1
+	endif
+	//
+	set lf-styles-node-handle = xml-get-child-by-name(ws-root-node-handle,'automatic-styles','office')
+	if lf-styles-node-handle = ZERO
+		set lf-styles-node-handle = XML-ADD-CHILD-NODE(ws-root-node-handle,'automatic-styles','office')
+	endif
+	//
+	//check if the cell style already exists in the file - no need to create it again
+	set lf-level2-node-handle = xml-get-first-child-node(lf-styles-node-handle)
+	while lf-level2-node-handle != ZERO 
+		if lp-cell-style-name = xml-get-node-attribute(lf-level2-node-handle,'name')
+			set lf-style-exists = TRUE
+			break
+		endif
+		set lf-level2-node-handle = xml-next-element-sibling(lf-level2-node-handle)
+	endwhile
+	if lf-style-exists
+		if XML-FREE-NODE-HANDLE(lf-styles-node-handle) <= 0
+	    endif
+		exit
+	endif
+	//
+	set lf-level2-node-handle = XML-ADD-CHILD-NODE(lf-styles-node-handle,"style",'style')
+   	set lr-cell-style-created =	lf-level2-node-handle
+    if XML-ADD-NODE-ATTRIBUTE(lf-level2-node-handle,"name",'style',lp-cell-style-name)
+    endif
+    if XML-ADD-NODE-ATTRIBUTE(lf-level2-node-handle,"family",'style',"table-cell")
+    endif
+	if XML-ADD-NODE-ATTRIBUTE(lf-level2-node-handle,"parent-style-name",'style',"Default")
+	endif
+    if lp-data-style != SPACES
+	    if XML-ADD-NODE-ATTRIBUTE(lf-level2-node-handle,"data-style-name",'style',lp-data-style)
+	    endif
+    endif
+	set lf-level3-node-handle = XML-ADD-CHILD-NODE(lf-level2-node-handle,"table-cell-properties",'style')
+	if lp-vertical-align != spaces
+	    if XML-ADD-NODE-ATTRIBUTE(lf-level3-node-handle,"vertical-align",'style',lp-vertical-align)
+	    endif
+	endif
+	if lp-background-color != SPACES
+	    if XML-ADD-NODE-ATTRIBUTE(lf-level3-node-handle,"background-color",'fo',lp-background-color)
+	    endif
+	endif
+	if lp-border-thickness != SPACES and lp-border-colour != SPACES
+		if lp-border-top	
+		and lp-border-bottom	
+		and lp-border-left		
+		and lp-border-right		
+			//full order
+		    if XML-ADD-NODE-ATTRIBUTE(lf-level3-node-handle,"border",'fo',concat(lp-border-thickness," solid ",lp-border-colour))
+		    endif
+		else
+			if lp-border-top	
+			    if XML-ADD-NODE-ATTRIBUTE(lf-level3-node-handle,"border-top",'fo',concat(lp-border-thickness," solid ",lp-border-colour))
+			    endif
+			endif
+			if lp-border-bottom	
+			    if XML-ADD-NODE-ATTRIBUTE(lf-level3-node-handle,"border-bottom",'fo',concat(lp-border-thickness," solid ",lp-border-colour))
+			    endif
+			endif
+			if lp-border-left		
+			    if XML-ADD-NODE-ATTRIBUTE(lf-level3-node-handle,"border-left",'fo',concat(lp-border-thickness," solid ",lp-border-colour))
+			    endif
+			endif
+			if lp-border-right		
+			    if XML-ADD-NODE-ATTRIBUTE(lf-level3-node-handle,"border-right",'fo',concat(lp-border-thickness," solid ",lp-border-colour))
+			    endif
+			endif
+		endif
+	endif
+	if lp-wrap-text
+		if XML-ADD-NODE-ATTRIBUTE(lf-level3-node-handle,"wrap-option",'fo','wrap')
+		endif
+	endif
+    //
+	if lp-text-align != SPACE
+		if XML-FREE-NODE-HANDLE(lf-level3-node-handle) <= 0
+	    endif
+		set lf-level3-node-handle = XML-ADD-CHILD-NODE(lf-level2-node-handle,"paragraph-properties",'style')
+	    if XML-ADD-NODE-ATTRIBUTE(lf-level3-node-handle,"text-align",'fo',lp-text-align)
+	    endif
+	endif
+    //
+	if XML-FREE-NODE-HANDLE(lf-level3-node-handle) <= 0
+    endif
+	set lf-level3-node-handle = XML-ADD-CHILD-NODE(lf-level2-node-handle,"text-properties",'style')
+	if lp-text-colour != SPACE
+	    if XML-ADD-NODE-ATTRIBUTE(lf-level3-node-handle,"color",'fo',lp-text-colour)
+	    endif
+	endif
+	if lp-font-name != SPACES
+	    if XML-ADD-NODE-ATTRIBUTE(lf-level3-node-handle,"font-name",'style',lp-font-name)
+	    endif
+	endif
+	if lp-font-size != SPACES
+	    if XML-ADD-NODE-ATTRIBUTE(lf-level3-node-handle,"font-size",'fo',lp-font-size)
+	    endif
+	endif
+	if lp-font-weight != SPACES
+	    if XML-ADD-NODE-ATTRIBUTE(lf-level3-node-handle,"font-weight",'fo',lp-font-weight)
+	    endif
+	endif
+    if XML-FREE-NODE-HANDLE(lf-level3-node-handle) <= 0
+    endif
+    if XML-FREE-NODE-HANDLE(lf-level2-node-handle) <= 0
+    endif
+    if XML-FREE-NODE-HANDLE(lf-styles-node-handle) <= 0
+    endif
+endprocedure //clibvods-create-cell-style ----------------------------------------------------------
+
+procedure clibvods-add-sheet	export no-override
+//////////////////////////////////////////////////////////////////////////////
+//<CLIB_DOC>
+//<DESC>
+// This procedure is used to add a table (sheet) to the ods file.
+//
+//<P1> Sheet name (e.g. "sheet1") - First sheet will be used if the sheet name is blank.
+//<P2> Flag to indicate if the sheet needs to be cleard if exists 
+//
+//<R1> Flag to indicate if the table has been added TRUE/FALSE.
+//
+///////////////////////////////////////////////////////////////////////////////		
+	parameter
+		lp-sheet-name				type string
+		lp-clear-sheet				type boolean
+	returning
+		lr-sheet-created			type boolean
+	//
+	set ws-current-column = ZERO
+	set ws-current-row = ZERO
+	set ws-sheets-list-only = FALSE
+	set ws-updating-sheet = FALSE
+	//
+	if XML-FREE-NODE-HANDLE(ws-current-cell-node-handle) <= 0
+		set ws-current-cell-node-handle = ZERO
+	endif
+	if XML-FREE-NODE-HANDLE(ws-sheet-node-handle) <= 0
+		set ws-sheet-node-handle = ZERO
+	endif
+	if XML-FREE-NODE-HANDLE(ws-sheet-row-node-handle) <= 0
+		set ws-sheet-row-node-handle = ZERO
+	endif
+	//
+	//check if the tabel name exist - could be updating an existing sheet
+	set ws-sheet-node-handle = xml-get-first-child-node(ws-doc-type-node-handle)
+	//
+	while ws-sheet-node-handle != ZERO 
+		if lp-sheet-name != SPACES
+			if uppercase(strconcat(lp-sheet-name)) = uppercase(strconcat(xml-get-node-attribute(ws-sheet-node-handle,'name')))
+				set ws-updating-sheet = TRUE //found existing sheet
+				break
+			endif
+		else
+			//get the first sheet
+			if uppercase(xml-node-name(ws-sheet-node-handle)) = 'TABLE'
+				set ws-updating-sheet = TRUE //found existing sheet
+				break
+			endif
+		endif
+		set ws-sheet-node-handle = xml-next-element-sibling(ws-sheet-node-handle) //get the next table
+	endwhile
+	//
+	if ws-updating-sheet and lp-clear-sheet
+		set ws-updating-sheet = FALSE
+		if xml-delete-node(ws-sheet-node-handle) > ZERO //delete if found and existing sheet when the flag is clear sheet 
+		endif
+		set ws-sheet-node-handle = ZERO
+	endif
+	//
+	if ws-sheet-node-handle = ZERO
+		set ws-sheet-node-handle = XML-ADD-CHILD-NODE(ws-doc-type-node-handle,"table",'table')
+	   	set lr-sheet-created = ws-sheet-node-handle
+		//
+		if XML-ADD-NODE-ATTRIBUTE(ws-sheet-node-handle,"name","table",lp-sheet-name) <= 0
+	    endif
+		if XML-ADD-NODE-ATTRIBUTE(ws-sheet-node-handle,"style-name","table",I8ODS_DEFAULT_TABLE_STYLE) <= 0
+	    endif
+		//
+	endif
+	set ws-columns-in-current-sheet = 0
+endprocedure //clibvods-add-sheet -----------------------------------------
+
+procedure clibvods-add-sheet-column export
+parameters
+	lp-style-name						type string
+	lp-col-count						type number
+returning
+	lr-ok								type boolean
+	set lr-ok = TRUE
+	if lp-col-count > I8ODS_MAX_NO_OF_COLUMNS
+		set lr-ok = FALSE
+		exit
+	endif
+	if lp-style-name = spaces
+		set lp-style-name = I8ODS_DEFAULT_COLUMN_STYLE
+	endif
+	do add-sheet-column
+		parameter
+			ws-sheet-node-handle
+			lp-style-name
+			str(lp-col-count)
+			I8ODS_DEFAULT_CELL_STYLE
+	set ws-columns-in-current-sheet += lp-col-count
+end-procedure
+
+procedure clibvods-add-sheet-row	export no-override
+//////////////////////////////////////////////////////////////////////////////
+//<CLIB_DOC>
+//<DESC>
+// This procedure is used to add a row to the current table of the ods file.
+//
+//<R1> Flag to indicate if table row has been added TRUE/FALSE.
+///////////////////////////////////////////////////////////////////////////////	
+	returning
+		lr-sheet-row-created		type boolean
+	do check-column-count
+	do ods-add-sheet-row-detail
+		parameter
+			ZERO
+		returning
+			lr-sheet-row-created		
+endprocedure //clibvods-add-sheet-row -------------------------------------
+
+procedure clibvods-add-sheet-row-repeat	export no-override
+//////////////////////////////////////////////////////////////////////////////
+//<CLIB_DOC>
+//<DESC>
+// This procedure is used to add a row to the current table of the ods file.
+//<P1> Number of rows to be repeated - This is useful when creating simmilar rows multiple times (e.g. blank rows)
+//
+//<R1> Flag to indicate if table row has been added TRUE/FALSE.
+///////////////////////////////////////////////////////////////////////////////	
+	parameter
+		lp-repeat-rows				pic 9999
+	returning
+		lr-sheet-row-created		type boolean
+	//
+	do ods-add-sheet-row-detail
+		parameter
+			lp-repeat-rows				
+		returning
+			lr-sheet-row-created		
+endprocedure //clibvods-add-sheet-row-repeat	export ----------------------------------------------------------
+
+procedure ods-add-sheet-row-detail	
+	parameter
+		lp-repeat-rows				pic 9999
+	returning
+		lr-sheet-row-created		type boolean
+	local
+		lf-sheet-row-node-handle 	type xml-handle  
+		lf-create-new-row			type boolean
+	//
+	if ws-sheet-row-node-handle != ZERO
+		//save the current row handle
+		set lf-sheet-row-node-handle  = xml-copy-node-handle(ws-sheet-row-node-handle)
+		//check if there a row next to it, this means we are updating a row from existing sheet
+		//if another row exists after the current row - set the node handle of the next row
+		set ws-sheet-row-node-handle = xml-next-element-sibling(ws-sheet-row-node-handle)
+		//
+		if ws-sheet-row-node-handle = ZERO
+			//no row after this 
+			//new row has been added, finish off the current row and release the node handle
+			do add-sheet-cell-repeat
+				parameter
+					lf-sheet-row-node-handle
+			//
+		    if XML-FREE-NODE-HANDLE(lf-sheet-row-node-handle) <= 0
+		    	set lf-sheet-row-node-handle = ZERO
+			endif
+			set lf-create-new-row = TRUE
+		endif
+	else
+		//set the first table-row handler of the current sheet to start with
+		set ws-sheet-row-node-handle = xml-get-child-by-name(ws-sheet-node-handle,'table-row','table')
+		if ws-sheet-row-node-handle = ZERO
+			set lf-create-new-row = TRUE
+		endif
+	endif
+	//
+	if lf-create-new-row = TRUE
+		set ws-sheet-row-node-handle = XML-ADD-CHILD-NODE(ws-sheet-node-handle,"table-row",'table')
+		set lr-sheet-row-created = TRUE
+		//
+		if XML-ADD-NODE-ATTRIBUTE(ws-sheet-row-node-handle,"style-name","table",I8ODS_DEFAULT_ROW_STYLE) <= 0
+	    endif
+	    if lp-repeat-rows > 1
+			if XML-ADD-NODE-ATTRIBUTE(ws-sheet-row-node-handle,"number-rows-repeated","table",str(lp-repeat-rows)) <= 0
+		    endif
+	    endif
+	endif
+    if lp-repeat-rows > 1
+		set ws-current-row += lp-repeat-rows						
+    else
+		set ws-current-row += 1						
+    endif
+	set ws-current-column = ZERO
+    if XML-FREE-NODE-HANDLE(ws-current-cell-node-handle) <= 0
+	    set ws-current-cell-node-handle = ZERO
+    endif
+endprocedure //ods-add-sheet-row-detail	export ----------------------------------------------------------
+
+procedure clibvods-fill-a-cell-alpha export no-override
+//////////////////////////////////////////////////////////////////////////////
+//<CLIB_DOC>
+//<DESC>
+// This procedure is used to add (fill) an alpha type cell to the ods file.
+// The next cell of the current row will be filled.
+//
+//<P1> Cell style name (e.g. "ce3")
+//<P2> Value to be set to the cell
+//
+//<R1> Flag to indicate if the cell has been added TRUE/FALSE.
+//
+///////////////////////////////////////////////////////////////////////////////		
+	parameter
+		lp-cell-style				type string
+		lp-value					type varchar pic x(10000)
+	returning
+		lr-sheet-cell-created		type boolean
+	//
+	do check-column-count
+	do ods-fill-a-cell-alpha-detail
+		parameter
+			lp-cell-style				
+			lp-value					
+			ZERO
+			zero
+		returning
+			lr-sheet-cell-created						
+	if not lr-sheet-cell-created
+		set ws-last-error = "Failed to Add"
+		exit 1
+	endif
+endprocedure //clibvods-fill-a-cell-alpha ----------------------------------------------------------
+
+procedure clibvods-fill-a-cell-alpha-span export no-override
+//////////////////////////////////////////////////////////////////////////////
+//<CLIB_DOC>
+//<DESC>
+// This procedure is used to add (fill) an alpha type cell to the ods file.
+// The next cell of the current row will be filled.
+//
+//<P1> Cell style name (e.g. "ce3")
+//<P2> Value to be set to the cell
+//<p3> The number of columns to span
+//
+//<R1> Flag to indicate if the cell has been added TRUE/FALSE.
+//
+///////////////////////////////////////////////////////////////////////////////		
+	parameter
+		lp-cell-style				type string
+		lp-value					type varchar pic x(10000)
+		lp-span-count				type number
+	returning
+		lr-sheet-cell-created		type boolean
+	//
+	do check-column-count
+	do ods-fill-a-cell-alpha-detail
+		parameter
+			lp-cell-style				
+			lp-value					
+			ZERO
+			lp-span-count
+		returning
+			lr-sheet-cell-created						
+	if not lr-sheet-cell-created
+		set ws-last-error = "Failed to Add"
+		exit 1
+	endif
+endprocedure //clibvods-fill-a-cell-alpha ----------------------------------------------------------
+
+procedure clibvods-fill-a-cell-alpha-repeat export no-override
+//////////////////////////////////////////////////////////////////////////////
+//<CLIB_DOC>
+//<DESC>
+// This procedure is used to add (fill) an alpha type cell to the ods file.
+// The next cell of the current row will be filled.
+//
+//<P1> Cell style name (e.g. "ce3")
+//<P2> Value to be set to the cell
+//<P3> Number of cells to be repeated - This is useful when creating same cell multiple times (e.g. blank cells)
+//
+//<R1> Flag to indicate if the cell has been added TRUE/FALSE.
+//
+///////////////////////////////////////////////////////////////////////////////		
+	parameter
+		lp-cell-style				type string
+		lp-value					type varchar pic x(10000)
+		lp-repeat-cells				pic 9999
+	returning
+		lr-sheet-cell-created		type boolean
+	//
+	do check-column-count
+	do ods-fill-a-cell-alpha-detail
+		parameter
+			lp-cell-style				
+			lp-value					
+			lp-repeat-cells				
+			0
+		returning
+			lr-sheet-cell-created		
+endprocedure //clibvods-fill-a-cell-alpha-repeat ----------------------------------------------------------
+
+procedure ods-fill-a-cell-alpha-detail 
+	parameter
+		lp-cell-style				type string
+		lp-value					type varchar pic x(10000)
+		lp-repeat-cells				pic 9999
+		lp-span-count				type number
+	returning
+		lr-sheet-cell-created		type boolean
+	local
+		lf-text-node-handle			type xml-handle 
+	//
+	do set-current-cell-node-handle
+		returning
+			lr-sheet-cell-created				
+	//
+	if lr-sheet-cell-created
+		if lp-repeat-cells > 1 
+			if XML-ADD-NODE-ATTRIBUTE(ws-current-cell-node-handle,"number-columns-repeated","table",str(lp-repeat-cells)) <= 0
+		    endif
+	    endif
+		if lp-span-count > 1
+			if XML-ADD-NODE-ATTRIBUTE(ws-current-cell-node-handle,"number-columns-spanned","table",str(lp-span-count)) <= 0
+		    endif
+			if XML-ADD-NODE-ATTRIBUTE(ws-current-cell-node-handle,"number-rows-spanned","table",str(1)) <= 0
+		    endif
+		endif
+	    if lp-value != SPACES
+			if XML-ADD-NODE-ATTRIBUTE(ws-current-cell-node-handle,"value-type","office",I8ODS_CELL_TYPE_ALPHA) <= 0
+		    endif
+	    endif
+	    if XML-ADD-NODE-ATTRIBUTE(ws-current-cell-node-handle,"style-name","table",lp-cell-style) <= 0
+	    endif
+	    if lp-value != SPACES
+			if XML-ADD-CHILD-NODE-TEXT(ws-current-cell-node-handle,"p","text",lp-value)
+			endif
+	    endif
+	else
+		set lf-text-node-handle = xml-get-first-child-node(ws-current-cell-node-handle) 
+		if lf-text-node-handle != ZERO
+			if xml-modify-node-text(lf-text-node-handle,lp-value)
+			endif
+		else
+		    if lp-value != SPACES
+				if XML-ADD-NODE-ATTRIBUTE(ws-current-cell-node-handle,"value-type","office",I8ODS_CELL_TYPE_ALPHA) <= 0
+			    endif
+				if XML-ADD-CHILD-NODE-TEXT(ws-current-cell-node-handle,"p","text",lp-value)
+				endif
+				//when the row is blank there will be repeated columns, if we are updating it with values we need to remove the repeat.
+				if xml-delete-node-attribute(ws-current-cell-node-handle,"number-columns-repeated","table") <= 0
+			    endif
+			endif
+	    endif
+	endif
+	if lp-repeat-cells > ZERO
+		set ws-current-column += lp-repeat-cells						
+	else
+		set ws-current-column += 1						
+	endif
+endprocedure //ods-fill-a-cell-alpha-detail ----------------------------------------------------------
+
+procedure clibvods-fill-a-cell-numeric export no-override
+//////////////////////////////////////////////////////////////////////////////
+//<CLIB_DOC>
+//<DESC>
+// This procedure is used to add (fill) a numeric type cell to the ods file.
+// The next cell of the current row will be filled.
+//
+//<P1> Cell style name (e.g. "ce4")
+//<P2> Value to be set to the cell
+//
+//<R1> Flag to indicate if the cell has been added TRUE/FALSE.
+//
+///////////////////////////////////////////////////////////////////////////////	
+	parameter
+		lp-cell-style				type string
+		lp-value					type string
+	returning
+		lr-sheet-cell-created		type boolean
+	local
+		lf-text-node-handle			type xml-handle 
+	//
+	do check-column-count
+	do set-current-cell-node-handle
+		returning
+			lr-sheet-cell-created				
+	//
+	if lr-sheet-cell-created
+	or xml-get-first-child-node(ws-current-cell-node-handle) = ZERO //no value set
+		if XML-ADD-NODE-ATTRIBUTE(ws-current-cell-node-handle,"value-type","office",I8ODS_CELL_TYPE_NUMERIC) <= 0
+	    endif
+	    if XML-ADD-NODE-ATTRIBUTE(ws-current-cell-node-handle,"value","office",lp-value) <= 0
+		endif
+		if XML-ADD-NODE-ATTRIBUTE(ws-current-cell-node-handle,"style-name","table",lp-cell-style) <= 0
+	    endif
+		if XML-ADD-CHILD-NODE-TEXT(ws-current-cell-node-handle,"p","text",lp-value)
+		endif
+	else
+		if xml-modify-node-attribute(ws-current-cell-node-handle,"value","office",lp-value)
+		endif
+		set lf-text-node-handle = xml-get-first-child-node(ws-current-cell-node-handle) 
+		if xml-modify-node-text(lf-text-node-handle,lp-value)
+		endif
+	endif
+	//
+	set ws-current-column += 1						
+endprocedure //clibvods-fill-a-cell-numeric ----------------------------------------------------------
+
+procedure clibvods-fill-a-cell-date export no-override
+//////////////////////////////////////////////////////////////////////////////
+//<CLIB_DOC>
+//<DESC>
+// This procedure is used to add (fill) a date type cell to the ods file.
+// The next cell of the current row will be filled.
+//
+//<P1> Cell style name (e.g. "ce3")
+//<P2> Value to be set to the cell
+//
+//<R1> Flag to indicate if the cell has been added TRUE/FALSE.
+//
+///////////////////////////////////////////////////////////////////////////////	
+	parameter
+		lp-cell-style				type string
+		lp-value					type string
+	returning
+		lr-sheet-cell-created		type boolean
+	local
+		lf-text-node-handle			type xml-handle 
+		lf-date						type date
+	//
+	do check-column-count
+	do set-current-cell-node-handle
+		returning
+			lr-sheet-cell-created				
+	//
+	if lp-value != SPACES
+		set lf-date = date2julian(lp-value)
+		set lp-value = DATE_TO_ISO8601_DATE_FORMAT(lf-date)
+	endif
+	//
+	if lr-sheet-cell-created
+		if XML-ADD-NODE-ATTRIBUTE(ws-current-cell-node-handle,"value-type","office",I8ODS_CELL_TYPE_DATE) <= 0
+		endif
+		if XML-ADD-NODE-ATTRIBUTE(ws-current-cell-node-handle,"date-value","office",lp-value) <= 0
+		endif
+		if XML-ADD-NODE-ATTRIBUTE(ws-current-cell-node-handle,"style-name","table",lp-cell-style) <= 0
+		endif
+		if XML-ADD-CHILD-NODE-TEXT(ws-current-cell-node-handle,"p","text",lp-value)
+		endif
+	else
+		if xml-modify-node-attribute(ws-current-cell-node-handle,"value","office",lp-value)
+		endif
+		set lf-text-node-handle = xml-get-first-child-node(ws-current-cell-node-handle) 
+		if xml-modify-node-text(lf-text-node-handle,lp-value)
+		endif
+	endif
+	//
+	set ws-current-column += 1						
+endprocedure //clibvods-fill-a-cell-date ----------------------------------------------------------
+
+procedure clibvods-fill-a-cell-currency export no-override
+//////////////////////////////////////////////////////////////////////////////
+//<CLIB_DOC>
+//<DESC>
+// This procedure is used to add (fill) a currency type cell to the ods file.
+// The next cell of the current row will be filled.
+//
+//<P1> Cell style name (e.g. "ce6")
+//<P2> Value to be set to the cell
+//
+//<R1> Flag to indicate if the cell has been added TRUE/FALSE.
+//
+///////////////////////////////////////////////////////////////////////////////	
+	parameter
+		lp-cell-style				type string
+		lp-value					type string
+	returning
+		lr-sheet-cell-created		type boolean
+	local
+		lf-text-node-handle			type xml-handle 
+	//
+	do check-column-count
+	do set-current-cell-node-handle
+		returning
+			lr-sheet-cell-created				
+	//
+	if lr-sheet-cell-created
+		if XML-ADD-NODE-ATTRIBUTE(ws-current-cell-node-handle,"style-name","table",lp-cell-style) <= 0
+		endif
+		if XML-ADD-NODE-ATTRIBUTE(ws-current-cell-node-handle,"value-type","office",I8ODS_CELL_TYPE_CURRENCY) <= 0
+		endif
+		if XML-ADD-NODE-ATTRIBUTE(ws-current-cell-node-handle,"value","office",lp-value) <= 0
+		endif
+		if XML-ADD-CHILD-NODE-TEXT(ws-current-cell-node-handle,"p","text",lp-value)
+		endif
+	else
+		if xml-modify-node-attribute(ws-current-cell-node-handle,"value","office",lp-value)
+		endif
+		set lf-text-node-handle = xml-get-first-child-node(ws-current-cell-node-handle) 
+		if xml-modify-node-text(lf-text-node-handle,lp-value)
+		endif
+	endif
+	//
+	set ws-current-column += 1						
+endprocedure //clibvods-fill-a-cell-currency ----------------------------------------------------------
+
+procedure set-current-cell-node-handle
+	returning
+		lr-sheet-cell-created				type boolean
+	//	
+	if ws-current-cell-node-handle = ZERO 
+		//When reading an existing sheet, see if the current cell is set.
+		//Otherwise set the value of the first cell to start with.
+		//Use the cell node hadle to update the value.
+		set ws-current-cell-node-handle = xml-get-first-child-node(ws-sheet-row-node-handle)
+	else 
+		//See if there a cell next to current cell.
+		set ws-current-cell-node-handle = xml-next-element-sibling(ws-current-cell-node-handle)
+	endif
+	if ws-current-cell-node-handle = ZERO
+		//No current cell, create a new cell.
+		set ws-current-cell-node-handle = XML-ADD-CHILD-NODE(ws-sheet-row-node-handle,"table-cell",'table')
+		set lr-sheet-cell-created = TRUE
+	endif
+endprocedure //set-current-cell-node-handle ----------------------------------
+
+procedure clibvods-fill-a-cell-formula export no-override
+//////////////////////////////////////////////////////////////////////////////
+//<CLIB_DOC>
+//<DESC>
+// This procedure is used to add (fill) a formula type cell to the ods file.
+// The next cell of the current row will be filled.
+//
+//<P1> Cell style name (e.g. "ce6")
+//<P2> formula to be set to the cell
+//
+//<R1> Flag to indicate if the cell has been added TRUE/FALSE.
+//
+///////////////////////////////////////////////////////////////////////////////	
+	parameter
+		lp-cell-style				type string
+		lp-formula					type string
+	returning
+		lr-sheet-cell-created		type boolean
+	//
+	do check-column-count
+	if ws-current-cell-node-handle = ZERO 
+		//When reading an existing sheet, see if the current cell is set.
+		//Otherwise set the value of the first cell to start with.
+		//Use the cell node hadle to update the value.
+		set ws-current-cell-node-handle = xml-get-first-child-node(ws-sheet-row-node-handle)
+	else 
+		//See if there a cell next to current cell.
+		set ws-current-cell-node-handle = xml-next-element-sibling(ws-current-cell-node-handle)
+	endif
+	if ws-current-cell-node-handle = ZERO
+		//No current cell, create a new cell.
+		set ws-current-cell-node-handle = XML-ADD-CHILD-NODE(ws-sheet-row-node-handle,"table-cell",'table')
+		set lr-sheet-cell-created = TRUE
+	endif
+	//
+	if lr-sheet-cell-created
+		//
+		// TODO: This needs to be changed so that the user can specify what
+		// data type the formula is going to be. (e.g. currency, 2dp etc).
+		if XML-ADD-NODE-ATTRIBUTE(ws-current-cell-node-handle,"value-type","office",I8ODS_CELL_TYPE_NUMERIC) <= 0
+	    endif
+		if XML-ADD-NODE-ATTRIBUTE(ws-current-cell-node-handle,"formula","table",concat("of:=",lp-formula)) <= 0
+		endif
+		if XML-ADD-NODE-ATTRIBUTE(ws-current-cell-node-handle,"style-name","table",lp-cell-style) <= 0
+	    endif
+	else
+		if xml-modify-node-attribute(ws-current-cell-node-handle,"formula","table",concat("of:=",lp-formula))
+		endif
+	endif
+    //
+	set ws-current-column += 1	
+endprocedure //clibvods-fill-a-cell-formula ----------------------------------------------------------
+
+procedure clibvods-fill-a-cell-formula-percent export no-override
+//////////////////////////////////////////////////////////////////////////////
+//<CLIB_DOC>
+//<DESC>
+// This procedure is used to add (fill) a formula type cell to the ods file.
+// The next cell of the current row will be filled.
+//
+//<P1> Cell style name (e.g. "ce6")
+//<P2> formula to be set to the cell
+//
+//<R1> Flag to indicate if the cell has been added TRUE/FALSE.
+//
+///////////////////////////////////////////////////////////////////////////////	
+	parameter
+		lp-cell-style				type string
+		lp-formula					type string
+	returning
+		lr-sheet-cell-created		type boolean
+	//
+	do check-column-count
+	if ws-current-cell-node-handle = ZERO 
+		//When reading an existing sheet, see if the current cell is set.
+		//Otherwise set the value of the first cell to start with.
+		//Use the cell node hadle to update the value.
+		set ws-current-cell-node-handle = xml-get-first-child-node(ws-sheet-row-node-handle)
+	else 
+		//See if there a cell next to current cell.
+		set ws-current-cell-node-handle = xml-next-element-sibling(ws-current-cell-node-handle)
+	endif
+	if ws-current-cell-node-handle = ZERO
+		//No current cell, create a new cell.
+		set ws-current-cell-node-handle = XML-ADD-CHILD-NODE(ws-sheet-row-node-handle,"table-cell",'table')
+		set lr-sheet-cell-created = TRUE
+	endif
+	//
+	if lr-sheet-cell-created
+		//
+		// TODO: This needs to be changed so that the user can specify what
+		// data type the formula is going to be. (e.g. currency, 2dp etc).
+		if XML-ADD-NODE-ATTRIBUTE(ws-current-cell-node-handle,"value-type","office","percentage") <= 0
+		endif
+		if XML-ADD-NODE-ATTRIBUTE(ws-current-cell-node-handle,"formula","table",concat("of:=",lp-formula)) <= 0
+		endif
+		if XML-ADD-NODE-ATTRIBUTE(ws-current-cell-node-handle,"style-name","table",lp-cell-style) <= 0
+	    endif
+	else
+		if xml-modify-node-attribute(ws-current-cell-node-handle,"formula","table",concat("of:=",lp-formula))
+		endif
+	endif
+    //
+	set ws-current-column += 1	
+endprocedure //clibvods-fill-a-cell-formula ----------------------------------------------------------
+
+procedure clb100-get-current-row export no-override
+//////////////////////////////////////////////////////////////////////////////
+//<CLIB_DOC>
+//<DESC>
+// This procedure is used to return the current row number  
+//
+//<R1> Current row number will be returned 
+//
+///////////////////////////////////////////////////////////////////////////////	
+	returning
+		lr-current-row			type numeric
+	//
+	set lr-current-row = ws-current-row			
+endprocedure //clb100-ods-get-current-row ----------------------------------------------------------
+
+procedure clb100-ods-get-current-column export no-override
+//////////////////////////////////////////////////////////////////////////////
+//<CLIB_DOC>
+//<DESC>
+// This procedure is used to return the current column number  
+//
+//<R1> Current column number will be returned 
+//
+///////////////////////////////////////////////////////////////////////////////	
+	returning
+		lr-current-col			type numeric
+	//
+	set lr-current-col = ws-current-column			
+endprocedure //clb100-ods-get-current-column ----------------------------------------------------------
+
+procedure clb100-ods-get-last-data-row-column export no-override
+//////////////////////////////////////////////////////////////////////////////
+//<CLIB_DOC>
+//<DESC>
+// This procedure is used to return the Last data row and data column in the spreadsheet  
+//
+//<R1> Last data row number will be returned 
+//<R2> Last data column number will be returned 
+//
+///////////////////////////////////////////////////////////////////////////////	
+	returning
+		lr-last-data-row			type numeric
+		lr-last-data-col			type numeric
+	//
+	set lr-last-data-row = ws-last-data-row 
+	set lr-last-data-col = ws-last-data-col 
+endprocedure //clb100-ods-get-last-data-row-column ----------------------------------------------------------
+
+procedure clibvods-finish-export export no-override
+//////////////////////////////////////////////////////////////////////////////
+//<CLIB_DOC>
+//<DESC>
+// 	This procedure is used to finish creating the xml components of the ods file.
+//  It then creates an zip archive ods file using the xml components.
+//  Note that an ods file is a collection of XML files.
+//  The XML files will be created in a temp directory \tmp\<lgogin-id()>\ods<p-id()>
+//  The temp directory will be removed once the ods file is created. 
+//  clibvods-start-export procedure starts creating the internal XML structure for contnt.xml file.
+//  At the end of adding data rows, this procedure has to be called to complete the file creation.
+//
+//<P1> ODS filename. Full path and filename to the new ods file to be created on the Pronto server.
+//
+///////////////////////////////////////////////////////////////////////////////	
+	parameter
+		lp-server-path-filename				type varchar pic x(500)
+	local
+		lf-tmp-folder-by-login-id			type varchar
+		lf-tmp-unique-sub-folder			type varchar
+		lf-tmp-ods-folder					type varchar
+		lf-current-data-set					type varchar
+		lf-command							type varchar
+	//
+	set lf-current-data-set = dir()
+	//
+	do create-ods-temp-folder 
+		returning
+			lf-tmp-folder-by-login-id			
+			lf-tmp-unique-sub-folder
+	//
+	set lf-tmp-ods-folder = concat(lf-tmp-folder-by-login-id,lf-tmp-unique-sub-folder,'/')
+	//
+	do create-ods-xml-files
+		parameter
+			lf-tmp-ods-folder
+	//
+	if cd(lf-tmp-ods-folder)
+		//create the ods file by running the zip command
+		command concat(get-env('PRONTO'),'/bin/zip')
+			parameters "-r" lp-server-path-filename "." "-i" "*"
+		if cd(lf-tmp-folder-by-login-id)
+			//remove the temp directory 
+			if operating-system() != 'WINDOWS'
+				command "rm" parameters "-rf" lf-tmp-unique-sub-folder
+			else
+				BMSDEF_DETERMINE_WINDOWS_COMMAND(lf-command)
+				command lf-command parameters
+				    concat("/C rmdir /s /q ",lf-tmp-unique-sub-folder)
+			endif
+		endif
+	else
+		message concat("Could not create the ODS file "
+			,lp-server-path-filename) 
+	endif
+	// change directory back to the current directory
+	if cd(lf-current-data-set)
+	endif
+endprocedure //clibvods-finish-export ----------------------------------------------------------
+
+
+procedure add-document-type
+	parameter
+		lp-current-node-handle			type xml-handle
+	returning
+		lr-doc-type-node-handle			type xml-handle 
+	//
+	set lr-doc-type-node-handle = XML-ADD-CHILD-NODE(lp-current-node-handle,"spreadsheet",'office')
+endprocedure //add-document-type ---------------------------------------------
+
+procedure add-calculation-settings
+	parameter
+		lp-node-handle				type xml-handle 
+	local
+		lf-next-node-handle			type xml-handle 
+	//
+	set lf-next-node-handle = XML-ADD-CHILD-NODE(lp-node-handle,"calculation-settings",'table')
+	//
+	if XML-ADD-NODE-ATTRIBUTE(lf-next-node-handle,"case-sensitive","table","false") <= 0
+    endif
+	if XML-ADD-NODE-ATTRIBUTE(lf-next-node-handle,"search-criteria-must-apply-to-whole-cell","table","true") <= 0
+    endif
+	if XML-ADD-NODE-ATTRIBUTE(lf-next-node-handle,"use-wildcards","table","true") <= 0
+    endif
+	if XML-ADD-NODE-ATTRIBUTE(lf-next-node-handle,"use-regular-expressions","table","false") <= 0
+    endif
+	if XML-ADD-NODE-ATTRIBUTE(lf-next-node-handle,"automatic-find-labels","table","false") <= 0
+    endif
+    //
+    if XML-FREE-NODE-HANDLE(lf-next-node-handle) <= 0
+    endif
+endprocedure //add-calculation-settings --------------------------------------
+
+procedure add-sheet-column
+	parameter
+		lp-node-handle				type xml-handle 
+		lp-style-name				type string
+		lp-no-col-repeated			type string
+		lp-default-cell-type		type string
+	local
+		lf-next-node-handle			type xml-handle 
+	//
+	set lf-next-node-handle = XML-ADD-CHILD-NODE(lp-node-handle,"table-column",'table')
+	//
+	if XML-ADD-NODE-ATTRIBUTE(lf-next-node-handle,"style-name","table",lp-style-name) <= 0
+    endif
+	if XML-ADD-NODE-ATTRIBUTE(lf-next-node-handle,"number-columns-repeated","table",lp-no-col-repeated) <= 0
+    endif
+	if XML-ADD-NODE-ATTRIBUTE(lf-next-node-handle,"default-cell-style-name","table",lp-default-cell-type) <= 0
+    endif
+    //
+    if XML-FREE-NODE-HANDLE(lf-next-node-handle) <= 0
+    endif
+endprocedure //add-sheet-column ----------------------------------------------
+
+procedure add-sheet-cell-repeat
+	parameter
+		lp-node-handle				type xml-handle 
+	local
+		lf-next-node-handle			type xml-handle 
+	//
+	set lf-next-node-handle = XML-ADD-CHILD-NODE(lp-node-handle,"table-cell",'table')
+	//
+	if XML-ADD-NODE-ATTRIBUTE(lf-next-node-handle,"number-columns-repeated","table",str(I8ODS_MAX_NO_OF_COLUMNS - ws-current-column)) <= 0
+    endif
+    if XML-FREE-NODE-HANDLE(lf-next-node-handle) <= 0
+    endif
+	set ws-current-column = ZERO
+endprocedure //add-sheet-cell-repeat -----------------------------------------
+
+procedure add-sheet-row-repeat
+	parameter
+		lp-node-handle				type xml-handle 
+		lp-style-name				type string
+	local
+		lf-next-node-handle			type xml-handle 
+		lf-next-node-handle-2		type xml-handle 
+	//
+	set lf-next-node-handle = XML-ADD-CHILD-NODE(lp-node-handle,"table-row",'table')
+	//
+	if XML-ADD-NODE-ATTRIBUTE(lf-next-node-handle,"number-rows-repeated","table",str(I8ODS_MAX_NO_OF_ROWS - ws-current-row)) <= 0
+    endif
+	if XML-ADD-NODE-ATTRIBUTE(lf-next-node-handle,"style-name","table",lp-style-name) <= 0
+    endif
+	set lf-next-node-handle-2 = XML-ADD-CHILD-NODE(lf-next-node-handle,"table-cell",'table')
+	if XML-ADD-NODE-ATTRIBUTE(lf-next-node-handle-2,"number-columns-repeated","table",str(I8ODS_MAX_NO_OF_COLUMNS)) <= 0
+    endif
+    //
+    if XML-FREE-NODE-HANDLE(lf-next-node-handle) <= 0
+    endif
+	set ws-current-row = ZERO
+endprocedure //add-sheet-row-repeat ------------------------------------------
+
+procedure write-xml-document-root 
+	parameter
+		lp-root-node-name						type varchar
+	returning
+		lr-document-handle						type xml-handle
+		lr-root-node-handle						type xml-handle
+	//
+	set lr-document-handle = XML-NEW-DOCUMENT(SPACES,lp-root-node-name)
+	if lr-document-handle <= 0
+		exit
+	endif
+	set lr-root-node-handle = XML-GET-ROOT-NODE(lr-document-handle)
+	if lr-root-node-handle <= 0
+		exit
+	endif
+	if XML-ADD-NS(lr-root-node-handle,"table","urn:oasis:names:tc:opendocument:xmlns:table:1.0") <= 0
+    endif
+	if XML-ADD-NS(lr-root-node-handle,"office","urn:oasis:names:tc:opendocument:xmlns:office:1.0") <= 0
+    endif
+	if XML-ADD-NS(lr-root-node-handle,"text","urn:oasis:names:tc:opendocument:xmlns:text:1.0") <= 0
+    endif
+	if XML-ADD-NS(lr-root-node-handle,"style","urn:oasis:names:tc:opendocument:xmlns:style:1.0") <= 0
+    endif
+	if XML-ADD-NS(lr-root-node-handle,"draw","urn:oasis:names:tc:opendocument:xmlns:drawing:1.0") <= 0
+    endif
+	if XML-ADD-NS(lr-root-node-handle,"fo","urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0") <= 0
+    endif
+	if XML-ADD-NS(lr-root-node-handle,"xlink","http://www.w3.org/1999/xlink") <= 0
+    endif
+	if XML-ADD-NS(lr-root-node-handle,"dc","http://purl.org/dc/elements/1.1/") <= 0
+    endif
+	if XML-ADD-NS(lr-root-node-handle,"number","urn:oasis:names:tc:opendocument:xmlns:datastyle:1.0") <= 0
+    endif
+	if XML-ADD-NS(lr-root-node-handle,"svg","urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0") <= 0
+    endif
+	if XML-ADD-NS(lr-root-node-handle,"of","urn:oasis:names:tc:opendocument:xmlns:of:1.2") <= 0
+    endif
+    if XML-ADD-NODE-ATTRIBUTE(lr-root-node-handle,"version",'office',I8ODS_OFFICE_VERSION)
+    endif
+endprocedure //write-xml-document-root ---------------------------------------
+
+procedure write-xml-document-styles 
+	parameters
+		lp-root-node-handle						type xml-handle
+	local
+		lf-level1-node-handle					type xml-handle
+		lf-level2-node-handle					type xml-handle
+		lf-level3-node-handle					type xml-handle
+		lf-title-back-colour 					type string
+		lf-title-text-colour 					type string
+		lf-detail-back-colour 					type string
+		lf-detail-text-colour 					type string
+		lf-total-back-colour 					type string
+		lf-total-text-colour 					type string
+		lf-use-custom-title-colours 			type boolean
+		lf-use-custom-detail-colours 			type boolean
+		lf-use-custom-total-colours 			type boolean
+	//
+	set lf-use-custom-title-colours = FALSE
+	set lf-use-custom-detail-colours = FALSE
+	set lf-use-custom-total-colours = FALSE
+	//
+	get spreadsheet-export-settings
+		on index ses-user-id
+		key is login-id()
+	on error 
+		initialise spreadsheet-export-settings
+	endon
+	if ses-title-font-red != ZERO
+	or ses-title-font-green != ZERO
+	or ses-title-font-blue != ZERO
+	or ses-title-fill-red != ZERO
+	or ses-title-fill-green != ZERO
+	or ses-title-fill-blue != ZERO
+		set lf-use-custom-title-colours = TRUE
+	endif
+	if ses-detail-font-red != ZERO
+	or ses-detail-font-green != ZERO
+	or ses-detail-font-blue != ZERO
+	or ses-detail-fill-red != ZERO
+	or ses-detail-fill-green != ZERO
+	or ses-detail-fill-blue != ZERO
+		set lf-use-custom-detail-colours = TRUE
+	endif
+	if ses-total-font-red != ZERO
+	or ses-total-font-green != ZERO
+	or ses-total-font-blue != ZERO
+	or ses-total-fill-red != ZERO
+	or ses-total-fill-green != ZERO
+	or ses-total-fill-blue != ZERO
+		set lf-use-custom-total-colours = TRUE
+	endif
+	//
+	set lf-title-back-colour = I8ODS_DEFAULT_TITLE_BACK_COLOUR
+	set lf-title-text-colour = I8ODS_DEFAULT_TITLE_TEXT_COLOUR 
+	set lf-detail-back-colour = I8ODS_DEFAULT_DETAIL_BACK_COLOUR
+	set lf-detail-text-colour = I8ODS_DEFAULT_DETAIL_TEXT_COLOUR 
+	set lf-total-back-colour = I8ODS_DEFAULT_TOTAL_BACK_COLOUR
+	set lf-total-text-colour = I8ODS_DEFAULT_TOTAL_TEXT_COLOUR 
+	//
+	if lf-use-custom-detail-colours 					
+		do clibvods-rgbcolour-to-hexcolour
+			parameter
+				ses-detail-fill-red
+				ses-detail-fill-green
+				ses-detail-fill-blue
+			returning
+				lf-detail-back-colour
+		do clibvods-rgbcolour-to-hexcolour
+			parameter
+				ses-detail-font-red
+				ses-detail-font-green
+				ses-detail-font-blue
+			returning
+				lf-detail-text-colour
+	endif
+	if lf-use-custom-title-colours 					
+		do clibvods-rgbcolour-to-hexcolour
+			parameter
+				ses-title-fill-red
+				ses-title-fill-green
+				ses-title-fill-blue
+			returning
+				lf-title-back-colour
+		do clibvods-rgbcolour-to-hexcolour
+			parameter
+				ses-title-font-red
+				ses-title-font-green
+				ses-title-font-blue
+			returning
+				lf-title-text-colour
+	endif
+	if lf-use-custom-total-colours 					
+		do clibvods-rgbcolour-to-hexcolour
+			parameter
+				ses-total-fill-red
+				ses-total-fill-green
+				ses-total-fill-blue
+			returning
+				lf-total-back-colour
+		do clibvods-rgbcolour-to-hexcolour
+			parameter
+				ses-total-font-red
+				ses-total-font-green
+				ses-total-font-blue
+			returning
+				lf-total-text-colour
+	endif
+	//
+	//font styles
+    do clibvods-create-font-style
+		parameter
+			"Calibri"
+			"Calibri"
+	//
+    //currency styles
+	do clibvods-create-currency-style 
+		parameter
+			I8ODS_DATA_STYLE_CURRENCY
+			I8ODS_DEFAULT //lp-currency-symbol		
+			I8ODS_DEFAULT //lp-currency-language
+			I8ODS_DEFAULT //lp-currency-country
+			TRUE		  //lp-thousands-seperator		
+			0
+    
+    //numeric styles
+	do clibvods-create-numeric-style 
+		parameter
+			I8ODS_DATA_STYLE_NUMERIC //lp-numeric-style-name		
+			'0'  //lp-decimal-places			
+			'1'  //lp-min-integer-digits	
+			TRUE //lp-thousands-seperator		
+	//
+	do clibvods-create-numeric-style 
+		parameter
+			I8ODS_DATA_STYLE_NUMERIC_DEC_2 //lp-numeric-style-name		
+			'2'  //lp-decimal-places			
+			'1'  //lp-min-integer-digits	
+			TRUE //lp-thousands-seperator		
+	//
+	do clibvods-create-numeric-style 
+		parameter
+			I8ODS_DATA_STYLE_NUMERIC_DEC_4 //lp-numeric-style-name		
+			'4'  //lp-decimal-places			
+			'1'  //lp-min-integer-digits	
+			TRUE //lp-thousands-seperator		
+	//
+	do clibvods-create-numeric-style 
+		parameter
+			I8ODS_DATA_STYLE_NUMERIC_DEC_6 //lp-numeric-style-name		
+			'6'  //lp-decimal-places			
+			'1'  //lp-min-integer-digits	
+			TRUE //lp-thousands-seperator		
+	//
+	do clibvods-create-numeric-style 
+		parameter
+			I8ODS_DATA_STYLE_NUMERIC_NO_THOUSAND_SEPARATOR //lp-numeric-style-name		
+			'0'  //lp-decimal-places			
+			'1'  //lp-min-integer-digits	
+			FALSE //lp-thousands-seperator
+	//
+    //cell styles
+    do clibvods-create-cell-style 
+		parameter
+			I8ODS_DEFAULT_CELL_STYLE //cell-name				
+			SPACES //border-thickness			
+			SPACES //border-colour			
+			SPACES //background-color			
+			SPACES //text-colour				
+			SPACES //text-align
+			SPACES //font-weight				
+			SPACES //font-name				
+			SPACES //font-size				
+			I8ODS_DEFAULT//data-style	
+			FALSE //Top Border	
+			FALSE //Bottom Border
+			FALSE //Left Border
+			FALSE //Right Border
+			FALSE // Wrap text
+			SPACES // vertical align
+	//
+	do clibvods-create-cell-style 
+		parameter
+			I8ODS_DEFAULT_CELL_STYLE_NUMERIC //cell-name				
+			SPACES //border-thickness			
+			SPACES //border-colour			
+			SPACES //background-color			
+			SPACES //text-colour				
+			SPACES //text-align
+			SPACES //font-weight				
+			SPACES //font-name				
+			SPACES //font-size				
+			I8ODS_DATA_STYLE_NUMERIC	//data-style	
+			FALSE //Top Border	
+			FALSE //Bottom Border
+			FALSE //Left Border
+			FALSE //Right Border
+			FALSE // Wrap text
+			SPACES // vertical align
+	//
+	do clibvods-create-cell-style 
+		parameter
+			I8ODS_DEFAULT_CELL_STYLE_NUMERIC_DEC_2 //cell-name				
+			SPACES //border-thickness			
+			SPACES //border-colour			
+			SPACES //background-color			
+			SPACES //text-colour				
+			SPACES //text-align
+			SPACES //font-weight				
+			SPACES //font-name				
+			SPACES //font-size				
+			I8ODS_DATA_STYLE_NUMERIC_DEC_2 //data-style	
+			FALSE //Top Border	
+			FALSE //Bottom Border
+			FALSE //Left Border
+			FALSE //Right Border
+			FALSE // Wrap text
+			SPACES // vertical align
+	//
+	do clibvods-create-cell-style 
+		parameter
+			I8ODS_CELL_STYLE_HEADER //cell-name				
+			"2pt" //border-thickness			
+			I8ODS_DEFAULT_TITLE_BORDER_COLOUR//"#000000" //border-colour			
+			lf-title-back-colour //"#000000" //background-color			
+			lf-title-text-colour //"#FFFFFF" //text-colour				
+			SPACES //text-align
+			"bold" //font-weight				
+			SPACES //font-name				
+			SPACES //font-size				
+			I8ODS_DEFAULT//data-style				
+			TRUE //Top Border	
+			TRUE //Bottom Border
+			TRUE //Left Border
+			TRUE //Right Border
+			TRUE // Wrap text
+			SPACES // vertical align
+	//
+	do clibvods-create-cell-style 
+		parameter
+			I8ODS_CELL_STYLE_DETAIL //cell-name				
+			"thin" //border-thickness			
+			I8ODS_DEFAULT_DETAIL_BORDER_COLOUR//"#BFBFBF" //border-colour			
+			lf-detail-back-colour //"#FFFFCC" //background-color			
+			lf-detail-text-colour //"#000000" //text-colour				
+			SPACES //text-align
+			SPACES //font-weight				
+			SPACES //font-name				
+			SPACES //font-size				
+			I8ODS_DEFAULT//data-style				
+			TRUE //Top Border	
+			TRUE //Bottom Border
+			TRUE //Left Border
+			TRUE //Right Border
+			FALSE // Wrap text
+			SPACES // vertical align
+	//
+	do clibvods-create-cell-style 
+		parameter
+			I8ODS_CELL_STYLE_NUMERIC //cell-name				
+			"thin" //border-thickness			
+			I8ODS_DEFAULT_DETAIL_BORDER_COLOUR//"#BFBFBF" //border-colour			
+			lf-detail-back-colour //"#FFFFCC" //background-color			
+			lf-detail-text-colour //"#000000" //text-colour				
+			SPACES //text-align
+			SPACES //font-weight				
+			SPACES //font-name				
+			SPACES //font-size				
+			I8ODS_DATA_STYLE_NUMERIC //data-style	
+			TRUE //Top Border	
+			TRUE //Bottom Border
+			TRUE //Left Border
+			TRUE //Right Border
+			FALSE // Wrap text
+			SPACES // vertical align
+	//
+	do clibvods-create-cell-style 
+		parameter
+			I8ODS_CELL_STYLE_NUMERIC_DEC_2 //cell-name				
+			"thin" //border-thickness			
+			I8ODS_DEFAULT_DETAIL_BORDER_COLOUR//"#BFBFBF" //border-colour			
+			lf-detail-back-colour //"#FFFFCC" //background-color			
+			lf-detail-text-colour //"#000000" //text-colour				
+			SPACES //text-align
+			SPACES //font-weight				
+			SPACES //font-name				
+			SPACES //font-size				
+			I8ODS_DATA_STYLE_NUMERIC_DEC_2 //data-style	
+			TRUE //Top Border	
+			TRUE //Bottom Border
+			TRUE //Left Border
+			TRUE //Right Border
+			FALSE // Wrap text
+			SPACES // vertical align
+	//
+	do clibvods-create-cell-style 
+		parameter
+			I8ODS_CELL_STYLE_NUMERIC_DEC_4 //cell-name				
+			"thin" //border-thickness			
+			I8ODS_DEFAULT_DETAIL_BORDER_COLOUR//"#BFBFBF" //border-colour			
+			lf-detail-back-colour //"#FFFFCC" //background-color			
+			lf-detail-text-colour //"#000000" //text-colour				
+			SPACES //text-align
+			SPACES //font-weight				
+			SPACES //font-name				
+			SPACES //font-size				
+			I8ODS_DATA_STYLE_NUMERIC_DEC_4 //data-style	
+			TRUE //Top Border	
+			TRUE //Bottom Border
+			TRUE //Left Border
+			TRUE //Right Border
+			FALSE // Wrap text
+			SPACES // vertical align
+	//
+	do clibvods-create-cell-style 
+		parameter
+			I8ODS_CELL_STYLE_NUMERIC_DEC_6 //cell-name				
+			"thin" //border-thickness			
+			I8ODS_DEFAULT_DETAIL_BORDER_COLOUR//"#BFBFBF" //border-colour			
+			lf-detail-back-colour //"#FFFFCC" //background-color			
+			lf-detail-text-colour //"#000000" //text-colour				
+			SPACES //text-align
+			SPACES //font-weight				
+			SPACES //font-name				
+			SPACES //font-size				
+			I8ODS_DATA_STYLE_NUMERIC_DEC_6 //data-style	
+			TRUE //Top Border	
+			TRUE //Bottom Border
+			TRUE //Left Border
+			TRUE //Right Border
+			FALSE // Wrap text
+			SPACES // vertical align
+	//
+	do clibvods-create-cell-style 
+		parameter
+			I8ODS_CELL_STYLE_NUMERIC_NO_THOUSAND_SEPARATOR //cell-name				
+			"thin" //border-thickness			
+			I8ODS_DEFAULT_DETAIL_BORDER_COLOUR//"#BFBFBF" //border-colour			
+			lf-detail-back-colour //"#FFFFCC" //background-color			
+			lf-detail-text-colour //"#000000" //text-colour				
+			SPACES //text-align
+			SPACES //font-weight				
+			SPACES //font-name				
+			SPACES //font-size				
+			I8ODS_DATA_STYLE_NUMERIC_NO_THOUSAND_SEPARATOR //data-style	
+			TRUE //Top Border	
+			TRUE //Bottom Border
+			TRUE //Left Border
+			TRUE //Right Border
+			FALSE // Wrap text
+			SPACES // vertical align
+	//
+	do clibvods-create-cell-style 
+		parameter
+			I8ODS_CELL_STYLE_CURRENCY //cell-name				
+			"thin" //border-thickness			
+			I8ODS_DEFAULT_DETAIL_BORDER_COLOUR//"#BFBFBF" //border-colour			
+			lf-detail-back-colour //"#FFFFCC" //background-color			
+			lf-detail-text-colour //"#000000" //text-colour				
+			SPACES //text-align
+			SPACES //font-weight				
+			SPACES //font-name				
+			SPACES //font-size				
+			I8ODS_DATA_STYLE_CURRENCY //data-style	
+			TRUE //Top Border	
+			TRUE //Bottom Border
+			TRUE //Left Border
+			TRUE //Right Border
+			FALSE // Wrap text
+			SPACES // vertical align
+	//
+	do clibvods-create-cell-style 
+		parameter
+			I8ODS_CELL_STYLE_TOTAL_NUMERIC //cell-name				
+			"thin" //border-thickness			
+			I8ODS_DEFAULT_DETAIL_BORDER_COLOUR//"#BFBFBF" //border-colour			
+			lf-total-back-colour //"#FFFFCC" //background-color			
+			lf-total-text-colour //"#000000" //text-colour				
+			SPACES //text-align
+			SPACES //font-weight				
+			SPACES //font-name				
+			SPACES //font-size				
+			I8ODS_DATA_STYLE_NUMERIC //data-style	
+			TRUE //Top Border	
+			TRUE //Bottom Border
+			TRUE //Left Border
+			TRUE //Right Border
+			FALSE // Wrap text
+			SPACES // vertical align
+	//
+    //column styles
+	do clibvods-create-column-style 
+		parameter
+			I8ODS_DEFAULT_COLUMN_STYLE //lp-column-name				
+			"2cm" //lp-column-width	
+	//
+    //row styles
+    set ws-styles-node-handle = xml-get-child-by-name(ws-root-node-handle,'automatic-styles','office')
+	set lf-level2-node-handle = XML-ADD-CHILD-NODE(ws-styles-node-handle,"style",'style')
+    if XML-ADD-NODE-ATTRIBUTE(lf-level2-node-handle,"name",'style',I8ODS_DEFAULT_ROW_STYLE)
+    endif
+    if XML-ADD-NODE-ATTRIBUTE(lf-level2-node-handle,"family",'style',"table-row")
+    endif
+	set lf-level3-node-handle = XML-ADD-CHILD-NODE(lf-level2-node-handle,"table-row-properties",'style')
+    if XML-ADD-NODE-ATTRIBUTE(lf-level3-node-handle,"row-height",'style',"15pt")
+    endif
+    if XML-ADD-NODE-ATTRIBUTE(lf-level3-node-handle,"use-optimal-row-height",'style',"true")
+    endif
+    if XML-ADD-NODE-ATTRIBUTE(lf-level3-node-handle,"break-before",'fo',"auto")
+    endif
+    if XML-FREE-NODE-HANDLE(lf-level2-node-handle) <= 0
+    endif
+	//
+    //table styles
+	set lf-level2-node-handle = XML-ADD-CHILD-NODE(ws-styles-node-handle,"style",'style')
+    if XML-ADD-NODE-ATTRIBUTE(lf-level2-node-handle,"name",'style',I8ODS_DEFAULT_TABLE_STYLE)
+    endif
+    if XML-ADD-NODE-ATTRIBUTE(lf-level2-node-handle,"family",'style',"table")
+    endif
+    if XML-ADD-NODE-ATTRIBUTE(lf-level2-node-handle,"master-page-name",'style',"mp1")
+    endif
+	set lf-level3-node-handle = XML-ADD-CHILD-NODE(lf-level2-node-handle,"table-properties",'style')
+    if XML-ADD-NODE-ATTRIBUTE(lf-level3-node-handle,"display",'table',"true")
+    endif
+    if XML-ADD-NODE-ATTRIBUTE(lf-level3-node-handle,"writing-mode",'style',"lr-tb")
+    endif
+    //
+    if XML-FREE-NODE-HANDLE(ws-styles-node-handle) <= 0
+    endif
+    if lf-level1-node-handle <= 0
+	endif
+	//
+	set ws-styles-node-handle = XML-ADD-CHILD-NODE(lp-root-node-handle,'body','office')
+endprocedure //write-xml-document-styles -------------------------------------
+
+procedure create-ods-temp-folder 
+	returning
+		lr-tmp-folder-by-login-id			type varchar
+		lr-tmp-unique-sub-folder			type varchar
+	local
+		lf-current-data-set					type varchar
+	//
+	set lf-current-data-set = dir()
+	//
+	if ws-tmp-folder-by-login-id != SPACES
+		set lr-tmp-folder-by-login-id =	ws-tmp-folder-by-login-id			
+	else
+		set lr-tmp-folder-by-login-id = concat(BMSDEF_TEMP_DIR_NAME(),'/',login-id(),'ods/')
+	endif
+	if ws-tmp-unique-sub-folder != SPACES
+		set lr-tmp-unique-sub-folder = ws-tmp-unique-sub-folder
+	else
+		set lr-tmp-unique-sub-folder = concat(str(p-id()))
+	endif
+	//
+	if cd(BMSDEF_TEMP_DIR_NAME())
+		if file-exists(concat(login-id(),'ods'),ZERO) != 2 //no subdirectory with the username within the temp folder
+			if mkdir(concat(login-id(),'ods'))
+			endif
+		endif
+		if cd(lr-tmp-folder-by-login-id)
+			if file-exists(lr-tmp-unique-sub-folder,ZERO) != 2 //no lr-tmp-unique-sub-folder subdirectory within the temp folder
+				if mkdir(lr-tmp-unique-sub-folder)
+				endif
+			endif
+		endif
+		if cd(concat(lr-tmp-folder-by-login-id,lr-tmp-unique-sub-folder,'/'))
+			if mkdir('META-INF')
+			endif
+		endif
+	endif
+	// change directory back to the current directory
+	if cd(lf-current-data-set)
+	endif
+endprocedure //create-ods-temp-folder ----------------------------------------------------------
+
+procedure create-ods-xml-files
+	parameter
+		lp-ods-folder				type varchar
+	//
+	do create-content-file
+		parameter
+			lp-ods-folder		
+	//
+	do create-styles-file
+		parameter
+			lp-ods-folder				
+	//
+	do create-mimetype-file
+		parameter
+			lp-ods-folder		
+	//
+	do create-manifest-file
+		parameter
+			lp-ods-folder
+endprocedure //create-ods-xml-files ------------------------------------------
+
+procedure create-content-file
+	parameter
+		lp-ods-folder				type varchar
+	//
+	if ws-updating-sheet = FALSE
+		if ws-sheet-row-node-handle != ZERO
+			//finish off the current row and release the node handle
+			do add-sheet-cell-repeat
+				parameter
+					ws-sheet-row-node-handle
+			//
+		    if XML-FREE-NODE-HANDLE(ws-sheet-row-node-handle) <= 0
+			endif
+		endif
+		if ws-sheet-node-handle != ZERO
+			//add the repeating rows and finish the current XML file 
+			do add-sheet-row-repeat
+				parameter
+					ws-sheet-node-handle
+					I8ODS_DEFAULT_ROW_STYLE
+		    if XML-FREE-NODE-HANDLE(ws-sheet-node-handle) <= 0
+		    endif
+		endif
+	endif
+    //
+	if XML-SAVE-AS-FILE(ws-document-handle,concat(lp-ods-folder,"content.xml"),"UTF-8",2) 
+	endif
+endprocedure //create-content-file ----------------------------------------------------------
+
+procedure create-styles-file
+	parameter
+		lp-ods-folder				type varchar
+	local
+		lf-document-handle			type xml-handle	
+		lf-root-node-handle			type xml-handle	
+		lf-level1-node-handle		type xml-handle
+		lf-level2-node-handle		type xml-handle
+		lf-level3-node-handle		type xml-handle
+		lf-level4-node-handle		type xml-handle
+	//
+	if ws-updating-sheet
+		exit
+	endif
+	do write-xml-document-root 
+		parameter
+			"office:document-styles"
+		returning
+			lf-document-handle						
+			lf-root-node-handle					
+	//
+	set lf-level1-node-handle = XML-ADD-CHILD-NODE(lf-root-node-handle,"font-face-decls",'office')
+	set lf-level2-node-handle = XML-ADD-CHILD-NODE(lf-level1-node-handle,"font-face",'style')
+    if XML-ADD-NODE-ATTRIBUTE(lf-level2-node-handle,"name",'style',"Calibri")
+    endif
+    if XML-ADD-NODE-ATTRIBUTE(lf-level2-node-handle,"font-family",'svg',"Calibri")
+    endif
+    if XML-FREE-NODE-HANDLE(lf-level1-node-handle) <= 0 //end of first node office:font-face-decls
+    endif
+    //
+	set lf-level1-node-handle = XML-ADD-CHILD-NODE(lf-root-node-handle,"styles",'office')
+	set lf-level2-node-handle = XML-ADD-CHILD-NODE(lf-level1-node-handle,"style",'style')
+    if XML-ADD-NODE-ATTRIBUTE(lf-level2-node-handle,"name",'style',"Default")
+    endif
+    if XML-ADD-NODE-ATTRIBUTE(lf-level2-node-handle,"family",'style',"table-cell")
+    endif
+    if XML-ADD-NODE-ATTRIBUTE(lf-level2-node-handle,"family",'data-style-name',"N0")
+    endif
+    set lf-level3-node-handle = XML-ADD-CHILD-NODE(lf-level2-node-handle,"table-cell-properties",'style')
+	if ws-default-vertical-align = spaces
+	or ws-default-vertical-align not in ( "automatic" "top" "middle")
+		if XML-ADD-NODE-ATTRIBUTE(lf-level3-node-handle,"vertical-align",'style',"automatic")
+		endif
+	else
+		if XML-ADD-NODE-ATTRIBUTE(lf-level3-node-handle,"vertical-align",'style',ws-default-vertical-align)
+		endif
+	endif
+    if XML-ADD-NODE-ATTRIBUTE(lf-level3-node-handle,"background-color",'fo',"transparent")
+    endif
+    if XML-FREE-NODE-HANDLE(lf-level3-node-handle) <= 0
+    endif
+    //    
+    set lf-level3-node-handle = XML-ADD-CHILD-NODE(lf-level2-node-handle,"text-properties",'style')
+    if XML-ADD-NODE-ATTRIBUTE(lf-level3-node-handle,"color",'fo',"#000000")
+    endif
+    if XML-ADD-NODE-ATTRIBUTE(lf-level3-node-handle,"font-name",'style',"Calibri")
+    endif
+    if XML-ADD-NODE-ATTRIBUTE(lf-level3-node-handle,"font-name-asian",'style',"Calibri")
+    endif
+    if XML-ADD-NODE-ATTRIBUTE(lf-level3-node-handle,"font-name-complex",'style',"Calibri")
+    endif
+    if XML-ADD-NODE-ATTRIBUTE(lf-level3-node-handle,"font-size",'fo',"11pt")
+    endif
+    if XML-ADD-NODE-ATTRIBUTE(lf-level3-node-handle,"font-size-asian",'style',"11pt")
+    endif
+    if XML-ADD-NODE-ATTRIBUTE(lf-level3-node-handle,"font-size-complex",'style',"11pt")
+    endif
+    if XML-FREE-NODE-HANDLE(lf-level3-node-handle) <= 0
+    endif
+    if XML-FREE-NODE-HANDLE(lf-level2-node-handle) <= 0
+    endif
+    if XML-FREE-NODE-HANDLE(lf-level1-node-handle) <= 0 //end of second node office:styles
+    endif
+	//
+	set lf-level1-node-handle = XML-ADD-CHILD-NODE(lf-root-node-handle,"automatic-styles",'office')
+	set lf-level2-node-handle = XML-ADD-CHILD-NODE(lf-level1-node-handle,"page-layout",'style')
+    if XML-ADD-NODE-ATTRIBUTE(lf-level2-node-handle,"name",'style',"pm1")
+    endif
+    set lf-level3-node-handle = XML-ADD-CHILD-NODE(lf-level2-node-handle,"page-layout-properties",'style')
+    if XML-ADD-NODE-ATTRIBUTE(lf-level3-node-handle,"margin-top",'fo',"0.3in")
+    endif
+    if XML-ADD-NODE-ATTRIBUTE(lf-level3-node-handle,"margin-bottom",'fo',"0.3in")
+    endif
+    if XML-ADD-NODE-ATTRIBUTE(lf-level3-node-handle,"margin-left",'fo',"0.7in")
+    endif
+    if XML-ADD-NODE-ATTRIBUTE(lf-level3-node-handle,"margin-right",'fo',"0.7in")
+    endif
+    if XML-ADD-NODE-ATTRIBUTE(lf-level3-node-handle,"table-centering",'style',"none")
+    endif
+    if XML-ADD-NODE-ATTRIBUTE(lf-level3-node-handle,"print",'style',"objects charts drawings")
+    endif
+    if XML-FREE-NODE-HANDLE(lf-level3-node-handle) <= 0
+    endif
+    //
+    set lf-level3-node-handle = XML-ADD-CHILD-NODE(lf-level2-node-handle,"header-style",'style')
+    set lf-level4-node-handle = XML-ADD-CHILD-NODE(lf-level3-node-handle,"header-footer-properties",'style')
+    if XML-ADD-NODE-ATTRIBUTE(lf-level4-node-handle,"min-height",'fo',"0.45in")
+    endif
+    if XML-ADD-NODE-ATTRIBUTE(lf-level4-node-handle,"margin-left",'fo',"0.7in")
+    endif
+    if XML-ADD-NODE-ATTRIBUTE(lf-level4-node-handle,"margin-right",'fo',"0.7in")
+    endif
+    if XML-ADD-NODE-ATTRIBUTE(lf-level4-node-handle,"margin-bottom",'fo',"0in")
+    endif
+    if XML-FREE-NODE-HANDLE(lf-level4-node-handle) <= 0
+    endif
+    if XML-FREE-NODE-HANDLE(lf-level3-node-handle) <= 0
+    endif
+    if XML-FREE-NODE-HANDLE(lf-level2-node-handle) <= 0
+    endif
+	//
+    set lf-level3-node-handle = XML-ADD-CHILD-NODE(lf-level2-node-handle,"footer-style",'style')
+    set lf-level4-node-handle = XML-ADD-CHILD-NODE(lf-level3-node-handle,"header-footer-properties",'style')
+    if XML-ADD-NODE-ATTRIBUTE(lf-level4-node-handle,"min-height",'fo',"0.45in")
+    endif
+    if XML-ADD-NODE-ATTRIBUTE(lf-level4-node-handle,"margin-left",'fo',"0.7in")
+    endif
+    if XML-ADD-NODE-ATTRIBUTE(lf-level4-node-handle,"margin-right",'fo',"0.7in")
+    endif
+    if XML-ADD-NODE-ATTRIBUTE(lf-level4-node-handle,"margin-bottom",'fo',"0in")
+    endif
+    if XML-FREE-NODE-HANDLE(lf-level4-node-handle) <= 0
+    endif
+    if XML-FREE-NODE-HANDLE(lf-level3-node-handle) <= 0
+    endif
+    if XML-FREE-NODE-HANDLE(lf-level2-node-handle) <= 0
+    endif
+    if XML-FREE-NODE-HANDLE(lf-level1-node-handle) <= 0 //end of third node office:automatic-styles
+    endif
+	//
+	set lf-level1-node-handle = XML-ADD-CHILD-NODE(lf-root-node-handle,"master-styles",'office')
+	set lf-level2-node-handle = XML-ADD-CHILD-NODE(lf-level1-node-handle,"master-page",'style')
+    if XML-ADD-NODE-ATTRIBUTE(lf-level2-node-handle,"name",'style',"mp1")
+    endif
+    if XML-ADD-NODE-ATTRIBUTE(lf-level2-node-handle,"page-layout-name",'style',"pm1")
+    endif
+	if XML-ADD-CHILD-NODE-TEXT(lf-level2-node-handle,"header",'style',SPACES)
+	endif
+	set lf-level3-node-handle = XML-ADD-CHILD-NODE(lf-level2-node-handle,"header-left",'style')
+    if XML-ADD-NODE-ATTRIBUTE(lf-level3-node-handle,"display",'style',"false")
+    endif
+    if XML-FREE-NODE-HANDLE(lf-level3-node-handle) <= 0
+    endif
+	if XML-ADD-CHILD-NODE-TEXT(lf-level2-node-handle,"footer",'style',SPACES)
+	endif
+	set lf-level3-node-handle = XML-ADD-CHILD-NODE(lf-level2-node-handle,"footer-left",'style')
+    if XML-ADD-NODE-ATTRIBUTE(lf-level3-node-handle,"display",'style',"false")
+    endif
+    if XML-FREE-NODE-HANDLE(lf-level3-node-handle) <= 0
+    endif
+    if XML-FREE-NODE-HANDLE(lf-level2-node-handle) <= 0
+    endif
+    if XML-FREE-NODE-HANDLE(lf-level1-node-handle) <= 0
+    endif
+	if XML-SAVE-AS-FILE(lf-document-handle,concat(lp-ods-folder,"styles.xml"),"UTF-8",2) 
+	endif
+endprocedure //create-styles-file ----------------------------------------------------------
+
+procedure create-mimetype-file
+	parameter
+		lp-ods-folder				type varchar
+	local
+		lf-mime-blob				type blob
+	//
+	set lf-mime-blob = "application/vnd.oasis.opendocument.spreadsheet"
+	if WRITE-BLOB-TO-FILE(lf-mime-blob,concat(lp-ods-folder,"mimetype"))
+	endif
+endprocedure //create-mimetype-file ----------------------------------------------------------
+
+procedure create-manifest-file
+	parameter
+		lp-ods-folder				type varchar
+	//
+	local
+		lf-document-handle			type xml-handle
+		lf-root-node-handle			type xml-handle
+		lf-level1-node-handle		type xml-handle
+	//
+	if ws-updating-sheet
+		exit
+	endif
+	set lf-document-handle = XML-NEW-DOCUMENT(SPACES,"manifest:manifest")
+	if lf-document-handle <= 0
+		exit
+	endif
+	set lf-root-node-handle = XML-GET-ROOT-NODE(lf-document-handle)
+	if lf-root-node-handle <= 0
+		exit
+	endif
+	if XML-ADD-NS(lf-root-node-handle,"manifest","urn:oasis:names:tc:opendocument:xmlns:manifest:1.0") <= 0
+    endif
+    //
+	set lf-level1-node-handle = XML-ADD-CHILD-NODE(lf-root-node-handle,"file-entry",'manifest')
+    if XML-ADD-NODE-ATTRIBUTE(lf-level1-node-handle,"full-path",'manifest',"/")
+    endif
+    if XML-ADD-NODE-ATTRIBUTE(lf-level1-node-handle,"media-type",'manifest',"application/vnd.oasis.opendocument.spreadsheet")
+    endif
+    if XML-FREE-NODE-HANDLE(lf-level1-node-handle) <= 0
+    endif
+    //
+	set lf-level1-node-handle = XML-ADD-CHILD-NODE(lf-root-node-handle,"file-entry",'manifest')
+    if XML-ADD-NODE-ATTRIBUTE(lf-level1-node-handle,"full-path",'manifest',"styles.xml")
+    endif
+    if XML-ADD-NODE-ATTRIBUTE(lf-level1-node-handle,"media-type",'manifest',"text/xml")
+    endif
+    if XML-FREE-NODE-HANDLE(lf-level1-node-handle) <= 0
+    endif
+    //
+	set lf-level1-node-handle = XML-ADD-CHILD-NODE(lf-root-node-handle,"file-entry",'manifest')
+    if XML-ADD-NODE-ATTRIBUTE(lf-level1-node-handle,"full-path",'manifest',"content.xml")
+    endif
+    if XML-ADD-NODE-ATTRIBUTE(lf-level1-node-handle,"media-type",'manifest',"text/xml")
+    endif
+    if XML-FREE-NODE-HANDLE(lf-level1-node-handle) <= 0
+    endif
+    //
+    if XML-FREE-NODE-HANDLE(lf-level1-node-handle) <= 0
+    endif
+    string lp-ods-folder appending "META-INF/"
+	if XML-SAVE-AS-FILE(lf-document-handle,concat(lp-ods-folder,"manifest.xml"),"UTF-8",2) 
+	endif
+endprocedure //create-manifest-file ----------------------------------------------------------
+
+procedure clibvods-get-row-column-by-cell export no-override
+//////////////////////////////////////////////////////////////////////////////
+//<CLIB_DOC>
+//<DESC>
+// This procedure is used to return the row number and column name and column number for a passed in cell  
+//
+//<P1> Row/column coordinates (A1 or B4 etc)	
+//
+//<R1> Row number will be returned
+//<R2> Column name will be returned 
+//<R3> Column number will be returned
+//
+///////////////////////////////////////////////////////////////////////////////	
+	parameter
+		lp-cell					type string
+	returning
+		lr-row					type numeric
+		lr-col-name				type string
+		lr-col					type numeric
+	local
+		lf-i					pic 99
+	//
+	for lf-i = 1 to 10
+		if num(substring(lp-cell,lf-i,lf-i))		//start of the number, cell could be A2 or AB14 or C22.....
+			set lr-col-name = substring(lp-cell,1,lf-i - 1)
+			set lr-row = num(substring(lp-cell,lf-i,999))
+			break
+		endif
+	endfor
+	//
+	do get-column-number-by-column-name
+		parameter
+			lr-col-name
+		returning
+			lr-col
+endprocedure //clibvods-get-row-column-by-cell ----------------------------------------------------------
+
+procedure get-column-number-by-column-name
+	parameter
+		lp-column-name		type string
+	returning
+		lr-column-number	type numeric
+	local
+		lf-pow				type numeric
+		lf-i				type numeric
+	//
+    set lr-column-number = 0
+    set lf-pow = 1
+	//
+    for lf-i = strlen(lp-column-name) down to 1 
+        set lr-column-number += (ascii-num(substring(lp-column-name,lf-i,lf-i)) - ascii-num('A') + 1) * lf-pow
+        set lf-pow *= 26
+    endfor
+endprocedure //get-column-number-by-column-name ----------------------------------------------------------
+
+
+procedure clibvods-rgbcolour-to-hexcolour export no-override
+////////////////////////////////////////////////////////////////////////////////
+//<CLIB_DOC>
+//<DESC>
+// This procedure is used to converr RGB colours to hex colour code
+//
+// <P1>	RGB Colour - Red value 
+// <P2>	RGB Colour - Green value 
+// <P3>	RGB Colour - Blue value 
+//
+// <R1>	Returning hex colour code
+///////////////////////////////////////////////////////////////////////////////
+	parameter
+		lp-r			pic 999
+		lp-g			pic 999
+		lp-b			pic 999
+	returning
+		lr-hex			type string
+	//
+	local
+		lf-r1			pic 99
+		lf-r2			pic 99
+		lf-g1			pic 99
+		lf-g2			pic 99
+		lf-b1			pic 99
+		lf-b2			pic 99
+	//
+		lf-r1-h			pic x	
+		lf-r2-h			pic x	
+		lf-g1-h			pic x	
+		lf-g2-h			pic x	
+		lf-b1-h			pic x	
+		lf-b2-h			pic x	
+	//
+	set lf-r1 = integer(lp-r / 16)
+	if lp-r - integer(lp-r / 16) * 16 >= ZERO
+		set lf-r2 = lp-r - integer(lp-r / 16) * 16
+	else
+		set lf-r2 = lp-r 
+	endif
+	//
+	set lf-g1 = integer(lp-g / 16)
+	if lp-g - integer(lp-g / 16) * 16 >= ZERO
+		set lf-g2 = lp-g - integer(lp-g / 16) * 16
+	else
+		set lf-g2 = lp-g 
+	endif
+	//
+	set lf-b1 = integer(lp-b / 16)
+	if lp-b - integer(lp-b / 16) * 16 >= ZERO
+		set lf-b2 = lp-b - integer(lp-b / 16) * 16
+	else
+		set lf-b2 = lp-b 
+	endif
+	//
+	do convert-digit-to-hex-char
+		parameter
+			lf-r1
+		returning
+			lf-r1-h
+	//
+	do convert-digit-to-hex-char
+		parameter
+			lf-r2
+		returning
+			lf-r2-h
+	//
+	do convert-digit-to-hex-char
+		parameter
+			lf-g1
+		returning
+			lf-g1-h
+	//
+	do convert-digit-to-hex-char
+		parameter
+			lf-g2
+		returning
+			lf-g2-h
+	//
+	do convert-digit-to-hex-char
+		parameter
+			lf-b1
+		returning
+			lf-b1-h
+	//
+	do convert-digit-to-hex-char
+		parameter
+			lf-b2
+		returning
+			lf-b2-h
+	//
+	set lr-hex = concat('#',lf-r1-h,lf-r2-h,lf-g1-h,lf-g2-h,lf-b1-h,lf-b2-h)
+endprocedure //clibvods-rgbcolour-to-hexcolour ----------------------------------------------------------
+
+procedure convert-digit-to-hex-char
+	parameter
+		lp-num		pic 99
+	returning	
+		lr-char		pic x
+	//
+	if lp-num between 0 and 9
+		set lr-char = str(lp-num)
+	else
+		set lr-char = ascii-char(ascii-num('A') - 10 + lp-num)
+	endif
+endprocedure //convert-digit-to-hex-char -------------------------------------
+
+procedure clibvods-transfer-file-to-pc-web-client export
+parameters
+	lp-filename					pic x(500) type string
+local field
+	lf-file-name-no-path		pic x(500)
+	i 							type number
+	//
+	set lf-file-name-no-path = lp-filename
+	for i = str-len(lf-file-name-no-path) down to 1
+		if substring(lf-file-name-no-path,i,i) in ( "/" "\" )
+			break
+		endif
+	endfor
+	string lf-file-name-no-path deleting 1 to i
+	command "proclientft"
+		parameters
+			"-cw"
+			lp-filename
+			lf-file-name-no-path
+	on error
+		message-box "An error Occurred Transferring the file to your machine"
+			title "Transfer File to PC"
+			message-button MSG_BOX_OK
+			icon MSG_BOX_WARNING
+	else
+		message-box "File Transfer Completed. "
+			title "Transfer File to PC"
+			message-button MSG_BOX_OK
+			icon MSG_BOX_INFORMATION
+			tag 3
+			optional
+		command "rm" parameters "-f" lp-filename
+	endon
+endprocedure //transfer-file-to-pc-web-client ---------------------------------
+
+procedure clibvods-public-override-file-upload-url export
+////////////////////////////////////////////////////////////////////////////////
+//<CLIB_DOC>
+//<DESC>
+// This procedure allows customisation of file upload url
+//
+// <P1>	File upload url passed in by core program				
+//
+// <R1>	Returning modified file upload url
+///////////////////////////////////////////////////////////////////////////////
+	parameter
+		lp-file-upload-url 					type varchar pic x(300)
+	returning
+		lr-file-upload-url  				like lp-file-upload-url					
+	//
+	set lr-file-upload-url  = lp-file-upload-url 					
+endprocedure //clibvods-public-override-file-upload-url --------------------------------
+
+procedure clibvods-public-override-export-folder-name export
+////////////////////////////////////////////////////////////////////////////////
+//<CLIB_DOC>
+//<DESC>
+// This procedure allows customisation of file export sub folder name
+//
+// <P1>	File export sub folder name				
+//
+// <R1>	Returning modified file export sub folder name
+///////////////////////////////////////////////////////////////////////////////
+	parameter
+		lp-export-folder-name				type varchar  pic x(500)
+	returning
+		lr-export-folder-name				type varchar  pic x(500)
+	//
+	set lr-export-folder-name  = lp-export-folder-name					
+endprocedure //clibvods-public-override-export-folder-name ----------------------------------------------------------
+
+procedure clibvods-public-override-read-folder-name export
+////////////////////////////////////////////////////////////////////////////////
+//<CLIB_DOC>
+//<DESC>
+// This procedure allows customisation of file reading sub folder name
+//
+// <P1>	File reading sub folder name				
+//
+// <R1>	Returning modified file reading sub folder name
+///////////////////////////////////////////////////////////////////////////////
+	parameter
+		lp-read-folder-name				type varchar  pic x(500)
+	returning
+		lr-read-folder-name				type varchar  pic x(500)
+	//
+	set lr-read-folder-name  = lp-read-folder-name					
+endprocedure //clibvods-public-override-read-folder-name ----------------------------------------------------------
+
+procedure clibvods-public-override-export-filename export
+////////////////////////////////////////////////////////////////////////////////
+//<CLIB_DOC>
+//<DESC>
+// This procedure allows customisation of file export filename
+//
+// <P1>	File export filename				
+//
+// <R1>	Returning modified export filename
+///////////////////////////////////////////////////////////////////////////////
+	parameter
+		lp-export-filename					type varchar pic x(500)
+	returning
+		lr-export-filename					type varchar pic x(500)
+	//
+	set lr-export-filename = lp-export-filename 
+endprocedure //clibvods-public-override-export-filename ----------------------------------------------------------
+
+procedure check-column-count
+	if ws-columns-in-current-sheet = 16384
+		exit 0
+	else
+		do clibvods-add-sheet-column parameters spaces (16384 - ws-columns-in-current-sheet)
+	endif
+end-procedure
+
+//end of program
+//
+//--------------------------------------------------------------------------------
+//   Test Cases and sample
+//--------------------------------------------------------------------------------
+//
+
+menu sample-and-test
+local
+	lf-count						type number
+	lf-shipment						like po-shipment-no
+	window
+	title "Samples and Tests"
+detail
+	Option "Simple" @1,1
+		help is "Select Test1"
+		do test1
+	option "All the bells and whistles" @2,1
+		do test2 parameters "W02"
+	option "Shipment Costing" @3,1
+		select lf-count = count(*)	
+			from purchase-order-costing 
+			where po-shipment-no != spaces
+		end-select
+		if lf-count = 0
+			message "You must have a shipment to run this test"
+		else
+			select lf-shipment = min(po-shipment-no) from purchase-order-costing
+				where po-shipment-no != spaces
+			end-select
+			do test3 parameters lf-shipment
+		endif
+end-menu
+
+procedure test1
+	//
+	do clibvods-start-export parameters "/tmp"
+	do clibvods-add-sheet parameters "Stock" True
+	do clibvods-add-sheet-row
+	do clibvods-fill-a-cell-alpha parameters spaces "Stock Group"
+	if exit-status() != 0
+		message "Failed"
+	endif
+	do clibvods-fill-a-cell-alpha parameters spaces "Stock Code"
+	do clibvods-fill-a-cell-alpha parameters spaces "Stock Desc"
+	select * from stock-master order by stock-group stock-code
+	detail
+		do clibvods-add-sheet-row
+		do clibvods-fill-a-cell-alpha parameters spaces stock-group
+		do clibvods-fill-a-cell-alpha parameters spaces stock-code
+		do clibvods-fill-a-cell-alpha parameters spaces stk-description
+	end-select
+	do clibvods-finish-export parameters are "/tmp/test1.ods"
+	message "File created in /tmp"
+end-procedure
+
+procedure test2
+parameters
+	lp-whse-code					like whse-code
+local
+	lf-row							type number
+	//
+	do clibvods-start-export parameters "/tmp"
+	do clibvods-add-sheet parameters "Stock" True
+	do clibvods-create-column-style parameters "8cm" "8cm"
+	do clibvods-add-sheet-column parameters spaces 1
+	do clibvods-add-sheet-column parameters "8cm" 1
+	do clibvods-add-sheet-column parameters spaces 1
+	do clibvods-add-sheet-column parameters "8cm" 1
+	do clibvods-create-cell-style parameters
+		"MAINHEAD" //cell-name				
+			"thick" //border-thickness			
+			"#DD5044" //border-colour			
+			"#72F0FE" //background-color			
+			"#FFD662"//text-colour				
+			"center" //text-align
+			"Bold" //font-weight				
+			"Letter Gothic" //font-name				
+			"20pt" //font-size				
+			space //data-style	
+			TRUE //Top Border	
+			TRUE //Bottom Border
+			TRUE //Left Border
+			TRUE //Right Border
+			FALSE // Wrap text
+			"middle" // vertical align
+	do clibvods-create-cell-style parameters
+		"WRAP" //cell-name				
+			"thin" //border-thickness			
+			spaces //border-colour			
+			spaces //background-color			
+			spaces //text-color
+			spaces //text-align
+			spaces //font-weight				
+			spaces  //font-name				
+			spaces //font-size				
+			space //data-style	
+			TRUE //Top Border	
+			TRUE //Bottom Border
+			TRUE //Left Border
+			TRUE //Right Border
+			TRUE // Wrap text
+			"top" // vertical align
+	do clibvods-create-currency-style parameters
+		"curr2dp"
+		spaces
+		spaces
+		spaces
+		True
+		2
+	do clibvods-create-cell-style parameters
+		"mycurrency" //cell-name				
+			"thin" //border-thickness			
+			I8ODS_DEFAULT_DETAIL_BORDER_COLOUR //border-colour			
+			I8ODS_DEFAULT_DETAIL_BACK_COLOUR //background-color			
+			I8ODS_DEFAULT_DETAIL_TEXT_COLOUR //text-colour				
+			spaces //text-align
+			spaces //font-weight				
+			spaces //font-name				
+			spaces //font-size				
+			"curr2dp" //data-style	
+			TRUE //Top Border	
+			TRUE //Bottom Border
+			TRUE //Left Border
+			TRUE //Right Border
+			FALSE // Wrap
+			SPACES // vertical align
+	do clibvods-add-sheet-row
+	do clibvods-fill-a-cell-alpha-span parameters "MAINHEAD" "Warehouse Valuation" 7
+	do clibvods-add-sheet-row
+	do clibvods-fill-a-cell-alpha-repeat parameters spaces spaces 2 // jump two cells
+	do clibvods-fill-a-cell-alpha parameters spaces "Effective"
+	do clibvods-fill-a-cell-date parameters spaces format-picture(today(), "dd/mmm/yyyy")
+	do clibvods-add-sheet-row
+	do clibvods-add-sheet-row
+	do clibvods-fill-a-cell-alpha parameters I8ODS_CELL_STYLE_HEADER "Stock Group"
+	do clibvods-fill-a-cell-alpha parameters I8ODS_CELL_STYLE_HEADER "Group Desc"
+	do clibvods-fill-a-cell-alpha parameters I8ODS_CELL_STYLE_HEADER "Stock Code"
+	do clibvods-fill-a-cell-alpha parameters I8ODS_CELL_STYLE_HEADER "Stock Desc"
+	do clibvods-fill-a-cell-alpha parameters I8ODS_CELL_STYLE_HEADER "Qty"
+	do clibvods-fill-a-cell-alpha parameters I8ODS_CELL_STYLE_HEADER "Cost"
+	do clibvods-fill-a-cell-alpha parameters I8ODS_CELL_STYLE_HEADER "Value"
+	set lf-row = 4
+	select * 
+		from stock-master  as t0
+		inner join stock-warehouse-detail  as t1
+			on t0.stock-code = t1.stock-code 
+			and t1.whse-code = :lp-whse-code	
+		inner join system-table as t2
+			on t2.sys-tbl-type = "PG"
+			and t2.sys-tbl-code = t0.stock-group
+		order by t0.stock-group t0.stock-code
+	detail
+		do clibvods-add-sheet-row
+		set lf-row += 1
+		do clibvods-fill-a-cell-alpha parameters I8ODS_CELL_STYLE_DETAIL stock-group
+		do clibvods-fill-a-cell-alpha parameters "WRAP" sys-description
+		do clibvods-fill-a-cell-alpha parameters I8ODS_CELL_STYLE_DETAIL stock-code
+		do clibvods-fill-a-cell-alpha parameters "WRAP" stk-description
+		do clibvods-fill-a-cell-numeric parameters I8ODS_CELL_STYLE_DETAIL str(whse-qty-on-hand)
+		do clibvods-fill-a-cell-numeric parameters "mycurrency" str(whse-avg-cost)
+		do clibvods-fill-a-cell-formula parameters I8ODS_CELL_STYLE_CURRENCY 
+			concat("[.E" str(lf-row) "]*[.F" str(lf-row) "]")
+	end-select
+	//
+	do clibvods-add-sheet-row
+	do clibvods-fill-a-cell-alpha-repeat parameters spaces spaces 6 // jump two cells
+	do clibvods-fill-a-cell-formula parameters "mycurrency" 
+		concat("SUBTOTAL(9;[.g5:.g"  str(lf-row) "])")
+	do clibvods-finish-export parameters are "/tmp/test1.ods"
+	do clibvods-transfer-file-to-pc-web-client parameters are  "/tmp/test1.ods"
+end-procedure
+
+procedure test3
+parameters
+	lp-shipment							like po-shipment-no
+local
+	lf-extended-cost					type number
+	lf-margin							type number
+	lf-total-price						type number
+	lf-foreign-cost						type number
+	lf-total-foreign-cost				type number
+	lf-row								type number
+	//
+	//	
+	do clibvods-start-export parameters "/tmp"
+	do clibvods-add-sheet parameters lp-shipment True
+	do clibvods-create-column-style parameters "8cm" "8cm"
+	do clibvods-create-cell-style parameters
+		"MAINHEAD" //cell-name				
+			"thick" //border-thickness			
+			"#DD5044" //border-colour			
+			"#72F0FE" //background-color			
+			"#FF0000"//text-colour				
+			"center" //text-align
+			"Bold" //font-weight				
+			"Letter Gothic" //font-name				
+			"20pt" //font-size				
+			space //data-style	
+			TRUE //Top Border	
+			TRUE //Bottom Border
+			TRUE //Left Border
+			TRUE //Right Border
+			FALSE // Wrap text
+			"middle" // vertical align
+	do clibvods-create-currency-style parameters
+		"curr2dp"
+		spaces
+		spaces
+		spaces
+		True
+		2
+	do clibvods-create-cell-style parameters
+		"mycurrency" //cell-name				
+			"thin" //border-thickness			
+			I8ODS_DEFAULT_DETAIL_BORDER_COLOUR //border-colour			
+			I8ODS_DEFAULT_DETAIL_BACK_COLOUR //background-color			
+			I8ODS_DEFAULT_DETAIL_TEXT_COLOUR //text-colour				
+			spaces //text-align
+			spaces //font-weight				
+			spaces //font-name				
+			spaces //font-size				
+			"curr2dp" //data-style	
+			TRUE //Top Border	
+			TRUE //Bottom Border
+			TRUE //Left Border
+			TRUE //Right Border
+			FALSE // Wrap text
+			spaces // vertical align
+	do clibvods-add-sheet-column parameters "8cm" 1 // stock code
+	do clibvods-add-sheet-column parameters spaces 1 // stock group
+	do clibvods-add-sheet-column parameters spaces 1 // qty
+	do clibvods-add-sheet-column parameters "8cm" 1 // stock-description
+	do clibvods-add-sheet-column parameters spaces 1 // unit cost
+	do clibvods-add-sheet-column parameters spaces 1 // total cost
+	do clibvods-add-sheet-column parameters spaces 1 // unit price
+	do clibvods-add-sheet-column parameters spaces 1 // margin %ge
+	do clibvods-add-sheet-column parameters spaces 1 // total proce
+	do clibvods-add-sheet-column parameters spaces 1 // foreign cost
+	do clibvods-add-sheet-column parameters spaces 1 // total Foregn Cost
+	do clibvods-add-sheet-row
+	do clibvods-fill-a-cell-alpha-span parameters "MAINHEAD" str-concat("Shipment Margin Report:",lp-shipment) 11
+	do clibvods-add-sheet-row
+	do clibvods-add-sheet-row
+	do clibvods-fill-a-cell-alpha parameters I8ODS_CELL_STYLE_HEADER "Stock Code"
+	do clibvods-fill-a-cell-alpha parameters I8ODS_CELL_STYLE_HEADER "Stock Group "
+	do clibvods-fill-a-cell-alpha parameters I8ODS_CELL_STYLE_HEADER "Qty"
+	do clibvods-fill-a-cell-alpha parameters I8ODS_CELL_STYLE_HEADER "Stock Description"
+	do clibvods-fill-a-cell-alpha parameters I8ODS_CELL_STYLE_HEADER "Unit Cost"
+	do clibvods-fill-a-cell-alpha parameters I8ODS_CELL_STYLE_HEADER "Total Cost"
+	do clibvods-fill-a-cell-alpha parameters I8ODS_CELL_STYLE_HEADER "Unit Price"
+	do clibvods-fill-a-cell-alpha parameters I8ODS_CELL_STYLE_HEADER "Margin %ge"
+	do clibvods-fill-a-cell-alpha parameters I8ODS_CELL_STYLE_HEADER "Total Price"
+	do clibvods-fill-a-cell-alpha parameters I8ODS_CELL_STYLE_HEADER "Foreign Cost"
+	do clibvods-fill-a-cell-alpha parameters I8ODS_CELL_STYLE_HEADER "Total Foreign Cost"
+	set lf-row = 3
+	//
+	select * 
+		lf-extended-cost = t0.po-item-cost * t0.po-line-qty
+		lf-margin = if-then-else(t0.po-item-cost != 0
+			,((t2.prc-wholesale-price - t0.po-item-cost) / t0.po-item-cost * 100)
+			,0)
+		lf-total-price = t0.po-line-qty * t2.prc-wholesale-price
+		lf-foreign-cost = if-then-else(t0.po-cost-price-per = 0
+			,t0.po-item-cost-in-currency 
+			,t0.po-item-cost-in-currency / t0.po-cost-price-per)
+		lf-total-foreign-cost = if-then-else(t0.po-cost-price-per = 0
+			,t0.po-item-cost-in-currency * t0.po-line-qty
+			,t0.po-item-cost-in-currency * t0.po-line-qty / t0.po-cost-price-per)
+		from purchase-order-costing as t0
+		left outer join stock-master as t1
+			on t1.stock-code = t0.stock-code
+		left outer join stock-price as t2
+			on t2.stock-code = t0.stock-code and t2.prc-region-code = spaces
+		where     t0.po-shipment-no =  :lp-shipment
+	detail
+		do clibvods-add-sheet-row
+		set lf-row += 1
+		do clibvods-fill-a-cell-alpha parameters I8ODS_CELL_STYLE_DETAIL stock-code
+		do clibvods-fill-a-cell-alpha parameters I8ODS_CELL_STYLE_DETAIL stock-group
+		do clibvods-fill-a-cell-numeric parameters I8ODS_CELL_STYLE_DETAIL str(po-line-qty)
+		do clibvods-fill-a-cell-alpha parameters I8ODS_CELL_STYLE_DETAIL stk-description
+		do clibvods-fill-a-cell-numeric parameters "mycurrency" str(po-item-cost)
+		do clibvods-fill-a-cell-formula parameters "mycurrency" 
+			str-concat("[.C" str(lf-row) "]*[.E" str(lf-row) "]")
+		do clibvods-fill-a-cell-numeric parameters "mycurrency" str(prc-wholesale-price)
+		do clibvods-fill-a-cell-formula-percent parameters I8ODS_CELL_STYLE_DETAIL 
+			str-concat("([.G" str(lf-row) "]-[.E" str(lf-row) "])/[.E" str(lf-row) "]")
+		do clibvods-fill-a-cell-formula parameters "mycurrency"
+			str-concat("[.C" str(lf-row) "]*[.G" str(lf-row) "]")
+		do clibvods-fill-a-cell-numeric parameters "mycurrency" str(lf-foreign-cost)
+		do clibvods-fill-a-cell-formula parameters "mycurrency" 
+			str-concat("[.C" str(lf-row) "]*[.J" str(lf-row) "]")
+	end-select
+	// totals
+	do clibvods-add-sheet-row
+	do clibvods-fill-a-cell-alpha-repeat parameters spaces spaces 2 // jump two cells
+	do clibvods-fill-a-cell-formula parameters I8ODS_CELL_STYLE_DETAIL
+			concat("SUBTOTAL(9;[.c4:.c"  str(lf-row) "])")
+	do clibvods-fill-a-cell-alpha-repeat parameters spaces spaces 2 // jump two cells
+	do clibvods-fill-a-cell-formula parameters "mycurrency" 
+			concat("SUBTOTAL(9;[.f4:.f"  str(lf-row) "])")
+	do clibvods-fill-a-cell-alpha parameters spaces spaces 
+	do clibvods-fill-a-cell-formula-percent parameters I8ODS_CELL_STYLE_DETAIL
+			str-concat("([.I" str(lf-row + 1) "]-[.F" str(lf-row + 1) "])/[.F" str(lf-row + 1) "]")
+	do clibvods-fill-a-cell-formula parameters "mycurrency" 
+			concat("SUBTOTAL(9;[.i4:.i"  str(lf-row) "])")
+	do clibvods-fill-a-cell-alpha parameters spaces spaces 
+	do clibvods-fill-a-cell-formula parameters "mycurrency" 
+			concat("SUBTOTAL(9;[.k4:.k"  str(lf-row) "])")
+	// finish up
+	do clibvods-finish-export parameters are str-concat("/tmp/" ltrim(lp-shipment) ".ods")
+	message lp-shipment
+	do clibvods-transfer-file-to-pc-web-client parameters are  
+		str-concat("/tmp/" ltrim(lp-shipment) ".ods")
+end-procedure

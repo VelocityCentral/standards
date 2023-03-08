@@ -1,0 +1,333 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : Start Putty
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2021
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: utility/startputty.spl
+//
+// This program will start putty detatched from the current environment
+// It allows the user to enter a selection of the defined putty profiles
+// These are stored in an xml file in the users home directory.
+// It specifically includes the storage of passwords. 
+// All passwords are stored in the XML encrypted.
+// When the user exits the program for the first time they are prompted for 
+// a master password.  From that point on they will not be prompted again
+// unless no master password is specified (in which case they are prompted
+// every time).  The master password is stored in the xml enrypted and checked
+// each time the program is run.
+//
+// There are two parameters : 
+// 	-master : loads the master password so the user is not prompted.
+// 	-profile : loads and runs a specific profile with no user input.
+//
+// Modification History
+// Date		Who	SDR		What
+// 29Jun21  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+#include "../include/i8gparam.spl"
+
+#define PRIVATEKEY 'Thisistheprivatekey'
+#define PUBLICKEY 'idontwantitseen'
+
+#define XMLFILE  str-concat(get-env("HOME"),"/puttyprofiles.xml")
+
+ 
+field
+	ws-function-title					type string
+	ws-master-password				type string
+
+// XML from users home directory is loaded into this object
+// and the object is saved to xml file on exit
+object puttyprofiles
+	type memory
+	record
+		pp-profile						type string
+		pp-userid						type string
+		pp-password						type string
+		pp-notes						pic x(1024) type string
+	end-record
+	key is pp-profile
+
+// contains all the profiles from the windows registry
+object puttyregister
+	type memory
+	record
+		pr-profile						type string
+	end-record
+	key is pr-profile
+
+mode md-start
+	prompt "Start"
+mode md-master
+	prompt "Master Pwd"
+	help "Change the master password"
+
+procedure main
+local
+	lf-profile							type string
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8secabt-check-abort
+		parameters are sys-consolidation-division login-id() "ZVG" "M018"
+		returning ws-function-title 
+	do i8proglog-write-log
+	I8GPARAM_ALPHA("-master",spaces,ws-master-password)
+	I8GPARAM_ALPHA("-profile",spaces,lf-profile)
+	if lf-profile = spaces
+		do maintain-profiles
+	else
+		do load-profiles-from-xml
+		if exit-status() <= 0
+			do run-a-profile parameters are lf-profile
+		endif
+	endif
+end-procedure
+
+screen maintain-profiles
+// The main screen of the application.
+	window
+	title ws-function-title
+	datagrid
+	select * from puttyprofiles
+	allowed search entry correct remove md-start md-master
+before
+	do read-registry
+	do load-profiles-from-xml
+	if exit-status > 0
+		exit 1
+	endif
+detail
+	if screenmode = md-start
+		do run-a-profile parameters are pp-profile
+	endif
+	if screenmode = md-master
+		do get-master-password returning ws-master-password
+	endif
+	accept  pp-profile col 1 pic x(15)
+		title "Profile"
+	drop-down
+		width 30
+		select pr-profile
+			from puttyregister 
+	end-drop-down
+	accept pp-notes col 2 pic x(30)
+		title "Notes/Desc"
+		optional
+	accept pp-userid col 3 pic x(15)
+		title "User"
+		optional
+	accept pp-password col 4 pic x(15)
+		title "Password"
+		help "Blank will cause putty to prompt"
+		optional
+		colour 0 on if-then-else(pp-password = spaces,0,yellow)
+		blank
+after
+	do save-profiles-to-xml
+end-screen
+
+procedure run-a-profile
+// runs a selected profile
+parameters
+	lp-profile								type string
+	//
+	get puttyprofiles
+		on index pp-profile
+		key is lp-profile
+	on error ENOREC
+		message-box param-text("Profile <<P1>> does not exist" ,lp-profile)
+			title is ws-function-title
+			message-buttons  MSG_BOX_CANCEL
+			icon MSG_BOX_STOP
+	else
+		if pp-password = spaces
+			command strconcat("c:\program files (x86)\pronto\Util\RUNCMD.exe") external
+				parameters "/c" 'putty.exe' '-load' pp-profile '-l' pp-userid 
+				no-wait
+		else
+			command strconcat("c:\program files (x86)\pronto\Util\RUNCMD.exe") external
+				parameters "/c" 'putty.exe' '-load' pp-profile '-l' pp-userid '-pw' pp-password
+				no-wait
+		endif
+	endon
+end-procedure
+
+
+screen get-master-password
+returning
+	lr-master-password						type string
+	window
+	window-position 5
+	title "Master Password"
+	responsive
+	allowed entry-once
+	no-ok-cancel
+detail
+	screen-group // ---- Master Password ----------------------------
+		title "Master Password"  // The title is optional
+		accept lr-master-password
+			title "Master Password"
+			blank
+			optional
+	end-screen-group // ---- Master Password --------------------------------------
+end-screen
+
+procedure save-profiles-to-xml
+// saves everything to xml.  Run at conclusion of interactive session
+local
+	lx-doc								type xml-handle
+	lx-root								type xml-handle
+	lx-profile							type xml-handle
+	lx-profiles							type xml-handle
+	if ws-master-password = spaces
+		do get-master-password returning ws-master-password
+	endif
+	set lx-doc = xml-new-document(spaces,"puttydata") 
+	if lx-doc <= 0
+		message "no doc"
+		exit
+	endif
+	set lx-root = xml-get-root-node(lx-doc)
+	if lx-root <= 0
+		message "No root node"
+		exit
+	endif
+	if ws-master-password != spaces
+		if xml-add-child-node-text(lx-root,
+				"masterpassword",spaces,
+				encrypt(ws-master-password,PRIVATEKEY,PUBLICKEY)
+				) endif
+	endif
+	set lx-profiles = xml-add-child-node(lx-root,"profiles",spaces)
+	select * from puttyprofiles
+	detail
+		set lx-profile =  xml-add-child-node(lx-profiles,"profile",spaces) 
+		if xml-add-node-attribute(lx-profile,"name",spaces,pp-profile) endif
+		if xml-add-child-node-text(lx-profile,"user",spaces,pp-userid) endif
+		if pp-notes != spaces
+			if xml-add-child-node-text(lx-profile,"notes",spaces,pp-notes) endif
+		endif
+		if xml-add-child-node-text(lx-profile,"password",spaces,encrypt(pp-password,PRIVATEKEY,PUBLICKEY)) endif
+		if xml-free-node-handle(lx-profile) endif
+	end-select
+	if xml-free-node-handle(lx-profiles) endif
+	if xml-free-node-handle(lx-root) endif
+	if not xml-save-as-file(lx-doc,XMLFILE,spaces,2) 
+		message "error in save" error-description(file-status())
+	endif
+end-procedure
+
+procedure load-profiles-from-xml
+// reads the xml.  Run every time the program loads
+local
+	lx-doc							type xml-handle
+	lx-root							type xml-handle
+	lx-profiles						type xml-handle
+	lx-node							type xml-handle
+	lx-master-password				type xml-handle
+	lf-master-password				type string
+	lf-xml-master					type string
+	open puttyprofiles temporary
+	if file-exists(XMLFILE, FALSE)
+		// open and load
+		set lx-doc = xml-parse-file(XMLFILE)
+		if lx-doc = 0
+			message "XML Parse Failed"
+			exit 1
+		endif
+		set lx-root = xml-get-root-node(lx-doc)
+		if lx-root = 0
+			message "No root node"
+		endif
+		set lx-master-password = xml-get-child-by-name(lx-root,"masterpassword",spaces)
+		if lx-master-password != 0
+			set lf-xml-master = decrypt(xml-node-text(lx-master-password),PRIVATEKEY,PUBLICKEY)
+			if ws-master-password = spaces
+				do get-master-password returning lf-master-password
+				if lf-master-password != lf-xml-master
+					message-box 
+						"Invalid Master Password"
+						title is ws-function-title
+						message-buttons  MSG_BOX_CANCEL
+						icon MSG_BOX_STOP
+					exit 1
+				endif
+				set ws-master-password = lf-xml-master
+			else
+				if ws-master-password != lf-xml-master
+					message-box 
+						"Invalid Master Password"
+						title is ws-function-title
+						message-buttons  MSG_BOX_CANCEL
+						icon MSG_BOX_STOP
+					exit 1
+				endif
+			endif
+		endif
+		set lx-profiles = xml-get-child-by-name(lx-root,"profiles",spaces)
+		set lx-node = xml-get-child-by-name(lx-profiles,"profile",spaces)
+		while lx-node != 0
+			initialise puttyprofiles
+			set pp-profile = xml-get-node-attribute(lx-node,"name")
+			set pp-userid = xml-node-text(xml-get-child-by-name(lx-node,"user",spaces))
+			set pp-notes = xml-node-text(xml-get-child-by-name(lx-node,"notes",spaces))
+			set pp-password = xml-node-text(xml-get-child-by-name(lx-node,"password",spaces))
+			set pp-password = decrypt(pp-password,PRIVATEKEY,PUBLICKEY)
+			insert puttyprofiles
+			on error
+			endon
+			set lx-node = xml-get-next-node(lx-node)
+		end-while
+		if xml-free-node-handle(lx-node) endif
+		if xml-free-node-handle(lx-profiles) endif
+		if xml-free-node-handle(lx-root) endif
+		if xml-free-node-handle(lx-doc) endif
+	endif
+end-procedure
+
+procedure read-registry
+// loads the profiles currently defined in the registry
+local
+	lf-key								pic x(128) type string
+	i 									type number
+	set lf-key = "HKEY_CURRENT_USER/SOFTWARE/SimonTatham/Putty/Sessions"
+	open puttyregister temporary
+	repeat
+		initialise puttyregister
+		set pr-profile = get-registry-enum-key(lf-key,i)
+		do clean-profile-name parameters are pr-profile returning pr-profile
+	until pr-profile = spaces
+		insert puttyregister
+		on error 
+		endon
+		set i += 1
+	end-repeat
+end-procedure
+
+procedure clean-profile-name
+parameters
+	lp-profile							pic x(128) type string
+returning
+	lr-profile							pic x(128) type string
+local 
+	i 									type number
+	set lr-profile = lp-profile
+	repeat
+		set i = pattern(lr-profile,"%20")
+	until i = 0
+		string lr-profile deleting i to i + 2
+		string lr-profile inserting " " at i
+	end-repeat
+end-procedure
+
+

@@ -1,0 +1,422 @@
+link 'clib/clibstk'
+#include "../include/bmsdef.spl"  // for version
+#include "../include/stddef.spl"  // for "round" #define
+
+object sasb-copy like stock-aged-sales-budget
+
+object dmcopy like deb-master
+
+#if BMS_DICT_VER > 7501
+procedure main
+	message "pgm retired use configurable budgets"
+end-procedure
+
+#else
+
+procedure main
+window no-hide
+	title "Building Budgets"
+local l-no-customers			type number
+	i							type number
+	l-random					type number
+	l-stock-code				like stock-code
+	l-type 						like ash-budget-type
+	l-bof 						like ash-budget-or-forecast
+	l-whse 						like ash-whse
+	l-year 						like ash-budget-year
+	l-qty 						like ash-budget-qty
+	l-drp						pic x
+	l-skip						type boolean
+	l-found						type boolean
+	l-rounding					pic 99v9(5)
+	disable-all-triggers
+	do get-paras entry once returning l-drp
+	confirm
+		prompt "Ok to re-calculate Budgets"
+	confirmed
+	report "Customer budget create"
+		no-message
+//	
+	if random(tod()) endif // sends the random function
+//
+// clear file
+	display "Clearing budgets..." @10,10
+	select * from deb-sales-history-budget-2
+		where deb-budget-status = "F0"
+		or deb-budget-status = "F1"
+		for update
+	detail
+		delete deb-sales-history-budget-2
+		// will need to update deb-sales-hist-budget-qty[*]
+//		 and deb-sales-hist-budget-price[*]
+	end-select
+//
+// Blow kit forecasts through individual items so that MRP orders them...
+//
+	select * from stock-aged-sales-budget
+		where ash-budget-or-forecast <> "Z"
+		for update
+	detail
+		delete stock-aged-sales-budget
+	end-select
+	select * from stock-aged-sales-budget
+		where ash-budget-type = "0"
+		and ash-budget-or-forecast = "Z"
+		and ash-budget-year = 0
+	detail
+		save stock-aged-sales-budget
+		get stock-master
+			on index stock-code
+			key is stock-code
+		on error 
+		endon
+		if stk-stock-status <> "K"
+			continue
+		endif
+		set l-stock-code = stock-code
+		set l-type = ash-budget-type
+		set l-bof = ash-budget-or-forecast
+		set l-whse = ash-whse
+		set l-year = ash-budget-year
+		for i = 1 to 12
+			set l-qty[i] = ash-budget-qty[i]
+		endfor
+		set l-found = FALSE
+		select * from bill-of-materials-header
+			where stock-code = :l-stock-code
+		detail
+			set l-found = TRUE
+			break
+		end-select
+		if not l-found
+			continue
+		endif
+		
+		select * from bill-of-materials-detail
+			where bomh-id = :bomh-id
+		detail
+			get sasb-copy
+				on index stock-code ash-whse ash-budget-or-forecast ash-budget-type ash-budget-year
+				key is comp-code l-whse l-bof l-type l-year
+				lock
+			on error
+				initialise sasb-copy
+				set stock-code = comp-code
+				set ash-whse = l-whse
+				set ash-budget-year = l-year
+				set ash-budget-type = l-type
+				set ash-budget-or-forecast = l-bof
+				for i = 1 to 12
+					set ash-budget-qty[i] = l-qty[i] * bom-quantity
+				endfor
+				insert sasb-copy
+			else
+				for i = 1 to 12
+					set ash-budget-qty[i] += l-qty[i] * bom-quantity
+				endfor
+				update sasb-copy
+			endon
+		end-select
+		restore stock-aged-sales-budget
+		// re-get for curency
+//		get stock-aged-sales-budget
+	end-select
+//
+// Look at customers to budget for
+//
+	display "Counting Customers ..." @10,10
+	select * from deb-master
+		where dr-curr-code = spaces
+		and accountcode not like "Z%"
+//		and accountcode not like "%MAST%"
+		and accountcode not like "%WHSE%"
+		and accountcode not like "%CASH"
+	detail
+/*
+		get dmcopy 
+			on index bill-to
+			key is accountcode
+			lookup
+		on error
+			set l-no-customers += 1
+		endon
+*/
+		set l-skip = FALSE
+		save deb-master
+		select * from dmcopy
+			where bill-to = :accountcode
+			and bill-to <> accountcode
+		detail
+			// then it is a parent
+			set l-skip = TRUE
+		end-select
+		restore deb-master
+		if not l-skip
+			set l-no-customers += 1
+		endif
+	end-select
+	print "Number of customers is " l-no-customers
+	display "Calculating Spreads ..." @10,10
+	select * from stock-aged-sales-budget
+		where ash-budget-type = "0"
+		and ash-budget-or-forecast = "Z"
+		and ash-budget-year = 0
+	detail
+		get stock-master
+			on index stock-code
+			key is stock-code
+		on error 
+		endon
+		get stock-price
+			on index stock-code prc-region-code
+			key is stock-code spaces
+		on error
+		endon
+		//
+		// distribute ash-budget-qty across customers
+		//
+		select * from deb-master
+			where dr-curr-code = spaces
+			and accountcode not like "Z%"
+//			and accountcode not like "%MAST%"
+			and accountcode not like "%WHSE%"
+			and accountcode not like "%CASH"
+		detail
+			// 16/4/08 do not create for parents
+			print "checking customer " 
+			/*
+			get dmcopy 
+				on index bill-to
+				key is accountcode
+				lookup
+			on error
+				print "processing customer " accountcode 
+				initialise deb-sales-history-budget-2
+					leaving accountcode
+				set dsh-stock-key = stock-code
+				set deb-budget-status = "F0"
+				for i = 1 to 12
+					do get-random parameters are 0.8 1 returning l-random		
+					set l-random += 0.1 // therefore numbers are between 0.9 and 1.1
+					set deb-sales-hist-budget-qty[i] = (ash-budget-qty[i] / l-no-customers) * l-random
+					set deb-sales-hist-budget-price[i] = prc-wholesale-price
+				endfor
+				insert deb-sales-history-budget-2
+			else
+				print "ignoring customer " accountcode 
+			endon
+			*/
+			set l-skip = FALSE
+			save deb-master
+			select * from dmcopy
+				where bill-to = :accountcode
+				and bill-to <> accountcode
+			detail
+				// then it is a parent
+				set l-skip = TRUE
+			end-select
+			restore deb-master
+			if not l-skip 
+				print "processing customer " accountcode 
+				initialise deb-sales-history-budget-2
+					leaving accountcode
+				set dsh-stock-key = stock-code
+				set deb-budget-status = "F0"
+				for i = 1 to 12
+					do get-random parameters are 0.8 1 returning l-random		
+					set l-random += 0.1 // therefore numbers are between 0.9 and 1.1
+					set deb-sales-hist-budget-qty[i] = (ash-budget-qty[i] / l-no-customers) * l-random
+					// Now round to the correct number of decimal places.
+					get stock-master 
+						on index stock-code 
+						key is stock-code
+					on error
+					else
+						do clibstk-item-rounding 
+							parameters are stk-unit-desc
+							returning l-rounding
+						set deb-sales-hist-budget-qty[i] = round(deb-sales-hist-budget-qty[i],l-rounding)
+					endon
+					set deb-sales-hist-budget-price[i] = prc-wholesale-price
+				endfor
+				insert deb-sales-history-budget-2
+			else
+				print "ignoring customer " accountcode 
+			endif
+		end-select
+	end-select
+	// Now update all the other budgets based on deb-sales-history-budget2 
+	display "Clearing deb-sales-budget ..." @10,10
+	select * from deb-sales-budget
+		for update
+	detail
+		delete deb-sales-budget
+	end-select
+	display "Clearing SASH" @10,10
+	select * from stock-aged-sales-budget
+		where (ash-budget-or-forecast = "B" or ash-budget-or-forecast = "F")
+		for update
+	detail
+		delete stock-aged-sales-budget
+	end-select
+	display "Re-adding Budget files ..." @10,10
+	//
+	// deb-sales-budget 
+	//	1. Territory, and accountcode, stock-group must be blank and deb-budget-status = "DT"
+	//  2. Territory, accountcode,stock-group with deb-budget-status = "DT"
+	//  3. Territory, accountcode and stock-group spaces with deb-budget-status = "T0"
+	//  4. Territory , stock-group, accountcode = spaces and deb-budget-status= "T0"
+	//  5. Territory = rep-code, stock-group and accountcode = spaces, deb-budget-status = R0
+	//  6. Territory = rep-code stock-group but accountcode = sapces deb-budget-status = "R0"
+	//
+	// deb-sales-history-budget-2
+	// 1. Accountcode set, dsh-stock-key = product deb-budget-status = "00" and only the qty set to the budgetA
+	//
+	// stock-aged-sales-budget
+	// 1. stock code,whse set; ash-budget-type = "0" ash-budget-or-forecast = "B" ash-budget-year = 0
+	//		set ash-budget-qty and ash-budget-price
+	select * from deb-sales-history-budget-2
+		order by accountcode dsh-stock-key deb-budget-status
+	before accountcode
+		get deb-master
+			on index accountcode
+			key is accountcode
+		on error endon
+	detail
+		get stock-master
+			on index stock-code key is dsh-stock-key
+		do load-budget parameters are territory accountcode spaces "DT"
+		do load-budget parameters are territory accountcode stock-group "DT"
+		do load-budget parameters are territory spaces spaces "T0"
+		do load-budget parameters are territory spaces stock-group "T0"
+		do load-budget parameters are rep-code spaces spaces "R0"
+		do load-budget parameters are rep-code spaces stock-group "R0"
+		do load-ash parameters are stock-code warehouse "B"
+		// remove the warehouse record becuase "Branch" DRP warehouses get added
+		// to demand but "C" ones do not.
+		// need a blan warehouse record with the totals if we are going to 
+		// use DRP warehouses
+		get system-table 
+			on index sys-tbl-type sys-tbl-code
+			key is "WH" warehouse
+		on error endon
+		if sys-tbl-alpha-4[1] = "C" and l-drp = YES
+			do load-ash parameters are stock-code spaces "F"  
+		else
+			do load-ash parameters are stock-code warehouse "F"
+		endif
+	end-select
+	spl 'nan/cusbudg2'
+	end-confirm
+end-procedure
+
+procedure load-ash
+parameters are 
+	l-stock-code			like stock-code
+	l-whse					like warehouse
+	l-type					pic x
+local
+	i						type number
+	save deb-sales-history-budget-2
+	save deb-master
+	save stock-master
+	get stock-aged-sales-budget
+		on index stock-code ash-whse ash-budget-or-forecast ash-budget-type ash-budget-year
+		key is l-stock-code l-whse l-type "0" 0
+		lock
+	on error
+		initialise stock-aged-sales-budget
+			leaving stock-code ash-whse ash-budget-or-forecast ash-budget-type ash-budget-year
+		for i = 1 to 12
+			set ash-budget-qty[i] = deb-sales-hist-budget-qty[i] 
+			set ash-budget-price[i] = deb-sales-hist-budget-price[i] 
+		end-for
+		insert stock-aged-sales-budget
+	else
+		for i = 1 to 12
+			set ash-budget-qty[i] += deb-sales-hist-budget-qty[i] 
+// can't keep increasing the price !!!
+//			set ash-budget-price[i] += deb-sales-hist-budget-price[i] 
+		end-for
+		update stock-aged-sales-budget
+	endon
+	restore deb-sales-history-budget-2
+	restore deb-master
+	restore stock-master
+end-procedure
+
+procedure load-budget
+parameters are 
+	l-territory 		like territory
+	l-accountcode		like accountcode
+	l-stock-group		like stock-group
+	l-deb-budget-status like deb-budget-status
+local
+	i					type number
+	save deb-sales-history-budget-2
+	save deb-master
+	save stock-master
+	get deb-sales-budget
+		on index territory accountcode stock-group deb-budget-status
+		key is l-territory l-accountcode l-stock-group l-deb-budget-status
+		lock
+	on error
+		initialise deb-sales-budget
+			leaving territory accountcode stock-group deb-budget-status
+		set deb-budget-year = 0
+		for i = 1 to 12
+			set deb-sales-budget[i] = deb-sales-hist-budget-qty[i] * deb-sales-hist-budget-price[i] 
+		end-for
+		insert deb-sales-budget
+	else
+		for i = 1 to 12
+			set deb-sales-budget[i] += deb-sales-hist-budget-qty[i] * deb-sales-hist-budget-price[i] 
+		end-for
+		update deb-sales-budget
+	endon
+	restore deb-sales-history-budget-2
+	restore deb-master
+	restore stock-master
+end-procedure
+
+procedure get-random
+parameters are 
+	l-start							type number
+	l-end							type number
+returning
+	l-value							type number
+	if l-start < 0 
+		set l-start = 0
+	endif
+	if l-end > 1
+		set l-end = 1
+	endif
+	repeat
+		// random returns a number between 0 and 32767
+		set l-value = random(0)
+		// ensure the number is even spread between 0.0001 and +1
+		// 1. drop and amount > 10,000 ( to ensure we deal with an even range)
+		if l-value > 10000
+			set l-value = l-value - (integer(l-value / 10000) * 10000) + 1
+		endif
+		// now have a number between 0 and 9999
+		// divide by 10000 to get numbers between 0 and 0.9999
+		set l-value = l-value / 10000
+	until l-value between l-start and l-end
+	end-repeat
+end-procedure
+
+screen get-paras
+returning l-drp pic x
+	window @1,1 to @8,60
+	relative to @5,5
+detail
+	accept l-drp @1,35
+		allowed YES NO
+		optional
+		uppercase
+		default NO
+		prompt "Build for DRP ?"
+end-screen
+
+#endif

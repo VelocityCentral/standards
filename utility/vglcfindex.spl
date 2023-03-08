@@ -1,0 +1,440 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : Compare ids index with prodict.
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2016
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: utility/vglidict.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 29Nov16  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+#include "../include/bmsdef.spl"
+#include "../include/i8dictopen.spl"
+
+
+#define CHKBIT(A,B)  not(aand(A,power-of(2,B)) - power-of(2,B))
+
+mode md-select
+	prompt "Select"
+
+
+object sysdatabases
+	type is indexed
+	record is
+		sd_name							pic x(20) type string db-column-name "name"
+		sd_partnum						type number db-column-name "partnum"
+		sd_owner						pic x(20) type string db-column-name "owner"
+		sd_created						type date db-column-name "created"
+		sd_is_logging					type number db-column-name "is_logging"
+		sd_is_buff_log					type number db-column-name "is_buff_log"
+		sd_is_ansi						type number db-column-name "is_ansi"
+		sd_is_nls						type number db-column-name "is_nls"
+		sd_is_case_insens				type number db-column-name "is_case_insens"
+		sd_flags						type number db-column-name "flags"
+	end-record
+	key is sd_name
+	no-rowid
+
+
+object systables
+	type is indexed
+	record is
+		st_tabname						pic x(20) type string db-column-name "tabname"
+		st_owner						pic x(20) type string db-column-name "owner"
+		st_partnum						type number db-column-name "partnum"
+		st_tabid						type number db-column-name "tabid"
+		st_rowsize						type number db-column-name "rowsize"
+		st_ncols						type number db-column-name "ncols"
+		st_nindexes						type number db-column-name "nindexes"
+		st_nrows						type number db-column-name "nrows"
+		st_created						type date db-column-name "created"
+		st_version						type number db-column-name "version"
+		st_tabtype						pic x type string db-column-name "tabtype"
+		st_locklevel					pic x type string db-column-name "locklevel"
+		st_npused						type number db-column-name "npused"
+		st_fextsize						type number db-column-name "fextsize"
+		st_nextsize						type number db-column-name "nextsize"
+		st_flags						type number db-column-name "flags"
+		st_site							pic x(20) type string db-column-name "site"
+		st_dbname						pic x(20) type string db-column-name "dbname"
+		st_type_xid						type number db-column-name "type_xid"
+		st_am_id						type number db-column-name "am_id"
+		st_pagesize						type number db-column-name "pagesize"
+		st_ustlowts						type datetime db-column-name "ustlowts"
+		st_secpolicyid					type number db-column-name "secpolicyid"
+		st_protgranularity				pic x(20) type string db-column-name "protgranularity"
+		st_statchange					pic x(20) type string db-column-name "statchange"
+		st_statlevel					pic x(20) type string db-column-name "statlevel"
+	end-record
+	key is st_tabname
+	no-rowid
+
+object syscolumns
+	type is indexed
+	record is
+		sc_colname						pic x(50) type string db-column-name  "colname"
+		sc_tabid						type number db-column-name  "tabid"
+		sc_colno						type number db-column-name  "colno"
+		sc_coltype						type number db-column-name  "coltype"
+		sc_collength					type number db-column-name  "collength"
+		sc_colmin						pic x(20) type string db-column-name  "colmin"
+		sc_colmax						pic x(20) type string db-column-name  "colmax"
+		sc_extended_id					type number db-column-name  "extended_id"
+		sc_seclabelid					type number db-column-name  "seclabelid"
+		sc_colattr						type number db-column-name  "colattr"
+	end-record
+	key is sc_colname
+	no-rowid
+
+object sysindexes
+	type is indexed
+	record is
+		si_idxname						pic x(50) type string db-column-name  "idxname"
+		si_tabid						type number db-column-name  "tabid"
+		si_part1						type number db-column-name  "part1"
+		si_part2						type number db-column-name  "part2"
+		si_part3						type number db-column-name  "part3"
+		si_part4						type number db-column-name  "part4"
+		si_part5						type number db-column-name  "part5"
+		si_part6						type number db-column-name  "part6"
+		si_part7						type number db-column-name  "part7"
+		si_part8						type number db-column-name  "part8"
+		si_part9						type number db-column-name  "part9"
+		si_part10						type number db-column-name  "part10"
+		si_part11						type number db-column-name  "part11"
+		si_part12						type number db-column-name  "part12"
+		si_part13						type number db-column-name  "part13"
+		si_part14						type number db-column-name  "part14"
+		si_part15						type number db-column-name  "part15"
+		si_part16						type number db-column-name  "part16"
+	end-record
+	key is si_idxname
+	no-rowid
+	
+object memcolumns
+	type is memory
+	record is 
+		mc-colname						like sc_colname
+		mc-colno						type number 
+		mc-coltype						type number
+		mc-collength					type number 
+		mc-display-pic					pic x(255) type string
+		mc-pic-string					pic x(255) type string
+	end-record
+	key is mc-colno
+
+object text-file
+	type is memory
+	record
+		tf-seq							type number
+		tf-line							pic x(1024) type string
+		tf-type							pic x
+	end-record
+	key is tf-seq
+
+field
+	ws-next-seq							like tf-seq
+	ws-next-seq2						like tf-seq
+
+#define SQUIRT(A) \
+	set ws-next-seq += 1 \
+	initialise text-file \
+	set tf-seq = ws-next-seq \
+	set tf-line = A \
+	set tf-type = "S" \
+	insert text-file \
+	on error endon
+
+#define SQUIRT2(A) \
+	set ws-next-seq2 += 1 \
+	initialise text-file \
+	set tf-seq = ws-next-seq2 \
+	set tf-line = A \
+	set tf-type = "C" \
+	insert text-file \
+	on error endon
+
+mode md-type-toggle
+	prompt "Toggle Type"
+	help "Swap between command and sql statements"
+
+procedure main
+local lf-count type number
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8proglog-write-log
+	open sysdatabases
+		file is "/sysmaster/informix.sysdatabases"
+	select lf-count = count(*) from sysdatabases
+	end-select
+	set ws-next-seq = 0
+	set ws-next-seq2 = 100000
+	do select-db md-select search
+end-procedure
+
+screen select-db
+local
+	lf-error-count						type number
+	window
+	datagrid occurs 20
+	select sd_name, sd_created from sysdatabases
+detail
+	if screenmode = md-select
+		do print-idx-data parameters are sd_name
+			returning lf-error-count
+		if lf-error-count = 0
+			message-box "There were no problems"
+				title is "Index Scan"
+				message-buttons MSG_BOX_OK
+				icon MSG_BOX_INFORMATION
+		else
+			do display-results
+		endif
+	endif
+	accept sd_name @1,1
+		title "Name"
+	display sd_created @1,2
+		title "Created"
+end-screen
+
+screen display-results
+local
+	lf-select-type				 pic x
+	window
+	datagrid occurs 18
+	select * from text-file
+		where tf-type = lf-select-type
+	allowed search md-type-toggle
+before
+	if lf-select-type = spaces
+		set lf-select-type = "C"
+	endif
+	display "Toggle on type, export to datagrid, copy and paste " @1,5
+	display "Use putty to paste commands directly into window" @2,5
+detail
+	if screenmode = md-type-toggle
+		if lf-select-type = "C"
+			set lf-select-type = "S"
+		else 
+			set lf-select-type = "C"
+		endif
+		re-select
+		get text-file on index tf-seq key is 1
+		refresh 
+	endif
+	accept tf-seq @3,1 pic z(8)
+		title "seq"
+	display tf-line @3,3 pic x(60)
+		title "Desc"
+end-screen
+
+procedure print-idx-data
+	window 
+		@1,1 to @5,70
+		window-position 5
+		no-hide
+parameters
+	lp-db							like sd_name
+returning
+	lr-error-count					type number
+local
+	lf-tbl							type string
+	lf-keylist						pic x(100) type string
+	lf-keydblist					pic x(100) type string
+	lf-idxname						pic x(100) type string
+	lf-ids-keys						type number occurs 16
+	lf-ids-keys-str					pic x(100) type string
+	i								type number	
+	lf-seq							type number
+	set lf-seq = 1
+	display "Please wait -  Analsying Indexes" @2,5
+	report "Index comparison"
+	no-xml 
+	name rprt
+	report "fixscript"
+	no-xml
+	name fixscript
+	open text-file temporary
+	open systables
+		file is str-concat("/",lp-db,"/informix.systables")
+	on error
+		message "Can't open systables" 
+		exit
+	endon
+	open syscolumns
+		file is str-concat("/",lp-db,"/informix.syscolumns")
+	on error
+		message "Can't open systables" 
+		exit
+	endon
+	open sysindexes
+		file is str-concat("/",lp-db,"/informix.sysindexes")
+	on error
+		message "Can't open systables" 
+		exit
+	endon
+	do open-dict-object
+	parameters	get-env("PRODICT")
+				DICTDEF_DICT_OBJECT
+	select * 
+		from dict-object
+		order by obj-name
+		where obj-name < "~"
+	detail
+		do get-tbl parameters are obj-file obj-version returning lf-tbl
+		display lf-tbl @3,5
+		select * 
+			from systables
+			where st_tabid > 100
+			and st_tabtype = 'T'
+			and st_nrows > 0
+			and st_tabname = lf-tbl
+		detail
+			// by here we have only the tables that are on the disk and have
+			// some rows.
+			select * from dict-keys
+				where obj-id = :obj-id
+			detail
+				set lf-keylist = spaces
+				set lf-keydblist = spaces
+				for i = 1 to num-fields
+					get dict-field 
+						on index fld-id
+						key is k-fld-id[i]
+					on error
+						print "crap"
+					endon
+					string lf-keylist appending fld-name
+					string lf-keylist appending ","
+					string lf-keydblist appending fld-col-name
+					string lf-keydblist appending ","
+				end-for
+				// Now find the ids index
+				set lf-idxname = lf-tbl
+				string lf-idxname appending ascii-char(96 + index-no)
+				do get-ids-keys parameters are lf-idxname returning lf-ids-keys
+				set lf-ids-keys-str = spaces
+				for i = 1 to 16
+					if lf-ids-keys[i] = 0
+						break
+					endif
+					select * from syscolumns
+						where sc_tabid = st_tabid
+						and sc_colno = lf-ids-keys[i]
+					detail
+						string lf-ids-keys-str appending sc_colname
+						string lf-ids-keys-str appending ","
+					end-select
+				end-for
+				// remove trailing ,
+				string lf-ids-keys-str deleting str-len(lf-ids-keys-str)
+				string lf-keydblist deleting str-len(lf-keydblist)
+				for i = 1 to str-len(lf-keydblist)
+					if substring(lf-keydblist,i,i) = "-"
+						string lf-keydblist replacing "_" at i
+					endif
+				end-for
+				if ltrim(lf-ids-keys-str) != ltrim(lf-keydblist)
+					set lr-error-count += 1
+					print "Holy crap---->" rtrim(lf-idxname) "/" obj-name
+						on rprt
+					print "prodict------>" lf-keydblist
+						on rprt
+					print "ids---------->" lf-ids-keys-str
+						on rprt
+					SQUIRT(concat("drop index " str-concat(lf-idxname) ";"))
+					SQUIRT(concat( "create index " str-concat("pronto." lf-idxname) 
+						"    on " str-concat("pronto." lf-tbl) "(" str-concat(lf-keydblist) ") using btree;"))
+					SQUIRT2(concat("proobject -o " obj-name " -drop-index " str(index-no) ))
+					SQUIRT2(concat("proobject -o " obj-name " -create-index " str(index-no) ))
+				endif
+			end-select
+			// find the pronto table
+		end-select
+	end-select
+	report finished on rprt
+	report finished on fixscript
+end-procedure
+
+procedure get-ids-keys
+parameters
+	lp-idxname			pic x(100) type string
+returning
+	lr-cols				type number occurs 16
+	select * from sysindexes
+		where si_idxname = lp-idxname
+	detail
+		set lr-cols[1] = si_part1
+		set lr-cols[2] = si_part2
+		set lr-cols[3] = si_part3
+		set lr-cols[4] = si_part4
+		set lr-cols[5] = si_part5
+		set lr-cols[6] = si_part6
+		set lr-cols[7] = si_part7
+		set lr-cols[8] = si_part8
+		set lr-cols[9] = si_part9
+		set lr-cols[10] = si_part10
+		set lr-cols[11] = si_part11
+		set lr-cols[12] = si_part12
+		set lr-cols[13] = si_part13
+		set lr-cols[14] = si_part14
+		set lr-cols[15] = si_part15
+		set lr-cols[16] = si_part16
+		exit
+	end-select
+end-procedure
+
+
+procedure get-tbl
+parameters
+	lp-tbl								like obj-file
+	lp-ver								like obj-version
+returning
+	lr-tbl								type string
+local
+	i									type number
+	for i = 1 to strlen(lp-tbl)
+		if substring(lp-tbl,i,i) in ( "/" "\" )
+			set lr-tbl = spaces
+		else
+			string lr-tbl appending substring(lp-tbl,i,i)
+		endif
+	endfor
+	string lr-tbl appending obj-version
+	set lr-tbl = lowercase(lr-tbl)
+end-procedure
+
+
+procedure open-dict-object
+	parameters	lp-dictionary-and-path		pic x(BMSDEF_PATHSIZE)
+				lp-dict-table-name			pic xx
+	returning	lr-error-found				type boolean
+				lr-error-message			pic x(BMSDEF_PATHSIZE) type string
+				lr-dictionary-suffix		like dvn-bms-dict-overide-suffix
+	//
+	do i8dictopen-open-dictionary
+		parameters	
+//			DICTDEF_INDIVIDUAL_TABLES//individual
+			"M"
+			DICTDEF_BMS_DICT		//objname:dict,dict-usr,dict-distributor
+			lp-dictionary-and-path	//dictionary and path without suffix
+			lp-dict-table-name		//only used if opening individual
+			FALSE					//display message and abort if error found!
+			TRUE					//Open files read-only
+		returning
+			lr-error-found
+			lr-error-message
+			lr-dictionary-suffix
+endprocedure //open-dict-object ----------------------------------------------
+

@@ -1,0 +1,30 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : Standard Header for edi programs
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2020
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: edi/iedi.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 06Jan20  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+//
+
+//----Status Codes--------------------------------------------------------------
+#define IEDI_RECEIVED spaces
+#define IEDI_EXCEPTION '10'
+#define IEDI_LOADING '50'
+#define IEDI_LOADED '90'
+#define IEDI_CANCELLED '99'
+
+
+#define IEDI_L_RECEIVED spaces
+#define IEDI_L_EXCEPTION '10'
+#define IEDI_L_LOADED '90'
+#define IEDI_L_CANCELLED '99'

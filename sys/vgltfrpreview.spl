@@ -1,0 +1,919 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : Velocity TF preview for use in either client
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2017
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: sys/vgltfrpreview.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 18Jul17  rjb         written 
+//
+// There is some setup required for this program at a unix/windows level.
+// The trueform preview folder must be available under /pro/prontoweb/ext.
+// You can do this with a symbolic link or you can just use this location as
+// the trueform preview location and share it with samba.
+//
+// Another option is to leave the preview files on the windows server and 
+// use mount to mount it directly on the pronto server.  This is useful when
+// there is a single tf server but multiple pronto servers
+//
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/i8secabt.spl"
+#include "../include/i8secok.spl"
+#include "../include/bmsdef.spl"
+#include "../include/iprogbar.spl"
+#include "../include/i8proglog.spl"
+#include "../include/i8gparam.spl"
+// the general rule is that users do not have write access to lib directory
+// which means they cannot create files.  Start this process by logging on
+// as psd and "touch $PRONTO/lib/vgltfrpreview.xml" followed by chmod g+w 
+#define XMLFILE concat(get-env("PRONTO"),"/lib/vgltfrpreview.xml")
+ 
+field
+	ws-function-title					type string
+	ws-config-mode						type boolean
+	ws-local-folder						pic x(512) type string
+	ws-proclient-prefix					pic x(512) type string
+	ws-webclient-prefix					pic x(512) type string
+	ws-wait-1							pic 9(5)
+	ws-wait-2							pic 9(5)
+	ws-using-web-client					type boolean
+	ws-password							type boolean
+	ws-preview-queue					pic x(30) type string
+	ws-preview-project					pic x(30) type string
+	ws-default-project					like tms-default-project
+	ws-tmp-dir							type string pic x(250)
+	ws-ZVG-M011							type boolean
+
+object tmp-template		type text 
+	record 
+		tmp-line			pic x(1000)
+	endrecord 
+
+object tmp-jobticket		type text 
+	record 
+		tmp-line		
+	endrecord 
+
+object tmp-reportfile		type text 
+	record 
+		tmp-line		
+	endrecord 
+
+object tmp-spoolfiles
+	type memory
+	record
+		tmp-ts-key						pic x(20) type string
+		tmp-ts-spoolfile-id				type string pic x(30)
+		tmp-ts-owner					type string
+		tmp-ts-seq						pic 9(4)
+		tmp-ts-fileinfo					type string
+		tmp-ts-date-time				type date-time 
+		tmp-ts-description				pic x(50) type string
+		tmp-ts-form						pic x(30) type string
+		tmp-ts-pages					pic 9(5)
+		tmp-ts-numeric-lt-seq			pic x(5)
+		tmp-ts-tf-project				pic x(60)
+	endrecord
+	key is tmp-ts-spoolfile-id unique
+	key is tmp-ts-owner tmp-ts-spoolfile-id
+	key is tmp-ts-seq
+	key is tmp-ts-key
+	key is tmp-ts-owner tmp-ts-date-time desc 
+	key is tmp-ts-tf-project tmp-ts-seq
+
+object tmp-spoolfile-header
+	type text
+	record
+		tmp-tsh-record				pic x(1023) type string
+	endrecord
+
+object tmp-txt-spoolfiles
+	type external
+	separator is "|"
+	record 
+		tmp-ts-owner
+		tmp-ts-spoolfile-id
+	endrecord
+
+mode md-show 
+	prompt "Show"
+mode md-preview 
+	prompt "Preview"
+	always-show
+mode md-config
+	prompt "Configure"
+	when ws-ZVG-M011
+	always-show
+
+procedure main
+local
+	lf-config-loaded					type boolean
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8secabt-check-abort
+		parameters are sys-consolidation-division login-id() "ZVG" "E002"
+		returning ws-function-title 
+	do i8secok-check-ok
+		parameters sys-consolidation-division login-id() "ZVG" "M011"
+		returning ws-ZVG-M011
+	do i8proglog-write-log
+	I8GPARAM_FLAG("-config",FALSE,ws-config-mode)
+	set ws-tmp-dir = BMSDEF_TEMP_DIR_NAME()
+	do getconfig returning lf-config-loaded
+	if ws-config-mode or not lf-config-loaded
+		do config-screen correct once
+	else
+		if param-cnt() = 0
+			do get-spoolfile
+		else
+			do preview-selected-spoolfile parameters are get-param(1)
+		endif
+	endif
+end-procedure
+
+procedure getconfig
+returning
+	lr-config-loaded					type boolean
+	lr-message							pic x(512) type string
+local
+	lf-doc								type xml-handle
+	lf-root								type xml-handle
+	lf-node								type xml-handle
+	// 
+	// We are going to store the configuration data in an xml file 
+	// in the lib directory
+	//
+	set lr-config-loaded = FALSE
+	if not file-exists(XMLFILE,0)
+		set lr-message = "File does not exist"
+		exit
+	endif
+	//
+	set lf-doc = xml-parse-file(XMLFILE)
+	if not lf-doc 
+		set lr-message = "Could not load xml file"
+		exit
+	endif
+	set lf-root = xml-get-root-node(lf-doc)
+	if not lf-root
+		set lr-message = "Could not locate root node"
+		exit
+	endif
+	set lf-node = xml-get-first-child-node(lf-root)
+	while lf-node
+		switch xml-node-name(lf-node)
+		case "ws-local-folder"
+			set ws-local-folder = xml-node-text(lf-node)
+		case "ws-webclient-prefix"
+			set ws-webclient-prefix = xml-node-text(lf-node)
+		case "ws-proclient-prefix"
+			set ws-proclient-prefix = xml-node-text(lf-node)
+		case "ws-preview-queue"
+			set ws-preview-queue = xml-node-text(lf-node)
+		case "ws-preview-project"
+			set ws-preview-project = xml-node-text(lf-node)
+		case "ws-default-project"
+			set ws-default-project = xml-node-text(lf-node)
+		case "ws-password"
+			set ws-password = num(xml-node-text(lf-node))
+		end-switch
+		set lf-node = xml-get-next-node(lf-node)
+	end-while
+	set ws-wait-1 = num(getenv("TFRENDERDELAY"))
+	set ws-wait-2 = num(getenv("TFCOPYDELAY"))
+	if ws-wait-1 = 0
+		set ws-wait-1 = 30
+	endif 	
+	if ws-wait-2 = 0
+		set ws-wait-2 = 2
+	endif 	
+	//
+	set ws-using-web-client = get-system-metrics(7) // Non 0 = web client
+	set lr-config-loaded = TRUE
+end-procedure
+
+screen config-screen
+	window
+	title ws-function-title
+	form-entry
+detail
+	accept ws-local-folder @2,20 pic x(50)
+		title 'Local Folder'
+		help "Enter the unix folder that will contain the previews generated by TF."
+	display "This should be under /pro/prontoweb/ext to be used by the Web client" @3,20 foreground prompts
+		scale 80
+	accept ws-webclient-prefix @4,20 pic x(50)
+		title "Web Client Prefix"
+		help "The path to the preview file if accessed from web client"
+	display "Will be something like 'http://192.168.110.20/ext' " @5,20 foreground prompts
+		scale 80
+	accept ws-proclient-prefix @6,20 pic x(50)
+		title "Proclient Prefix" 
+		help "The path to the preview file if accessed from proclient (i.e. the samba share)"
+	display "Will be something like '\\pronto\tfpreview' " @7,20 foreground prompts
+		scale 80
+	accept ws-preview-project @8,20
+		title "Preview Project"
+		help "The name of the director project used to preview forms"
+	accept ws-preview-queue @9,20
+		title "Preview Queue"
+		help "The name of the print queue connected to trueform for preview"
+	accept ws-default-project @10,20
+		title "Default Project"
+		help "The project to use if there is none defined by the form (may be blank)"
+	check-box ws-password	@12,20
+		values true false
+		title "Password Protection"
+		right-coordinate
+		default is false
+	end-check-box 
+after
+	do saveconfig
+endscreen
+
+procedure saveconfig
+returning
+	lr-config-saved						type boolean
+	lr-message							pic x(100) type string
+local
+	lf-doc								type xml-handle
+	lf-root								type xml-handle
+	lf-node								type xml-handle
+	lf-status							type number
+	//
+	set lf-doc = xml-new-document("1.0","Parameters")
+	set lf-root = xml-get-root-node(lf-doc)
+	set lf-node = xml-add-child-node-text(lf-root,"ws-local-folder",spaces,ws-local-folder)
+	set lf-node = xml-add-child-node-text(lf-root,"ws-webclient-prefix",spaces,ws-webclient-prefix)
+	set lf-node = xml-add-child-node-text(lf-root,"ws-proclient-prefix",spaces,ws-proclient-prefix)
+	set lf-node = xml-add-child-node-text(lf-root,"ws-preview-queue",spaces,ws-preview-queue)
+	set lf-node = xml-add-child-node-text(lf-root,"ws-preview-project",spaces,ws-preview-project)
+	set lf-node = xml-add-child-node-text(lf-root,"ws-default-project",spaces,ws-default-project)
+	set lf-node = xml-add-child-node-text(lf-root,"ws-password",spaces,str(ws-password))
+	set lf-status = xml-save-as-file(lf-doc,XMLFILE,xml-get-doc-encoding(lf-doc),2)
+	if lf-status <= 0
+		set lr-message = error-description(file-status)
+		set lr-config-saved = FALSE
+		message-box param-text("<<P1>><<BR>><<p2>><<BR>><<p3>>"
+			,"An error occurred"
+			,concat("Attempting to save ", XMLFILE)
+			,"Do you have write access?")
+			title is ws-function-title
+			message-buttons MSG_BOX_CANCEL
+			icon MSG_BOX_STOP
+	else
+		set lr-config-saved = TRUE
+	endif
+endprocedure
+
+screen get-spoolfile
+returning 
+	lr-spoolfile-number					pic x(20)
+local	
+	lf-user								type string pic x(30)
+	lf-spools-found						type numeric
+	lf-spoolfile-directory				type string pic x(250)
+	//
+	window @19,30 to @23,80
+		title is concat("Select Spoolfile : ",lf-spoolfile-directory)
+	allow correct 
+before
+	do get-spoolfile-directory
+		returning lf-spoolfile-directory
+	//
+	if operating-system = "UNIX"
+		display "Created By    :" @21,32
+	endif
+	set	lf-user = login-id()
+	set lf-spools-found = ZERO
+detail
+	accept lr-spoolfile-number @20,48 
+		help "Enter a spool file number - (#P)nnnnn , nnnnn(.xml) or spaces = all,"
+		optional
+		title "Report File Number:" 
+	//
+	accept lf-user @21,48
+		help "Enter the name of a user, space for all users."
+		when lf-spools-found = ZERO
+		and operating-system = "UNIX"
+		no-clear
+		optional
+	confirm auto
+	confirmed
+		display "Loading Spoolfiles" @22,41 bold prompt
+		do load-reports-to-tmp-spoolfile
+			parameter lr-spoolfile-number lf-user  lf-spoolfile-directory
+			returning lf-spools-found
+		//
+		if lf-spools-found = 0
+			display "No Spoolfile found" @22,41 bold prompt
+			message "No Reports Found" 
+			reenter lr-spoolfile-number optional
+		else
+			//We found something.. go select one 
+			//beginning with the first one
+			get tmp-spoolfiles first
+				on index tmp-ts-owner tmp-ts-date-time
+			on error
+			endon
+			do select-spool-to-print
+				 search md-show md-preview md-config
+		endif
+	endconfirm
+endscreen //attach-spoolfiles ------------------------------------------------
+
+procedure get-spoolfile-directory 
+returning
+	lr-spoolfile-directory				type string pic x(250)
+local	
+	lf-count							pic 9
+	lf-key								pic x(7)
+	//
+	//If they are running REPORTDIR use that...
+	set lr-spoolfile-directory = getenv("REPORTDIR")
+	//Otherwise, try for REPORTS, then reports in data (current) directory.
+	while lr-spoolfile-directory = SPACES
+		set lf-count += 1
+		switch on lf-count
+		case 1 
+			set lf-key = "REPORTS"
+		case 2
+			set lf-key = "reports"
+		else 
+			set lr-spoolfile-directory = "."
+			break 
+		endswitch
+		if start-dir-search(".",lf-key)
+			set lr-spoolfile-directory = next-dir-entry()
+			if finish-dir-search()
+			endif 
+		endif
+	endwhile
+endprocedure //set-spoolfile-directory  ------------------------------
+
+procedure load-reports-to-tmp-spoolfile
+	//Wrapper routine
+	//Load both Spoolfiles and XML Reports 
+parameter	
+	lp-spoolnumber-in					pic x(20)
+	lp-user								type string
+	lp-spoolfile-directory				pic x(256) type string
+returning	
+	lr-matched							type numeric
+local 		
+	lf-model							type string pic x(250)
+	lf-xml-matched						type numeric
+//
+	//First check for Spoolfiles alone
+	set lf-model = strconcat("#P",lp-spoolnumber-in)
+	do populate-tmp-spoolfile 
+		parameter lf-model lp-user "TRUNCATE" lp-spoolfile-directory
+		returning lr-matched
+	//Now do it again for XML reports
+	set lf-model = strconcat(lp-spoolnumber-in,".xml")
+	set lf-xml-matched = 0
+    do populate-tmp-spoolfile 
+		parameter lf-model lp-user "APPEND" lp-spoolfile-directory
+	    returning lf-xml-matched
+	set lr-matched += lf-xml-matched
+endprocedure //load-reports-to-tmp-spoolfile ---------------------------------
+
+procedure populate-tmp-spoolfile
+parameter	
+	lp-model							type string	pic x(250)
+	lp-user								type string
+	lp-adding-xmlreports				pic x(10)   // APPEND or TRUNCATE
+	lp-spoolfile-directory				pic x(256) type string
+returning	
+	lr-matched							type numeric
+local			
+	lf-count							pic 99
+	lf-locked-rec						type boolean
+	lf-pathfile							type string pic x(80)
+	lf-data								type string pic x(50)
+	lf-ok-to-tag						type boolean
+	//
+	set lr-matched = 0
+	//
+	if not lp-adding-xmlreports = "APPEND" 
+		open tmp-spoolfiles truncate temporary
+	endif
+	open tmp-txt-spoolfiles truncate temporary
+	if start-dir-search(lp-spoolfile-directory,lp-model)
+		repeat
+			set tmp-ts-spoolfile-id = next-dir-entry()
+			if tmp-ts-spoolfile-id > SPACES
+				if operating-system = "UNIX"
+					if pattern(strconcat(lp-spoolfile-directory),"/$")
+						set lf-pathfile = strconcat(lp-spoolfile-directory
+							,tmp-ts-spoolfile-id)
+					else
+						set lf-pathfile = strconcat(lp-spoolfile-directory
+							,"/",tmp-ts-spoolfile-id)
+					endif
+					//Don't include those files that aren't for nominated user.
+					set tmp-ts-owner = file-owner(lf-pathfile)
+					if lp-user not in { SPACES tmp-ts-owner }
+						continue
+					endif
+					//Don't include those files this user can't read.
+				else //Windows Standalone, NT or other non-UNIX
+					set tmp-ts-owner = SPACES
+				endif
+				insert tmp-txt-spoolfiles
+			endif
+		until tmp-ts-spoolfile-id = SPACES
+		endrepeat
+	endif
+	//
+	select * from tmp-txt-spoolfiles
+	detail
+		set lf-pathfile = strconcat(lp-spoolfile-directory,"/",
+							tmp-ts-spoolfile-id)
+		open tmp-spoolfile-header read-only
+			file is lf-pathfile 
+		on error 
+			//ignore spoolfiles that cant be read....
+			continue
+		endon 
+		//
+		set tmp-ts-seq = ZERO
+		get tmp-spoolfiles lock
+		on error
+			set lf-locked-rec = FALSE
+		else
+			set lf-locked-rec = TRUE
+		endon
+		initialise tmp-spoolfiles leaving
+			tmp-ts-owner tmp-ts-spoolfile-id tmp-ts-seq
+		set lf-count = 0
+		select * from tmp-spoolfile-header 
+		detail
+			//Read info from the spool or XML file itself
+			if pattern(tmp-ts-spoolfile-id ,"xml")
+				set lf-count += 1
+				//Handle XML Reports as well
+				if pattern(tmp-tsh-record,"</report_info>")
+					//End of header section - get out
+					break
+				endif
+				if tmp-ts-description = SPACES
+					do parse-xml-line
+						parameter "title" tmp-tsh-record
+						returning tmp-ts-description
+				endif
+				if tmp-ts-form = SPACES
+					do parse-xml-line
+						parameter "form_type" tmp-tsh-record
+						returning tmp-ts-form 
+				endif
+				if tmp-ts-pages = 0
+					do parse-xml-line
+						parameter "page_count" tmp-tsh-record
+						returning lf-data
+					if lf-data <> SPACES
+						set tmp-ts-pages = integer(num(lf-data))
+					endif
+				endif
+			else
+				//Spoolfiles
+				if pattern(tmp-tsh-record,ascii-char(12))
+					//Break when we hit the form feed
+					break
+				endif
+				set lf-count += 1
+				switch on lf-count
+				case 1
+					set tmp-ts-description = 
+						substring(tmp-tsh-record,2,strlen(tmp-tsh-record))
+				case 3
+					set tmp-ts-pages = num(strconcat(tmp-tsh-record))
+				case 4
+					set tmp-ts-form = uppercase(strconcat(tmp-tsh-record))
+				endswitch
+			endif
+		endselect
+		set lr-matched += 1
+		set tmp-ts-numeric-lt-seq = zstr(lr-matched,5,0)
+		set tmp-ts-key = tmp-ts-numeric-lt-seq
+		//What about an exact match
+		//in case where user request specific spoolfile
+		if tmp-ts-spoolfile-id > SPACES
+		and tmp-ts-spoolfile-id = lp-model
+			set lf-ok-to-tag = TRUE
+//			set ws-mapped-form = SPACES
+		endif
+		set tmp-ts-date-time = modification-time(lf-pathfile)
+		//
+		if tmp-ts-form != space 
+			//need to get the project related to this spoolfile
+			//by mapping back to trueform-document-types.
+			//cant just rely on form-name as it can be duplicated
+			//and you might get the wrong one. Instead use
+			//source and form type to get the layout.
+			//then compare report name to get the right one.
+			//works as long as report name is unique by layout
+			select * 
+				from trueform-document-types
+				where tdt-form-name = :tmp-ts-form
+				order by tdt-form-name tdt-document
+			detail
+				//If multiple records setup with the same form-name
+				//the layout, source and type details have to entered
+				//to select the correct trueform project
+				if tdt-layout != SPACES
+					get system-forms-header
+						on index ssh-layout-code ssh-order-source 
+								 ssh-order-status
+						key is tdt-layout tdt-source tdt-form-type
+					on error
+						continue
+					else
+						if tmp-ts-description = ssh-report-name
+							set tmp-ts-tf-project = tdt-project
+						endif
+					endon
+				else
+					set tmp-ts-tf-project = tdt-project
+				endif
+			endselect
+		endif
+		if tmp-ts-tf-project = SPACES 
+			set tmp-ts-tf-project = ws-default-project
+		endif	
+		if tmp-ts-tf-project = spaces
+			if lf-locked-rec
+				delete tmp-spoolfiles
+			endif
+		else
+		//
+			if lf-locked-rec 
+				update tmp-spoolfiles no-warning
+			else
+				insert tmp-spoolfiles
+			endif
+		endif
+	endselect
+endprocedure //populate-tmp-spoolfile --------------------------------
+
+procedure parse-xml-line
+parameter 
+	lp-key								type string pic x(50)
+	lp-text								type string pic x(80)
+return    
+	lr-data								type string pic x(80)
+local 	  
+	lf-startag							pic 9(2)
+	lf-endtag							pic 9(2)
+	lf-startkey							type string pic x(80)
+	lf-endkey							type string pic x(80)
+	//
+	//Pass in the value of the KEY minus tags
+	//Pass lp-key : title
+	//Pass lp-text: <title>Debtors Report</title>
+	//Returns: Debtors Report
+	set lf-startkey = strconcat("<",lp-key,">")
+	set lf-endkey = strconcat("</",lp-key,">")
+	set lf-startag = pattern(lp-text,lf-startkey)
+	if lf-startag 
+		set lf-startag += strlen(lf-startkey)
+		set lf-endtag = pattern(lp-text,lf-endkey)
+		set lr-data = substring(lp-text, lf-startag,lf-endtag - 1)
+	else
+		set lr-data = SPACES
+	endif
+endprocedure //parse-xml-line ------------------------------------------------
+
+screen select-spool-to-print
+	//
+	window @1,1 to @23,106
+		title is "Spoolfiles"
+	primary tmp-spoolfiles 
+		on index tmp-ts-owner tmp-ts-date-time
+	datagrid occurs 18
+	allow search md-show md-preview md-config
+detail
+	display tmp-ts-spoolfile-id @1,6 pic x(10) 
+		title "File"
+	display tmp-ts-owner @1,14 
+		title "Owner"
+	display tmp-ts-date-time @1,32 
+		title "Date/Time"
+	display tmp-ts-pages @1,45 pic z(5)9 
+		title "Pages"
+	display tmp-ts-description @1,50 pic x(20)
+		title "Report Name"
+	display tmp-ts-form @1,55 pic x(20) 
+		title "Form Name"
+	display tmp-ts-tf-project @1,57 pic x(20) 
+		title "TrueForm Project"
+	confirm auto
+	confirmed
+		if screenmode() = md-show
+			command 'proprint'	parameters '-v' tmp-ts-spoolfile-id 
+		elseif screenmode = md-preview
+			do print-preview
+				parameter tmp-ts-spoolfile-id tmp-ts-tf-project
+		elseif screenmode = md-config
+			do config-screen correct once
+		endif
+	endconfirm
+after 
+	initialise tmp-spoolfiles
+endscreen //select-spool-to-print ------------------------------------
+
+/////////////////////////////////////////////////////////
+//needs to be current on spoolfile directory....
+//	* Project   ...  (project comes from the spool) 
+//	* spool     ...
+/////////////////////////////////////////////////////////
+procedure print-preview
+parameter 
+	lp-spool-file						pic x(256)
+	lp-project							pic x(256)
+local	
+	lf-preview-file						pic x(256)
+	lf-i								pic 99
+	lf-password							pic x(30)
+	//
+	window @5,1 to @9,70
+		title "TrueForm Preview"
+		no-hide
+	if ws-password
+		//add in password 
+		accept lf-password @6,20
+			title "Set PDF Password:"
+			help "Enter a password to use to protect preview PDF, Leave blank for no Password"
+			default lf-password
+	endif 
+	//
+	do iprogbar-progress-bar
+		parameter	FALSE 8 15 1 	 	
+	display "Progress:" @8,2 background bold	
+	//
+	if lp-project = space 
+		message "No matching form project found"
+		exit	
+	endif 
+	//
+	display "Sending to TrueForm server (1/3)" @8,39 background 	
+	do send-preview-to-queue
+		parameter 
+			ws-preview-queue	
+			lp-spool-file		
+			lp-project			
+			lf-password	
+			ws-proclient-prefix
+		returning 
+			lf-preview-file
+	//		
+	display "Waiting for file (2/3)" @8,39 background 	
+	for lf-i = 1 to ws-wait-1 
+		if sleep(1)		
+		endif 
+		do iprogbar-progress-bar
+			parameter	FALSE 8 15 1 	 	
+		if file-exists(str-concat(ws-local-folder,"/",lf-preview-file),0)
+			display "Opening file (3/3)" @8,39 background 	
+			do iprogbar-progress-bar
+				parameter	TRUE 8 15 1 	 	
+			if sleep(ws-wait-2)		
+				//Give it a second before opening 
+			endif 
+			do open-file parameters are lf-preview-file
+			break	
+		endif 	
+		if lf-i = 2
+			do open-file parameters are lf-preview-file
+			break
+		endif
+	endfor	
+endprocedure //print-preview -------------------------------------------------
+
+procedure open-file
+parameters
+	lp-filename							pic x(256) type string
+local
+	lf-cmd								pic x(1024) type string
+//
+	if ws-using-web-client = 1
+		set lf-cmd =  str-concat(ws-webclient-prefix,"/",lp-filename)
+	else
+		set lf-cmd =  str-concat(ws-proclient-prefix,"\",lp-filename)
+	endif
+	command lf-cmd
+		external no-wait
+		no-message
+	on error
+		message-box param-text("<<P1>><<BR>><<p2>><<BR>><<p3>>"
+			,"There was a problem opening the file,"
+			,lf-cmd,
+			error-description(exit-status()))
+			title is ws-function-title
+			message-buttons MSG_BOX_CANCEL
+			icon MSG_BOX_STOP
+			optional
+	endon
+end-procedure
+
+procedure send-preview-to-queue
+parameter 
+	lp-queue							pic x(50)
+	lp-spool-file						pic x(256)
+	lp-project							pic x(256)
+	lp-password							pic x(30)
+	lp-directory						pic x(256)
+returning 
+	lr-preview-file						pic x(256)
+local 
+	lf-feed								type boolean
+	lf-report-file						type string pic x(250)
+	lf-tod								pic x(20)
+	lf-preview-file						pic x(256) type string
+	//
+	set lf-tod = str(systime())
+	open tmp-jobticket truncate temporary 
+	set tmp-line = "%cpBegin"
+	insert tmp-jobticket
+	set tmp-line = concat("%cpParam:-s",ws-preview-project)
+	insert tmp-jobticket
+	set tmp-line = concat("%cpUserData:",lp-project)
+	insert tmp-jobticket
+	set tmp-line = concat("%cpUsrDefData:",lp-password)
+	insert tmp-jobticket
+	set tmp-line = concat("%cpDate:",lf-tod)
+	insert tmp-jobticket
+	set tmp-line = concat("%cpUser:",login-id())
+	insert tmp-jobticket
+	set tmp-line = "%cpEnd"
+	insert tmp-jobticket
+	set lr-preview-file = strconcat(login-id(),lf-tod,".pdf")
+	set lf-preview-file = strconcat(lp-directory,"\",lr-preview-file)
+	//
+	set lf-report-file = strconcat(ws-tmp-dir,'/',lp-spool-file,"-",str(pid()),".txt")
+	command 'proprint'	parameters '-t' lp-spool-file lf-report-file
+	////////////////////////////////////////////////////////
+	//consolidate						like projects 
+	////////////////////////////////////////////////////////
+	open tmp-reportfile 
+		file is lf-report-file
+	on error 
+		message "There was an error processing the spoolfile(s)" lf-report-file
+	else
+		select * from  tmp-reportfile 
+		before	
+			set lf-feed = FALSE 
+		detail 
+			//////////////////////////////////////////////////////////////////
+			//Need to insert a formfeed here to separate from the last report
+			//////////////////////////////////////////////////////////////////
+			if not lf-feed
+				if substring(tmp-line,1,1) != ascii-char(12) 
+					string tmp-line inserting ascii-char(12) at 1
+				endif 
+				set lf-feed = true 	
+			endif 	
+			insert tmp-jobticket
+		endselect 
+		close tmp-reportfile and remove 
+	endon 	
+	//
+	do send-mail-fax	
+		parameter lp-queue
+	//	
+endprocedure //send-preview-to-queue -----------------------------------------
+
+procedure send-mail-fax
+parameter
+	lp-queue	pic x(50)
+	//////////////////////////////////////////////////////////////	
+	//	Queue must be plain text if going to be processed by TF
+	/////////////////////////////////////////////////////////////
+	report "Sending interacive data for TF"
+		no-xml
+		direct to lp-queue
+		width 300
+		length 300
+		no-message 
+	select * from tmp-jobticket
+	detail
+		/////////////////////////////////////////////////
+		//Try and keep print aspect the same.. (FF in the coprrect place) 
+		// if we add our own our print wont repaginate for us when it hits the length ....
+		/////////////////////////////////////////////////
+		if substring(tmp-line,1,1) = ascii-char(12)
+			string tmp-line deleting 1 
+			page
+		endif 
+		print substring(tmp-line,1,255) col 1
+			// limitation of 255 characters that can be printed at this point in time .... doh.
+			 substring(tmp-line,256,500) col 256
+	endselect 
+	report finished
+/////////////////////////////////////////////////////////////////////////////////	
+/*DEBUG ---------------------------------------------------------------	
+	//////////////////////////////////////////////////////////////	
+	//	Queue must be plain text if going to be processed by TF
+	/////////////////////////////////////////////////////////////
+	report "Sending interacive data for TF"
+		no-xml
+		width 300
+		length 300
+	extract tmp-jobticket	
+		all
+	detail
+		/////////////////////////////////////////////////
+		//Try and keep print aspect the same.. (FF in the coprrect place) 
+		// if we add our own our print wont repaginate for us when it hits the length ....
+		/////////////////////////////////////////////////
+		if substring(tmp-line,1,1) = ascii-char(12)
+			string tmp-line deleting 1 
+			page
+		endif 
+		print substring(tmp-line,1,255) col 1
+			// limitation of 255 characters that can be printed at this point in time .... doh.
+			 substring(tmp-line,256,500) col 256
+	endextract 
+	report finished
+DEBUG ---------------------------------------------------------------*/	
+/////////////////////////////////////////////////////////////////////////////////	
+endprocedure //send-mail-fax -------------------------------------------------
+
+procedure preview-selected-spoolfile
+parameters
+	lp-spool-file						pic x(256) type string
+local
+	lf-project							pic x(256) type string
+	//
+	do find-form
+		parameters are lp-spool-file
+		returning lf-project
+	do print-preview parameters are lp-spool-file lf-project
+end-procedure
+
+procedure find-form
+parameter 
+	lp-spool-file						pic x(256)
+returning
+	lr-project							pic x(256) type string
+local	
+	lf-form								pic x(60) 		
+	lf-count							pic 99
+	lf-spoolfile-directory				pic x(256) type string
+	//	
+	do get-spoolfile-directory
+		returning lf-spoolfile-directory
+	open tmp-spoolfile-header read-only
+		file is strconcat(lf-spoolfile-directory,"/",lp-spool-file) 
+	on error 
+		message "Could not open spoolfile: "   strconcat(lf-spoolfile-directory,"/",lp-spool-file)
+		exit
+	endon 
+	//	
+	select * from tmp-spoolfile-header 
+	detail
+		//Read info from the spool or XML file itself
+		if pattern(lp-spool-file ,"xml")
+			do parse-xml-line
+				parameter "form_type" tmp-tsh-record
+				returning lf-form 
+			if lf-form != space 
+				break
+			endif 	
+		else
+			set lf-count += 1
+			if lf-count = 4
+				set lf-form = uppercase(strconcat(tmp-tsh-record))
+				break
+			endif
+		endif
+		//
+		if pattern(tmp-tsh-record,"</report_info>")
+		or pattern(tmp-tsh-record,ascii-char(12))
+			break
+		endif
+	endselect
+	//	
+	if lf-form != space 
+		get trueform-document-types 
+			on index tdt-form-name
+			key is lf-form
+		on error 
+			set lr-project = ws-default-project
+		else	
+			set lr-project = tdt-project
+		endon
+	else	
+		set lr-project = ws-default-project
+	endif	
+endprocedure //find-form -----------------------------------------------------

@@ -1,0 +1,538 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : 
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2021
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: nan/stkcat.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 25Apr21  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+#define CATCSVNAME 'nancat.csv'
+#define ARRCNT 100
+
+link 'clib/clibserial'
+ 
+field
+	ws-function-title					type string
+	ws-diameter							type number occurs ARRCNT
+	ws-diameter-used					type number // number of elements used
+	ws-length							type number occurs ARRCNT
+	ws-length-used						type number // number of elements used
+	ws-pitch							type number occurs ARRCNT
+	ws-pitch-used						type number // number of elements used
+	ws-material							type string occurs ARRCNT
+	ws-material-used					type number // number of elements used
+	ws-head								type string occurs ARRCNT
+	ws-head-used						type number // number of elements used
+	ws-supplier							type string occurs ARRCNT
+	ws-supplier-used					type number // number of elements used
+	ws-app-type							type string occurs ARRCNT
+	ws-app-type-used					type number // number of elements used
+	ws-app-model						type string occurs ARRCNT
+	ws-app-model-used					type number // number of elements used
+	ws-app-section						type string occurs ARRCNT
+	ws-app-section-used					type number // number of elements used
+	ws-app-item							type string occurs ARRCNT
+	ws-app-item-used					type number // number of elements used
+
+
+object catfile
+	type is external
+	file is CATCSVNAME
+	record is
+		cf-id							type string // A
+		cf-inc-code						type string // B
+		cf-type							type string // C
+		cf-desc-a						type string // D
+		cf-desc-b						type string // D
+		cf-desc-c						type string // D
+		cf-sup-type						type string // E
+		cf-sup-code						type string // F
+		cf-sup-part						type string // G
+		cf-sup-price					pic 9(6).99 // H
+		cf-pat-type						type string // K
+		cf-pat-val						type string // L
+		cf-pat-seq						type number // M
+		cf-app-type						type string // T
+		cf-app-model					type string // U
+		cf-app-section					type string // V
+		cf-app-item						type string // W
+		cf-app-seq						type number // X
+	end-record
+
+
+procedure main
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8secabt-check-abort
+		parameters are sys-consolidation-division login-id() "ZUSR" "R004"
+		returning ws-function-title 
+	do i8proglog-write-log
+	report "debug"
+	confirm
+		prompt "OK to create catalogue"
+	confirmed
+		do build-cat
+		message "Complete"
+	endconfirm
+end-procedure
+
+procedure build-cat
+	// seed the random function
+	if random(tod()) endif
+	// clean up
+	do delete-cat
+	open catfile create truncate permanent
+	// create all possible permutations
+	do build-catpat
+	do build-catapp
+	do build-catsups
+	// build the import file defintion
+	do build-file-import
+	// Set the array upper boundaries
+	do set-array-used-elements
+	// now do the create
+	do create-bolts
+end-procedure
+
+procedure create-bolts
+local
+	// array offsets:
+	d 									type number // ws-diameter
+	l 									type number // ws-length
+	t 									type number // ws-pitch pitch
+	m 									type number // ws-material
+	h 									type number // ws-head type
+	// this routine steps through all the arrays and 
+	// calls the add-one-bolt routine for every permutaion
+	// and combination of settings.  
+	// Add-one-bolt will determine if particular settings are appropriate
+	for d = 1 to ws-diameter-used 
+		for l = 1 to ws-length-used
+			for t = 1 to ws-pitch-used
+				for m = 1 to ws-material-used
+					for h = 1 to ws-head-used
+						// for diameter, pitch and lenght select only
+						// combinations that are near each other
+						if ((l > d - 3) and (l < d + 3))
+							AND
+							(( t > l - 2) and (t < l + 2))
+						do add-one-bolt parameters
+							ws-diameter[d]
+							ws-length[l]
+							ws-pitch[t]
+							ws-material[m]
+							ws-head[h]
+						endif
+					end-for
+				end-for
+			end-for
+		end-for
+	end-for
+end-procedure
+
+procedure add-one-bolt
+parameters
+	lp-dia								type number
+	lp-len								type number
+	lp-thread							type number
+	lp-material							type string
+	lp-head								type string
+local
+	t 									type number
+	s 									type number
+	m 									type number
+	i 									type number
+	lf-id								type number
+	//
+	initialise catfile
+	// Firstly get a unique number
+	do clibserial-next-serial-number parameters are "STKCATALOG" returning lf-id
+	set cf-id = str(lf-id)
+	set cf-inc-code = "BLT"
+	// the part number description is built up progressively
+	set cf-desc-a = concat("BOLT M" str(lp-dia))
+	string cf-desc-a appending concat(" " str(lp-len) "mm")
+	string cf-desc-a appending concat(" " str(lp-thread) "pitch")
+	set cf-desc-b = lp-material
+	set cf-desc-c = lp-head
+	set cf-type = "C"
+	insert catfile
+	// now the patterns
+	set cf-pat-seq = 0
+	do insert-pattern parameters are "DIA" str(lp-dia)
+	do insert-pattern parameters are "LEN" str(lp-len)
+	do insert-pattern parameters are "TP" str(lp-thread)
+	do insert-pattern parameters are "MT" lp-material
+	do insert-pattern parameters are "HD" lp-head
+	// now the applications
+	set cf-pat-seq = 0
+	for t = 1 to ws-app-type-used
+		for s = 1 to ws-app-section-used
+			for m = 1 to ws-app-model-used
+				for i = 1 to ws-app-item-used
+					do insert-application parameters are 
+						ws-app-type[t]
+						ws-app-section[s]
+						ws-app-model[m]
+						ws-app-item[i]
+				end-for
+			end-for
+		end-for
+	end-for
+	// now add the suppliers
+	for s = 1 to ws-supplier-used
+		do insert-supplier parameters are ws-supplier[s] lp-dia lp-material
+	endfor
+end-procedure
+
+
+procedure insert-pattern
+parameters
+	lp-type				like cf-pat-type
+	lp-val				like cf-pat-val
+	initialise catfile leaving cf-id cf-pat-seq
+	set cf-pat-type = lp-type
+	set cf-pat-val = lp-val
+	set cf-pat-seq += 1
+	insert catfile
+end-procedure
+
+procedure insert-application
+parameters
+	lp-type								like cf-app-type
+	lp-model							like cf-app-model
+	lp-section							like cf-app-section
+	lp-item								like cf-app-item
+	initialise catfile leaving cf-id cf-app-seq
+	set cf-app-type = lp-type
+	set cf-app-model = lp-model
+	set cf-app-section = lp-section
+	set cf-app-item = lp-item
+	set cf-app-seq += 1
+	insert catfile
+end-procedure
+
+procedure insert-supplier
+parameters
+	lp-supp							like cf-sup-code
+	lp-diameter						type number
+	lp-material						type string
+local
+	randomchar 						pic x
+	i 								type number
+	//
+	initialise catfile leaving cf-id 
+	set cf-sup-type = 'S'
+	set cf-sup-code = lp-supp
+	// 8 digit random part number
+	for i = 1 to 8
+		do get-random-character returning randomchar
+		string cf-sup-PART appending randomchar
+	end-for
+	// price is a function of size
+	do get-random parameters are .1 .3 returning i
+	set cf-sup-price = lp-diameter * (i + .9) / 10
+	if sub-string(lp-material,1,2) = 'SS' // stainless steel
+		set cf-sup-price *= 3
+	endif
+	insert catfile
+end-procedure
+
+procedure build-catapp	
+	set ws-app-type[1] = 'HOME'
+	set ws-app-type[2] = 'COMM'
+	set ws-app-model[1] = 'A56G'
+	set ws-app-model[2] = 'B53D'
+	set ws-app-section[1] = 'GRPHD'
+	set ws-app-section[2] = 'PCASE'
+	set ws-app-item[1] = 'EQ200'
+	set ws-app-item[2] = 'EQ150'
+end-procedure
+
+procedure build-catpat
+//	open catsups temporary
+	// inc table
+	do add-sys-tbl parameters are "PF" "BLT" "Bolts"
+	// Diameter
+	do add-sys-tbl parameters are "PJ" "DIA" "Diameter"
+	do insert-cat-pattern parameters are 'BLT' 'DIA' 'M5'
+	do insert-cat-pattern parameters are 'BLT' 'DIA' 'M6'
+	do insert-cat-pattern parameters are 'BLT' 'DIA' 'M8'
+	do insert-cat-pattern parameters are 'BLT' 'DIA' 'M12'
+	do insert-cat-pattern parameters are 'BLT' 'DIA' 'M14'
+	do insert-cat-pattern parameters are 'BLT' 'DIA' 'M16'
+	do insert-cat-pattern parameters are 'BLT' 'DIA' 'M18'
+	do insert-cat-pattern parameters are 'BLT' 'DIA' 'M20'
+	do insert-cat-pattern parameters are 'BLT' 'DIA' 'M22'
+	do insert-cat-pattern parameters are 'BLT' 'DIA' 'M24'
+	do insert-cat-pattern parameters are 'BLT' 'DIA' 'M27'
+	// Length
+	do add-sys-tbl parameters are "PJ" "LEN" "Length"
+	do insert-cat-pattern parameters are 'BLT' 'LEN' '12'
+	do insert-cat-pattern parameters are 'BLT' 'LEN' '14'
+	do insert-cat-pattern parameters are 'BLT' 'LEN' '18'
+	do insert-cat-pattern parameters are 'BLT' 'LEN' '20'
+	do insert-cat-pattern parameters are 'BLT' 'LEN' '25'
+	do insert-cat-pattern parameters are 'BLT' 'LEN' '30'
+	do insert-cat-pattern parameters are 'BLT' 'LEN' '40'
+	do insert-cat-pattern parameters are 'BLT' 'LEN' '50'
+	do insert-cat-pattern parameters are 'BLT' 'LEN' '60'
+	do insert-cat-pattern parameters are 'BLT' 'LEN' '100'
+	do insert-cat-pattern parameters are 'BLT' 'LEN' '120'
+	// Thread Pitch
+	do add-sys-tbl parameters are "PJ" "TP" "Thread Pitch"
+	do insert-cat-pattern parameters are 'BLT' 'TP' '1.0'
+	do insert-cat-pattern parameters are 'BLT' 'TP' '1.25'
+	do insert-cat-pattern parameters are 'BLT' 'TP' '1.5'
+	do insert-cat-pattern parameters are 'BLT' 'TP' '1.75'
+	do insert-cat-pattern parameters are 'BLT' 'TP' '2.0'
+	// Material
+	do add-sys-tbl parameters are "PJ" "MT" "Material"
+	do insert-cat-pattern parameters are 'BLT' 'MT' 'SS.A2-70'
+	do insert-cat-pattern parameters are 'BLT' 'MT' 'SS.A4-70'
+	do insert-cat-pattern parameters are 'BLT' 'MT' 'S4.6'
+	do insert-cat-pattern parameters are 'BLT' 'MT' 'S8.8'
+	do insert-cat-pattern parameters are 'BLT' 'MT' 'GALV4.6'
+	do insert-cat-pattern parameters are 'BLT' 'MT' 'ZINCPLAT4.6'
+	do insert-cat-pattern parameters are 'BLT' 'MT' 'ZINCPLAT8.8'
+	// STYLE
+	do add-sys-tbl parameters are "PJ" "HD" "HEAD"
+	do insert-cat-pattern parameters are 'BLT' 'HD' 'HEX' // AA
+	do insert-cat-pattern parameters are 'BLT' 'HD' 'COACH' // ss or S
+end-procedure
+
+procedure build-catsups
+	set ws-supplier[1] = "S0006"
+	set ws-supplier[2] = "S0016"
+end-procedure
+
+
+procedure insert-cat-pattern
+parameters are
+	lp-inc								type string pic x(4) 
+	lp-code								like stock-cat-pattern-type
+	lp-value							like stock-cat-pattern
+local
+	i 										type number
+	// deal with arrays
+	switch lp-code
+	case "DIA"
+		for i =  1 to ARRCNT
+			if ws-diameter[i] = 0
+				set ws-diameter[i] = num(substring(lp-value,2,str-len(lp-value)))
+				print "diameter" i ws-diameter[i] lp-value
+				break
+			endif
+		endfor
+	case "LEN"
+		for i =  1 to ARRCNT
+			if ws-length[i] = 0
+				set ws-length[i] = num(lp-value)
+				print "length" i ws-length[i] lp-value
+				break
+			endif
+		endfor
+	case "TP"
+		for i =  1 to ARRCNT
+			if ws-pitch[i] = 0
+				set ws-pitch[i] = num(lp-value)
+				print "pitch" i ws-pitch[i] lp-value
+				break
+			endif
+		endfor
+	case "MT"
+		for i =  1 to ARRCNT
+			if ws-material[i] = spaces
+				set ws-material[i] = lp-value
+				print "material" i ws-material[i] lp-value
+				break
+			endif
+		endfor
+	case "HD"
+		for i =  1 to ARRCNT
+			if ws-head[i] = spaces
+				set ws-head[i] = lp-value
+				print "head" i ws-head[i] lp-value
+				break
+			endif
+		endfor
+	end-switch
+end-procedure
+
+procedure add-sys-tbl
+parameters
+	lp-type					like sys-tbl-type
+	lp-code					like sys-tbl-code
+	lp-desc					like sys-description
+	//
+	get system-table
+		on index sys-tbl-type sys-tbl-code
+		key is lp-type lp-code
+		lock
+	on error ENOREC
+		initialise system-table 
+			leaving sys-tbl-type sys-tbl-code
+		set sys-description = lp-desc
+		insert system-table
+	else
+		set sys-description = lp-desc
+		update system-table
+	endon
+end-procedure
+
+procedure delete-cat
+	open stock-catalogue-master truncate permanent
+	open stock-catalogue-supplier truncate permanent
+	open stock-catalogue-pattern truncate permanent
+	open stock-catalogue-text truncate permanent
+	open stock-catalogue-xref truncate permanent
+	open stock-catalogue-application truncate permanent
+	sql-delete system-table
+		where sys-tbl-type = 'PJ'
+	sql-delete system-table
+		where sys-tbl-type = 'PF'
+	//reset next number for stock catalogue to 1.
+	get system-table lock
+		on index sys-tbl-type sys-tbl-code
+		key is "YY" "STKCATALOG"
+	on error
+	else
+		set sys-money-value = 1
+		update system-table
+	endon
+end-procedure
+
+procedure build-file-import
+local 
+	lf-id						like report-seq-number
+	//
+	sql-delete reporting-seq-file
+		where rs-printer-name = CATCSVNAME
+	select lf-id = max(report-seq-number)
+		from reporting-seq-file
+		where report-seq-name = "CATLOAD"
+	end-select
+	initialise reporting-seq-file
+	set report-seq-name = "CATLOAD"
+	set report-seq-number = lf-id + 1
+	set report-seq-program-type = "L"
+	set rs-program-name = "EDL"
+	set rs-description = "Bolts"
+	set rs-parameters[1] = 'AN099999999'
+	set rs-parameters[2] = 'BA4'
+	set rs-parameters[3] = 'CA1'
+	set rs-parameters[4] = 'DA30'
+	set rs-parameters[5] = 'DA30'
+	set rs-parameters[6] = 'DA30'
+	set rs-parameters[7] = 'EA1'
+	set rs-parameters[8] = 'FA10'
+	set rs-parameters[9] = 'GA35'
+	set rs-parameters[10] = 'HN09999999999.99'
+	set rs-parameters[11] = 'KA4'
+	set rs-parameters[12] = 'LA15'
+	set rs-parameters[13] = 'MN0999.9'
+	set rs-parameters[14] = 'TA6'
+	set rs-parameters[15] = 'UA6'
+	set rs-parameters[16] = 'VA6'
+	set rs-parameters[17] = 'WA6'
+	set rs-parameters[18] = 'XN0999.9'
+	set rs-printer-name = CATCSVNAME
+	insert reporting-seq-file
+	on error
+	endon
+end-procedure
+
+procedure set-array-used-elements
+local
+	i 									type number
+	for i = 1 to ARRCNT
+		if ws-diameter[i] != 0
+			set ws-diameter-used = i
+		endif
+		if ws-length[i] != 0
+			set ws-length-used = i
+		endif
+		if ws-pitch[i] != 0
+			set ws-pitch-used = i
+		endif
+		if ws-material[i] != spaces
+			set ws-material-used = i
+		endif
+		if ws-head[i] != spaces
+			set ws-head-used = i
+		endif
+		if ws-app-type[i] != spaces
+			set ws-app-type-used = i
+		endif
+		if ws-app-model[i] != spaces
+			set ws-app-model-used = i
+		endif
+		if ws-app-section[i] != spaces
+			set ws-app-section-used = i
+		endif
+		if ws-app-item[i] != spaces
+			set ws-app-item-used = i
+		endif
+		if ws-supplier[i] != spaces
+			set ws-supplier-used = i
+		endif
+	endfor
+endprocedure
+
+
+procedure get-random
+parameters are 
+	l-start							type number
+	l-end							type number
+returning
+	l-value							type number
+	if l-start < 0 
+		set l-start = 0
+	endif
+	if l-end > 1
+		set l-end = 1
+	endif
+	repeat
+		// random returns a number between 0 and 32767
+		set l-value = random(0)
+		// ensure the number is even spread between 0.0001 and +1
+		// 1. drop and amount > 10,000 ( to ensure we deal with an even range)
+		if l-value > 10000
+			set l-value = l-value - (integer(l-value / 10000) * 10000) + 1
+		endif
+		// now have a number between 0 and 9999
+		// divide by 10000 to get numbers between 0 and 0.9999
+		set l-value = l-value / 10000
+	until l-value between l-start and l-end
+	end-repeat
+end-procedure //
+
+procedure get-random-character
+returning
+	lr-char							pic x
+local
+	r 								type number
+	//
+	do get-random parameters are .01 .36 returning r
+	set r = integer(r * 100)
+	if r < 10
+		set lr-char = str(r)
+	else
+		set lr-char = ascii-char((r - 10) + 65)
+	endif
+end-procedure
+
+

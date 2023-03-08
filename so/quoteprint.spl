@@ -1,0 +1,670 @@
+#define TAB chr(9)
+#define CR chr(13)
+#define ESC chr(27)
+#define	APPNAME	"Word.Application"
+#include "../include/i8word.spl"
+#include "../include/oleWord2003.spl"
+
+field 
+	ws-inst-id							type ole-interface
+	ws-wb-id							type ole-interface
+	ws-active-document					type ole-interface
+	ws-id								type ole-interface
+	ws-object							type ole-interface
+	ws-bookmark							type ole-interface
+	ws-word								type ole-interface
+	ws-dummy-ret						pic 999
+
+// this is a list of bookmarks we need in the template
+// using a memory table because we don't have n-dimensional arrays.
+object bookmark-list
+	type memory
+	record is
+		bl-name							pic x(100) type string
+		bl-mandatory					type boolean
+		bl-exists						type boolean
+	end-record
+	key is bl-name
+
+procedure main
+local
+	lf-so-order-no						type number
+	lf-so-bo-suffix						type string
+//
+	get system-control first
+	set lf-so-order-no = num(get-param(1))
+	set lf-so-bo-suffix = get-param(2)
+	if lf-so-order-no = 0
+		if login-id() = "rayb"
+			set lf-so-order-no = 3
+			set lf-so-bo-suffix = spaces
+		else
+			abort "This program must be passed a sales order"
+		endif
+	endif
+	do build-bookmark-list
+	do print-quote parameters are lf-so-order-no lf-so-bo-suffix
+	message-box "Quote Complete"
+		Title "Quote Preparation" 
+		message-buttons MSG_BOX_OK
+		icon MSG_BOX_INFORMATION
+		optional
+		tag 1
+		bell
+end-procedure
+
+procedure get-address
+parameters are
+	lp-so-order-no						type number
+	lp-so-bo-suffix						type string
+returning
+	lr-addr								pic x(30) type string occurs 6
+	lr-fax								like na-fax-no
+local
+	i									type number
+//
+// where did this quote come from?
+//
+// To handle this correctly the mff allow entry of customer at order entry
+// must be set to something other than "Y"
+//
+	get sales-order
+		on index so-order-no so-bo-suffix
+		key is lp-so-order-no  lp-so-bo-suffix
+	on error
+	endon
+	get sales-order-delivery
+		on index so-order-no so-bo-suffix so-text-type
+		key is lp-so-order-no  lp-so-bo-suffix "DA"
+	on error
+	else
+		for i = 1 to 6
+			set lr-addr[i] = so-dl-text[i]
+		endfor
+		set lr-fax = so-dl-fax
+		exit
+	endon
+// there's a customer use it
+	get deb-master
+		on index accountcode
+		key is so-cust-code
+	on error
+	else
+		get name-and-address-master
+			on index accountcode na-type
+			key is accountcode "C"
+		on error
+		endon
+		set lr-addr[1] =  shortname
+		set lr-addr[2] =  na-company
+		set lr-addr[3] =  na-street
+		set lr-addr[4] =  na-suburb
+		set lr-addr[5] =  na-country
+		set lr-fax = na-fax-no
+		exit
+	endon
+end-procedure
+
+procedure print-quote
+parameters
+	lf-so-order-no						type number
+	lf-so-bo-suffix						type string
+local
+	lf-doc-name							pic x(150)
+	set lf-doc-name = "c:\usr\pronto\cus\sample\quote.dot"
+	get sales-order
+		on index so-order-no so-bo-suffix
+		key is lf-so-order-no lf-so-bo-suffix
+	on error
+		abort "Could not find sales order :" 
+	endon
+	do print-word-document-ole
+		parameters are lf-doc-name
+end-procedure
+
+
+procedure print-word-document-ole
+parameters are 
+	lp-this-doc							pic x(150)
+local
+	lf-txt								type string
+	lf-file-name						pic x(128) type string
+	lf-addr								pic x(30) type string occurs 6
+	lf-fax								like na-fax-no
+	lf-ver								pic x(60)
+	lf-dummy-ret-a						pic x(100)
+	lf-email							type string pic x(120)
+	//
+	//	Opens up a word session
+	//
+	set ws-inst-id = ole-get-active-object (APPNAME)
+	if ws-inst-id <= 0
+		set ws-inst-id = ole-create-instance (APPNAME, CLSCTX_LOCAL_SERVER)
+		if ws-inst-id <= 0
+			abort "Can't create instance - error ", ole-status()
+		end
+	end
+	if not ole-get-property (ws-inst-id, "Application.Version", lf-ver)
+		abort "Could not get version property: ", ole-status()
+	end
+	//
+	// Creates a new Document from the template Doc - OK
+	//
+// opening an existing document
+	if not ole-call-method (ws-inst-id, "Application.Documents.add", ws-dummy-ret , lp-this-doc)
+		message "Template document not added"
+		//
+		// Just opens up a document (blank)
+		//
+		if not ole-call-method (ws-inst-id, "Application.Documents.Add", ws-dummy-ret)
+			message "no add"
+		end
+	end
+	do verify-template 
+	if exit-status != 0
+		if ole-release(ws-inst-id) endif
+		exit 1
+	endif
+	if ole-get-property(ws-inst-id,"ActiveDocument",ws-active-document)
+	endif
+	if ole-get-property(ws-active-document,"FullName",lf-dummy-ret-a)
+	endif
+	if ole-call-method(ws-inst-id, "Selection.GoTo",ws-dummy-ret,-1,1,0,"line_start")
+		set ws-word = ole-call-method(ws-inst-id,"Selection.TypeText",ws-dummy-ret,"not sure where this is")
+		message 'did it'
+	endif
+	if ole-call-method(ws-inst-id,"ActiveDocument.Bookmarks.Item",ws-bookmark,"add1")
+		if ole-call-method(ws-bookmark,"Select",ws-dummy-ret)
+//			set ws-word = ole-call-method(ws-inst-id,"Selection.TypeText",dummy-ret,"This should line line 1 of the add")
+		endif
+	endif 
+	if ole-get-property(ws-inst-id,"ActiveDocument.characters",ws-object)
+	endif
+	if ole-get-property(ws-inst-id,"ActiveDocument.characters",ws-object,4)
+	endif
+	if ole-get-property(ws-inst-id,"ActiveDocument.content",ws-object)
+	endif
+	if ole-get-property(ws-inst-id,"ActiveDocument.bookmarks",ws-object)
+		if ole-call-method(ws-object, "Item",ws-bookmark,"add1")
+			if ole-call-method(ws-bookmark, "Select",ws-bookmark,"add1")
+			endif
+		endif
+	endif
+	get deb-master
+		on index accountcode
+		key is so-cust-code
+	on error
+	endon
+	do get-address parameters are so-order-no so-bo-suffix
+		returning lf-addr lf-fax
+	if lf-addr[1] <> spaces
+		do ole-paste-bookmark parameters are "customer_code" lf-addr[1]
+	endif
+	if lf-addr[2] <> spaces
+		do ole-paste-bookmark parameters are "add1" lf-addr[2]
+	endif
+	if lf-addr[3] <> spaces
+		do ole-paste-bookmark parameters are "add2" lf-addr[3]
+	endif
+	if lf-addr[4] <> spaces
+		do ole-paste-bookmark parameters are "add3" lf-addr[4]
+	endif
+	if lf-addr[5] <> spaces
+		do ole-paste-bookmark parameters are "add4" lf-addr[5]
+	endif
+	if lf-fax <> spaces
+		do ole-paste-bookmark parameters are "fax" lf-fax
+	endif
+	do find-email-address parameters are so-cust-code
+		returning lf-email
+	if lf-email <> spaces
+		do ole-paste-bookmark parameters are "email" lf-email
+	endif
+	do print-lines
+	do cvt-string parameters (so-order-total-amount ) returning lf-txt
+	do ole-paste-bookmark parameters are "total" lf-txt
+	do cvt-string parameters so-order-total-tax returning lf-txt
+	do ole-paste-bookmark parameters are "GST" lf-txt
+	do cvt-string parameters (so-order-total-amount + so-order-total-tax )
+	returning lf-txt
+	do ole-paste-bookmark parameters are "grand_total" lf-txt
+	do ole-paste-bookmark parameters are "user" "Ray Burns"
+	//
+	// Displays The Document - OK
+	//
+	set ws-word = ole-put-property (ws-inst-id, "Application.Visible", true)
+	//
+	//
+	// Moves cursor down 10 lines
+	//
+	set ws-word = ole-call-method(ws-inst-id,"Selection.MoveDown",ws-dummy-ret,wdLine,10)
+//
+//	 Save as pdf
+//		The 17 at the end of the call method indicates the document is saved
+//		as a pdf.
+//
+	set lf-file-name = str-concat("c:\tmp\quote",str(so-order-no),so-bo-suffix)
+	if ole-call-method(ws-inst-id,"ActiveDocument.ExportasFixedFormat",ws-dummy-ret,lf-file-name,17)
+		do update-quicklinks parameters are 
+			str-concat(lf-file-name,".pdf")
+			"sales-order"
+			str-concat(str(so-order-no),"/",so-bo-suffix)
+	endif
+	//
+	// Releases all ole interfaces
+	//
+	if ole-release (ws-id)
+	endif
+	if ole-release (ws-wb-id)
+	endif
+	if ole-release (ws-inst-id)
+	endif
+end-procedure
+
+procedure print-lines
+local 
+	lf-txt								type string
+	lf-bookmark							type string
+	lo-tables							type ole-interface
+	lo-table							type ole-interface
+	lo-bookmark							type ole-interface
+	lf-line								type number
+	lf-first-time						type boolean
+	lf-last-type						like sol-line-type
+	lf-note-text						pic x(16000) type varchar
+	lf-tbl-row-no						type number
+	//
+	set ws-word = ole-put-property (ws-inst-id, "Application.Visible", true) // rjb debug
+	set lf-bookmark = "line_start"
+	// get object id's for tables collection and first table
+	if not ole-get-property(ws-inst-id,"ActiveDocument.Tables",lo-tables) 
+		message "Could not get tables collection"
+	endif
+	if not ole-call-method(lo-tables,"Item",lo-table,1) 
+		message "Could not get table 1"
+	endif
+	if ole-get-property(ws-inst-id, "ActiveDocument.Bookmarks",ws-wb-id)
+		if ole-call-method(ws-wb-id, "Item",lo-bookmark,lf-bookmark)
+			if ole-call-method(lo-bookmark,"Select",ws-dummy-ret)
+				set lf-first-time = true
+				set lf-note-text = spaces
+				set lf-tbl-row-no = 1  // remember the headings have already been added.
+				select * from sales-order-line
+					where so-order-no = :so-order-no
+					and so-bo-suffix = :so-bo-suffix
+					and sol-line-type in ( "SN", "SS", "DN", "KN" )
+				detail
+					if lf-tbl-row-no > 1 and lf-note-text = spaces
+						set ws-word = ole-call-method(ws-inst-id,"selection.MoveRight",ws-dummy-ret,wdCell,1)
+					endif
+					switch sol-line-type
+					case "SN" , "SS",  "KN"
+						if lf-note-text <> spaces
+							// then we need to move the pointer forwards and
+							// merge the cells
+							set ws-word = ole-call-method(ws-inst-id,"Selection.TypeText",ws-dummy-ret,lf-note-text)
+							set ws-word = ole-call-method(ws-inst-id,"Selection.MoveRight",ws-dummy-ret,wdCell,6)
+							set lf-tbl-row-no += 1
+							do merge-tbl-cols parameters are lo-table lf-tbl-row-no
+							set lf-note-text = spaces
+						endif
+						if sol-line-type in ( "SN" "KN" )
+							get stock-master on index stock-code key is stock-code
+							on error 
+							endon
+						endif
+						set ws-word = ole-put-property(ws-inst-id,"Selection.Font.Italic",FALSE)
+						if sol-line-type in ("SN" "KN")
+							// kit components in italic
+							if sol-line-type = "SN" and sol-print-line = NO
+								set ws-word = ole-put-property(ws-inst-id,"Selection.Font.Italic",True)
+							else
+								set ws-word = ole-put-property(ws-inst-id,"Selection.Font.Italic",FALSE)
+							endif
+							set ws-word = ole-call-method(ws-inst-id,"Selection.TypeText",ws-dummy-ret,stock-code)
+							set ws-word = ole-call-method(ws-inst-id,"selection.MoveRight",ws-dummy-ret,wdCell,1)
+							// kit components in italic
+							if sol-line-type = "SN" and sol-print-line = NO
+								set ws-word = ole-put-property(ws-inst-id,"Selection.Font.Italic",True)
+							else
+								set ws-word = ole-put-property(ws-inst-id,"Selection.Font.Italic",FALSE)
+							endif
+							set ws-word = ole-call-method(ws-inst-id,"Selection.TypeText",ws-dummy-ret,stk-description)
+						elseif sol-line-type = "SS"
+							set ws-word = ole-call-method(ws-inst-id,"Selection.TypeText",ws-dummy-ret,"Special")
+							set ws-word = ole-call-method(ws-inst-id,"selection.MoveRight",ws-dummy-ret,wdCell,1)
+							set ws-word = ole-call-method(ws-inst-id,"Selection.TypeText",ws-dummy-ret,sol-line-description)
+						endif
+						set ws-word = ole-call-method(ws-inst-id,"selection.MoveRight",ws-dummy-ret,wdCell,1)
+						set ws-word = ole-call-method(ws-inst-id,"Selection.TypeText",ws-dummy-ret,str(sol-ordered-qty))
+						set ws-word = ole-call-method(ws-inst-id,"selection.MoveRight",ws-dummy-ret,wdCell,1)
+						if sol-print-line = YES // don't print kit chn
+							do cvt-string parameters sol-item-price returning lf-txt
+							set ws-word = ole-call-method(ws-inst-id,"Selection.TypeText",ws-dummy-ret,lf-txt)
+						endif
+						set ws-word = ole-call-method(ws-inst-id,"selection.MoveRight",ws-dummy-ret,wdCell,1)
+						if sol-print-line = YES // don't print kit chn
+							set ws-word = ole-call-method(ws-inst-id,"Selection.TypeText",ws-dummy-ret,concat(str(sol-disc-rate),"%"))
+						endif
+						set lf-line = sol-ordered-qty * (sol-item-price - (sol-item-price * sol-disc-rate) / 100)
+						set ws-word = ole-call-method(ws-inst-id,"selection.MoveRight",ws-dummy-ret,wdCell,1)
+						do cvt-string parameters lf-line returning lf-txt
+						if sol-print-line = YES // don't print kit chn
+							set ws-word = ole-call-method(ws-inst-id,"Selection.TypeText",ws-dummy-ret,lf-txt)
+						endif
+						set lf-tbl-row-no += 1
+					case "DN"
+						if sol-print-line = YES
+							if lf-note-text = spaces
+								set lf-note-text = sol-line-description
+							else
+								string lf-note-text appending concat(" ",sol-line-description)
+							endif
+						endif
+					end-switch
+					set lf-last-type = sol-line-type
+				end-select
+				if lf-note-text <> spaces 
+					// then we need to move the pointer forwards and
+					// merge the cells
+					set ws-word = ole-call-method(ws-inst-id,"Selection.TypeText",ws-dummy-ret,lf-note-text)
+					set ws-word = ole-call-method(ws-inst-id,"selection.MoveRight",ws-dummy-ret,wdCell,5)
+					set lf-note-text = spaces
+					set lf-tbl-row-no += 1
+					do merge-tbl-cols parameters are lo-table lf-tbl-row-no
+				endif
+			endif 
+			do reformat-table parameters are lo-table
+		endif
+	endif 
+end-procedure
+
+procedure merge-tbl-cols
+parameters
+	lo-table							type ole-interface
+	lp-row								type number
+local
+	lo-rows								type ole-interface
+	lo-row								type ole-interface
+	lo-cell								type ole-interface
+	lf-rows								type number
+	// get the number of rows - we want the last one.
+	// get a range of all the cells on this row
+	// get one row
+	if ole-get-property(lo-table,"Rows",lo-rows) 
+		if ole-get-property(lo-rows,"Count",lf-rows)
+			if not ole-call-method(lo-rows,"Item",lo-row,lp-row)
+				message "Cant get row"
+			else
+				if not ole-get-property(lo-row,"Cells",lo-cell ) 
+					message "cant get cells collection "
+				else
+					set ws-word = ole-call-method(lo-cell,"Merge",ws-dummy-ret)
+					// get a range that we can format
+				endif
+			endif
+		endif
+	endif
+end-procedure
+
+procedure reformat-table
+parameters
+	lo-table							type ole-interface
+local
+	i									type number
+	lo-rows								type ole-interface
+	lo-row								type ole-interface
+	lo-cell								type ole-interface
+	lo-rowrange							type ole-interface
+	lo-cellrange						type ole-interface
+	lf-rows								type number
+	lf-cols								type number
+	if  not ole-get-property(lo-table,"Rows",lo-rows) 
+		message "Can't get rows for table"
+		exit 1
+	endif
+	if not ole-get-property(lo-rows,"Count",lf-rows)
+		message "Cant get row count"
+		if ole-release(lo-rows) endif
+		exit 1
+	endif
+	for i = 1 to lf-rows
+		if not ole-call-method(lo-rows,"Item",lo-row,i)
+			message "Cant get row"
+			exit 1
+		endif
+		// get the column count
+		if not ole-get-property(lo-row,"Cells.Count",lf-cols)
+			message "cant get column count"
+			if ole-release(lo-rows) endif
+			if ole-release(lo-row) endif
+			exit 1
+		endif
+		if lf-cols = 1 // then this is a note line
+			if not ole-call-method(lo-table,"cell",lo-cell,i,1)
+				message "cant get reference to  cell"
+				exit 1
+			endif
+			if not ole-get-property(lo-cell,"Range",lo-cellrange)
+				message "Cant get cell range "
+				if ole-release(lo-cell) endif
+				exit 1
+			endif
+			if not ole-put-property(lo-cellrange,"ParagraphFormat.Alignment",wdAlignParagraphLeft )  
+				message "Can put the format property for range"
+			endif
+		endif
+		if ole-release(lo-row) endif
+		if ole-release(lo-rowrange) endif
+	end-for
+	if ole-release(lo-rows) endif
+end-procedure
+
+procedure ole-paste-bookmark
+parameters are
+	lp-bookmark							type string
+	lp-value							type string
+local
+	lo-bookmark							type ole-interface
+	//
+	if ole-get-property(ws-inst-id, "ActiveDocument.Bookmarks",ws-wb-id)
+		if ole-call-method(ws-wb-id, "Item",lo-bookmark,lp-bookmark)
+			if ole-call-method(lo-bookmark,"Select",ws-dummy-ret)
+				set ws-word = ole-call-method(ws-inst-id,"Selection.TypeText",ws-dummy-ret,lp-value)
+			endif 
+		endif
+	endif 
+endprocedure
+
+procedure cvt-string
+parameter are
+	lp-num							type number
+returning 	
+	lr-string						type string
+local
+	i								type number
+	set lr-string = format-picture(lp-num,"$$$$$$$$.99CR")
+	for i = 1 to str-len(lr-string)
+		if substring(lr-string,i,i) <> spaces
+			set lr-string = substring(lr-string,i,str-len(lr-string))
+			break
+		endif
+	endfor
+end-procedure
+
+procedure update-quicklinks
+parameters
+	lp-file							like ql-path
+	lp-table						like ql-table
+	lp-key							like ql-key
+local
+	lf-found						type boolean
+	lf-last-seq						like ql-sequence
+//
+	set lf-found = FALSE
+	select * from quick-links
+		where ql-data-area = :sys-consolidation-division
+		and ql-table = :lp-table
+		and ql-key = :lp-key
+		order by ql-data-area ql-table ql-key ql-sequence
+	detail
+		if ql-path = lp-file
+			exit
+		endif
+		set lf-last-seq = ql-sequence
+	end-select
+	// 
+	// If I got here then we need to add it.
+	//
+	initialise quick-links
+	set ql-data-area = lowercase(sys-consolidation-division)
+	set ql-table = lp-table
+	set ql-key = lp-key
+	set ql-sequence = lf-last-seq + 10
+	set ql-path = lp-file
+	set ql-description  = "Quote"
+	set ql-created-by-user = login-id
+	set ql-date-time = system-time
+	set ql-code = "QT"
+	insert quick-links
+	on error
+	endon
+end-procedure
+
+procedure find-email-address
+parameters are 
+	lp-accountcode						like accountcode
+returning
+	lr-email-address					pic x(120) type string
+	// There is a multitude of places the email address could be.
+	// 1.  Document delivery for quotes
+	// 2.  Document delivery for invoices
+	// 3.  Document delivery for statements
+	// 4.  name-and-address-master
+	// 5.  CRM.
+	select * 
+		from trueform-document-map
+		where tdm-type = "C"
+		and tdm-account = :lp-accountcode
+		and tdm-document = "Q"
+		and tdm-contact-type = "M"
+	detail
+		// select the first one
+		set lr-email-address = tdm-address
+		exit 
+	end-select
+	//
+	// look for nad
+	//
+	select *
+		from name-and-address-master
+		where accountcode  = :lp-accountcode
+		and na-type = "E"
+		and na-name != spaces
+	detail
+		set lr-email-address  = na-name
+		string lr-email-address appending na-company
+		exit 
+	end-select
+end-procedure
+
+procedure verify-template
+local
+	lf-start							type boolean
+	lf-end								type boolean
+	lf-quote							type boolean
+	lf-description						type boolean
+	lf-tblstart							type boolean
+	lf-tblcols							type boolean
+	lo-bookmarks						type ole-interface
+	lo-bookmark							type ole-interface
+	lf-bookmark-name					type string
+	lf-i								type number
+	lf-bookmarks-count					type number
+	lf-missing-bookmarks					type string pic x(1024)
+//
+	set lf-start = FALSE
+	set lf-end = FALSE
+	set lf-quote = FALSE
+	set lf-description = FALSE
+	set lf-tblstart = FALSE
+	set lf-tblcols = FALSE
+//
+	if ole-get-property(ws-inst-id, "ActiveDocument.Bookmarks",lo-bookmarks)
+		if ole-get-property(lo-bookmarks,"Count",lf-bookmarks-count)
+			for lf-i = lf-bookmarks-count down to 1
+				if ole-call-method(lo-bookmarks, "Item",lo-bookmark,lf-i)
+					if ole-get-property(lo-bookmark, "Name",lf-bookmark-name)
+						if ole-call-method(lo-bookmark,"Select",ws-dummy-ret)
+							get bookmark-list
+								on index bl-name
+								key is lf-bookmark-name
+								lock
+							on error ENOREC
+							else
+								set bl-exists = TRUE
+								update bookmark-list
+							endon
+						endif 
+					endif 
+					if ole-release(lo-bookmark)
+					endif
+				endif 
+			endfor 
+		endif 
+		if ole-release(lo-bookmarks)
+		endif
+	else
+		message "Failed to get bookmarks"
+	endif
+	// 
+	// Now check
+	select * 
+		from bookmark-list
+		where bl-exists = FALSE and bl-mandatory = TRUE
+	detail
+		if lf-missing-bookmarks = spaces
+			set lf-missing-bookmarks = bl-name
+		else
+			string lf-missing-bookmarks appending ","
+			string lf-missing-bookmarks appending bl-name
+		endif
+	end-select
+	if lf-missing-bookmarks != spaces
+		message-box param-text("<<P1>><<BR>><<p2>>"
+			,"Your selected template is missing the following bookmarks"
+			,lf-missing-bookmarks)
+			title is "Quote Print"
+			message-buttons  MSG_BOX_CANCEL
+			icon MSG_BOX_STOP
+		exit 1
+	endif
+end-procedure
+
+procedure build-bookmark-list
+	// this is the list of bookmarks that need to be in the document
+	open bookmark-list temporary
+	do add-one-bookmark-list parameters are "Customer_Code" True	
+	do add-one-bookmark-list parameters are "add1" True	
+	do add-one-bookmark-list parameters are "add2" True	
+	do add-one-bookmark-list parameters are "add3" True	
+	do add-one-bookmark-list parameters are "add4" True	
+	do add-one-bookmark-list parameters are "email" FALSe	
+	do add-one-bookmark-list parameters are "grand_total" True	
+	do add-one-bookmark-list parameters are "GST" True	
+	do add-one-bookmark-list parameters are "line_start" True	
+	do add-one-bookmark-list parameters are "total" True	
+	do add-one-bookmark-list parameters are "user" True	
+end-procedure
+
+procedure add-one-bookmark-list
+parameters
+	lp-name					like bl-name
+	lp-mandatory			type boolean
+	initialise bookmark-list
+	set bl-name = lp-name
+	set bl-mandatory = lp-mandatory
+	insert bookmark-list
+	on error
+	endon
+end-procedure

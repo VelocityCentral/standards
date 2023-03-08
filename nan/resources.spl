@@ -1,0 +1,253 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : 
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2019
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: nan/resources.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 29May19  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+#include "../include/irmsdefines.spl"
+
+link 'clib/clibres'
+
+#define RANDOM_BETWEEN(A,B) \
+	(((RANDOM(0) / 32767) * (B - A)) + A)
+
+// DAYSTOBOOK is the nubmer of days forwad, from today to make resource
+// bookings.
+//
+#define DAYSTOBOOK 14
+//
+// Start time
+//
+#define STARTTIME idx(RANDOM_BETWEEN(1,6), 8, 9, 11, 13, 14, 1 8, 9, 11, 13, 14, 155 ) * 60 * 60
+// 
+// End Time
+//
+#define DURATION  idx(RANDOM_BETWEEN(1,6), 60,90,120,180,240,150 ) * 60 
+//
+// Description
+//
+#define DESCRIPTION idx(RANDOM_BETWEEN(1,3), "WORK", "MEETING", "LEAVE")
+//
+// I know that I could have just used a random_between rather than the idx,
+// but this better documents what is going on.
+//
+#define BOOKING_STATUS idx(RANDOM_BETWEEN(1,5), \
+		IRMSDEFINES_BOOKING_STATUS_ENTERED, \
+		IRMSDEFINES_BOOKING_STATUS_DECLINED, \
+		IRMSDEFINES_BOOKING_STATUS_ACCEPTED, \
+		IRMSDEFINES_BOOKING_STATUS_TENTATIVE, \
+		IRMSDEFINES_BOOKING_STATUS_NOTIFIED)
+
+field
+	ws-function-title						type string
+
+
+procedure main
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8secabt-check-abort
+		parameters are sys-consolidation-division login-id() "ZUSR" "R004"
+		returning ws-function-title 
+	do i8proglog-write-log
+	confirm 
+		prompt "OK to setup Resources"
+	confirmed
+		do  setup-resources
+	end-confirm 
+end-procedure
+
+procedure setup-resources
+	window
+	no-hide
+local
+	lf-current-date						type date
+	lf-start-time						type time
+	lf-end-time							type time
+	lf-holiday-timesheet-type			like rtd-type	
+	lf-schedule-updated					type boolean
+	lf-available-updated				type boolean
+	lf-description						type string
+	lf-count							type number
+	lf-resources-processed				type number
+	lf-error-count						type number
+	//
+	report "RMS Update"
+		no-xml
+	display "Deleting all bookings" @5,10
+	print "Deleting all bookings" 
+	sql-delete ALL resource-booking
+	display "Updating Resources" @5,10
+	print "Updating Resources" 
+	select * from resource-master
+		where rms-type in ( 'P'  'S') // Personnel and Subcontractors
+		order by resource-master-code
+	detail
+		display str-concat("Processing Resource-" 
+				resource-master-code ":" rms-description 
+				"(" str(lf-resources-processed + 1) ")" 
+				) @6,10
+		print "Resource: " col 5 resource-no resource-master-code rms-description
+		select lf-count = count(*)
+			from resource-master-time-profile
+			where resource-no = :resource-no
+		end-select
+		if lf-count = 0
+			print "* * * ERROR * * *: There are is no work cycle defined for this resource " col 10 BOLD
+			print "Resource skipped" col 10
+			set lf-error-count += 1 
+			continue
+		endif
+		// update resource master propfile end dates
+		select * from resource-master-profile
+			where resource-no = :resource-no
+			order by rmpf-end-date desc
+			for update
+			no-warning
+		detail
+			if rmpf-end-date < today() + (365 * 3) // make it at least three years out
+				set rmpf-end-date = today() + (365 * 3) // make it at least three years out
+				update resource-master-profile
+				on error 
+					print "* * * ERROR * * * There was a problem updating the work cycle end date" col 10
+					print error-description(file-status()) col 20
+					set lf-error-count += 1 
+					continue
+				endon
+			endif
+		endselect
+		// Update attributes
+		display "Updating Attribute expiry dates" @7,10
+		print "Updating Attribute expiry dates" col 10
+		select * from resource-attributes
+			where ra-group = 'CERT'
+			and ra-resource-no = :resource-no
+			for update
+		detail
+			set ra-start-date = today - day(today()) + 1
+			set ra-start-date = add-month(ra-start-date, (0 - RANDOM_BETWEEN(1,12)),TRUE)
+			set ra-end-date = add-month(ra-start-date, idx(RANDOM_BETWEEN(1,4),12,24,36,48), TRUE)
+			update resource-attributes
+			on error 
+			endon
+		end-select
+		// Generate availabilty
+		display "Generating Availability Records" @7,10
+		print "Generating Availability Records" col 10
+		set lf-holiday-timesheet-type = spaces
+		do clibres-maintain-availability-calendar-records
+			parameter
+				resource-no
+				rms-calendar-code
+				today() - day(today) + 1
+				add-months(today() - day(today) + 1, 2, True) - 1
+				ZERO 
+				'G' //create entries
+				rms-inactive-date
+				rms-inactive-time
+			returning
+				lf-available-updated
+		if not lf-available-updated
+			print "* * * ERROR * * * Availability NOT Updated for resource" col 10 bold
+			print "Resource Not processed" col 10
+			set lf-error-count += 1
+			continue
+		endif
+		display "Generating Schedule Calendar Records" @7,10
+		print "Generating Schedule Calendar Records" col 10
+		do clibres-maintain-schedule-calendar-records
+			parameter
+				resource-no
+				rms-calendar-code
+				today() - day(today) + 1  // first of this Monthd
+				add-months(today() - day(today) + 1, 2, True) - 1  // until end of next month
+				'G' //create entries
+				lf-holiday-timesheet-type // not a holiday
+				rms-inactive-date
+				rms-inactive-time
+				FALSE	// Not from location calendar
+			returning
+				lf-schedule-updated
+		if not lf-schedule-updated
+			print "* * * ERROR * * * Schedule NOT Updated" col 10 bold
+			print "Resource Not processed" col 10
+			set lf-error-count += 1
+			continue
+		endif
+
+		// Do some bookings
+		set lf-current-date = today
+		display "Creating Bookings" @7,10
+		print "Creating Bookings" col 10
+		while lf-current-date < today + DAYSTOBOOK
+			if DOW(lf-current-date) between 2 and 6
+				set lf-start-time = STARTTIME
+				set lf-end-time = lf-start-time + DURATION
+				set lf-description = DESCRIPTION
+				// Bookings only occur on days the resource is working
+				// The resource-coster-calendar contains records when a
+				// resource is working.
+				// The resrouce-availability-calendar contains records when
+				// a resource is AVAILABLE.
+				// For ths purpost we don't care about TIME.  Just days.
+				select lf-count = count(*)
+					from resource-roster-calendar
+					where resource-no = :resource-no
+					and rrc-date = :lf-current-date
+				end-select
+				if lf-count >= 1
+					do clibres-insert-resource-booking-record
+						parameters are 
+							resource-no
+							lf-current-date
+							lf-start-time
+							lf-end-time
+							date-time(lf-current-date,lf-start-time,TRUE)
+							date-time(lf-current-date,lf-end-time,TRUE)
+							lf-description
+							0 // timezone
+							BOOKING_STATUS // status
+							if-then-else(uppercase(lf-description) = 'LEAVE', 
+								IRMSDEFINES_BOOKING_SOURCE_LEAVE,
+								IRMSDEFINES_BOOKING_SOURCE_GENERIC)  // source
+							spaces // type
+				endif
+			endif
+			set lf-current-date += 1
+		end-while
+		set lf-resources-processed += 1
+		print str-concat("Resources Processed so far:" str(lf-resources-processed)) col 5
+		display str-concat("Resources Processed so far:" str(lf-resources-processed)) @9,10
+			colour green
+	end-select
+	report finished
+	if lf-error-count > 0
+		message-box param-text("<<P1>><<BR>><<p2>>"
+			,"At least one error Occurred"
+			,"Read the report (F5)")
+			title is ws-function-title
+			message-buttons  MSG_BOX_CANCEL
+			icon MSG_BOX_WARNING
+	else
+		message-box 
+			"Rsources Successfully updated"
+			title is ws-function-title
+			message-buttons  MSG_BOX_OK
+			icon MSG_BOX_INFORMATION
+	endif
+end-procedure
+

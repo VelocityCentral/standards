@@ -1,0 +1,302 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : Overrides for EDI
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2013
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: so/m50loadso.spl
+//
+// Modification History
+// Date		Who	SDR		What
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/i8proglog.spl"
+#include "../include/i5sostatii.spl"
+#include "../so/i50statchg.spl"
+#include "../include/iwrtevntlog.spl"
+
+link 'clib/clibwrtevntlog'
+
+
+// Change the if to TRUE to enable logging
+#define LOG(A) \
+	if FALSE \
+	do clibwrtevntlog-write-log parameters are IWRTEVNTLOG_LEVEL_DEBUG 'APPS'   \
+		str-concat(substring(get-param(0),pattern(get-param(0),"[~/]*$"),str-len(get-param(0))) \
+		,"|",str(pid())) \
+	A \
+	endif
+
+link "clib/clibvcvt"
+ 
+field
+	ws-function-title						type string
+
+procedure main export
+returning
+	lr-sales-audit-spool				type string
+	lr-exception-spool					type string
+	lr-valid-records					type numeric
+	do i8proglog-write-log
+	do next main returning
+		lr-sales-audit-spool				
+		lr-exception-spool				
+		lr-valid-records			
+	report finished
+end-procedure
+
+/*
+procedure public-s100-before-insert-sales-order-line export
+	parameters
+		lp-file-format			pic x(2)
+		lp-detail-line			pic x(1024)
+		sales-order-line.*		global							
+	returning
+		sales-order-line.*										
+	//
+local
+	i									type number
+	lf-fld								type string
+	lf-record							like lp-detail-line
+	lf-ok								type boolean
+	//
+	LOG("public-s100-before-insert-sales-order-line export")
+	LOG(concat(str(so-order-no) so-bo-suffix str(sol-line-seq)))
+	set lf-record = lp-detail-line
+	for i = 1 to 23
+		do clibvcvt-extract-via-delimiter
+			parameters are lf-record ","
+			returning lf-fld lf-record 
+	end-for
+	// lf-fld should not contain the filler field:
+	log(concat( "filler:" lf-fld)
+	if substring(lf-fld,1,1) = '"'
+	or substring(lf-fld,1,1) = "'"
+		set lf-fld = substring(lf-fld,2,str-len(lf-fld) - 1)
+		LOG(concat( str(i) ":" lf-fld))
+	endif
+	LOG(concat( "filler modified" lf-fld))
+	if valid-number(lf-fld)
+		get edi-order-headers
+			on index v-edi-receipt-number
+			key is num(lf-fld)
+		on error ENOREC
+		else
+			set ws-receipt-number = num(lf-fld)
+			LOG(concat("receipt number" str(ws-receipt-number)))
+		endon
+	endif
+endprocedure //public-s100-before-insert-sales-order-line --------------------
+*/
+
+procedure public-s020-before-update-sales-order export
+////////////////////////////////////////////////////////////////////////////////
+//
+//  This only occurs once on the FIRST input record
+//
+//<CLIB_DOC>
+//<DESC>
+// Passes the sales order record and allow the values to be changed and 
+// return back just before update.
+// The returned values will be updated to the sales order in core program. 
+// Note: *** Do not change the key fields ***
+// i50loadso.spl needs to be included in the custom version of m50loadso if it 
+// needs to refer to the import file definitions (e.g std-sales-order-and-lines)
+//
+//<P1> The import file format is passed in.
+//<P2> The header type record related to the SO from import file is passed in.
+//<P3> The whole sales-order record is passed in.
+//<R1> The whole sales-order record is returned.
+//
+////////////////////////////////////////////////////////////////////////////////
+parameters
+	lp-file-format						pic x(2)
+	lp-header-line						pic x(1024)
+	sales-order.*						global						
+returning
+	sales-order.*									
+local
+	i									type number
+	lf-fld								type string
+	lf-record							like lp-header-line
+	lf-ok								type boolean
+	//
+	LOG(" public-s020-before-update-sales-order export")
+	LOG(concat(str(so-order-no) so-bo-suffix))
+	set lf-record = lp-header-line
+	for i = 1 to 23
+		do clibvcvt-extract-via-delimiter
+			parameters are lf-record ","
+			returning lf-fld lf-record 
+	end-for
+	// lf-fld should not contain the filler field:
+	if substring(lf-fld,1,1) = '"'
+	or substring(lf-fld,1,1) = "'"
+		set lf-fld = substring(lf-fld,2,str-len(lf-fld) - 1)
+	endif
+	set so-user-only-num1 = num(lf-fld)
+	LOG(concat( "user only:" str(so-user-only-num1)))
+endprocedure //public-s020-before-update-sales-order -------------------------
+
+procedure public-sales-order-conclusion export
+////////////////////////////////////////////////////////////////////////////////
+//clstart
+//cldesc  The intention of this procedure is to permit processing
+//		an external request at the conclusion of sales order insert
+//		for each of the different file imports
+//
+////////////////////////////////////////////////////////////////////////////////
+//clp		Parameters
+//clp1		Current Sales Order record
+//clpend
+//
+////////////////////////////////////////////////////////////////////////////////
+//clr		Returning
+//clrend
+//
+////////////////////////////////////////////////////////////////////////////////
+	parameters are 
+		lp-sales-order.*				like sales-order.*
+	local
+		lf-old-status					like so-order-status
+	// Determine Whether Order Should Be Held
+	/*
+	get deb-master
+		on index accountcode
+		key is lp-sales-order.so-cust-code
+	on error
+	else
+		if dr-cust-type != SPACES
+			get system-table
+				on index sys-tbl-type sys-tbl-code
+				key is "CT" dr-cust-type
+			on error
+			else
+				if lp-sales-order.so-order-total-shipped-amount < sys-money-value
+					get sales-order lock
+						on index so-order-no so-bo-suffix
+						key is lp-sales-order.so-order-no lp-sales-order.so-bo-suffix
+					on error
+					else
+						set lf-old-status = so-order-status
+						set so-order-status = I5SO_ENTERED_ON_HOLD
+						AUDIT_SO_STATUS_CHANGE(lf-old-status,so-order-status)
+						update sales-order
+						on error
+						endon
+					endon
+				endif
+			endon
+		endif
+	endon
+	*/
+	//	
+	//	M50LOADSO Does Not Populate Route & DPID
+	//	This Will Do So From Name And Address Master Using DPID Passed In Via
+	//	Fax Number Field. Also Refresh Delivery Address Ensures All 7 Lines
+	//	Used
+	//
+	get sales-order-delivery
+		on index so-order-no so-bo-suffix so-text-type
+		key is lp-sales-order.so-order-no lp-sales-order.so-bo-suffix 'DA'
+		lock
+	on error
+	else
+		select * from name-and-address-master
+			where accountcode = :lp-sales-order.so-cust-code and na-address-id = :so-dl-fax
+			and na-type not in ('C' 'E')
+		detail
+			set so-dl-text[1] = na-name
+			set so-dl-text[2] = na-company
+			set so-dl-text[3] = na-street
+			set so-dl-text[4] = na-suburb
+			set so-dl-text[5] = na-country
+			set so-dl-text[6] = na-address-6
+			set so-dl-text[7] = na-address-7
+			set so-dl-postcode = postcode
+			set so-dl-route = na-route-code
+			set so-dl-address-id = so-dl-fax
+			set so-dl-fax = SPACES
+			break
+		end-select
+		update sales-order-delivery
+		on error
+		end-on
+	end-on
+//clend
+endprocedure //public-sales-order-conclusion -----------------------------------   
+
+procedure public-sales-order-conclusion-V2 export
+////////////////////////////////////////////////////////////////////////////////
+//<CLIB_DOC>
+//<DESC>
+// This allows to do additional processing at the sales order conclusion.
+// Passes the sales order record and the corresponding header type record
+// from the import file. 
+// This is a wrapper procedure for public-sales-order-conclusion with 
+// additional parameters. 
+// In the custom program user can override one of the public rocedures, 
+// public-sales-order-conclusion or public-sales-order-conclusion-V2. 
+// i50loadso.spl needs to be included in the custom version of m50loadso if it 
+// needs to refer to the import file definitions (e.g std-sales-order-and-lines)
+//
+//<P1> The import file format is passed in.
+//<P2> The header type record related to the SO from import file is passed in.
+//<P3> The whole sales-order record is passed in.
+////////////////////////////////////////////////////////////////////////////////
+parameters are
+	lp-file-format						pic x(2)
+	lp-header-line						pic x(1024)
+	sales-order.*						global
+local
+	lf-invoice-no						like so-invoice-no
+	//
+	// If it's a demo order just invoice it
+	//
+	get sales-order 
+		on index so-order-no so-bo-suffix
+		key is so-order-no so-bo-suffix
+		lock
+	on error
+		if file-status = ENOREC
+			LOG(concat("Unable to find sales order", str(so-order-no) so-bo-suffix))
+		elseif file-status = ENOLCK
+			LOG(concat("Unable to obtain lock on sales order", str(so-order-no) so-bo-suffix))
+		else
+			LOG(concat("Problem with sales order", str(so-order-no) so-bo-suffix, error-description(file-status)))
+		endif
+	else
+		// get the original receipt
+		get edi-order-headers
+			on index v-edi-receipt-number
+			key is so-user-only-num1
+		on error
+			if file-status = ENOREC
+				LOG(concat("Unable to find receipt", str(so-user-only-num1)))
+			elseif file-status = ENOLCK
+				LOG(concat("Unable to obtain lock on receipt", str(so-user-only-num1) ))
+			else
+				LOG(concat("Problem with receipt", str(so-user-only-num1) , error-description(file-status)))
+			endif
+		else
+			if so-order-status = '70' and v-edi-h-filler = 'edidemo.op7'
+				do clibserial-next-sales-invoice-no
+					parameters
+						so-order-no
+						so-bo-suffix
+					returning
+						lf-invoice-no
+				set so-invoice-no = lf-invoice-no
+				set so-order-status = '80'
+				update sales-order
+				on error
+					LOG(concat("Unable to update sales order after lock" , str(so-order-no) so-bo-suffix))
+				endon
+			endif
+		endon
+	endon
+end-procedure

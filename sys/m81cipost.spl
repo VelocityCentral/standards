@@ -1,0 +1,152 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : Program to support importing supplier invoicces as quicklinks.
+// Probably redundant now that redmap is along.
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2018
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: sys/m81cipost.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 11Aug18  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/i8proglog.spl"
+
+ 
+#define LOGINFO(A) \
+	do clibwrtevntlog-write-log parameters are IWRTEVNTLOG_LEVEL_INFO 'APPS'   \
+		str-concat(substring(get-param(0),pattern(get-param(0),"[~/]*$"),str-len(get-param(0))) \
+		,"|",str(pid())) \
+		A
+
+#define LOGDEBUG(A) \
+	do clibwrtevntlog-write-log parameters are IWRTEVNTLOG_LEVEL_DEBUG 'APPS'   \
+		str-concat(substring(get-param(0),pattern(get-param(0),"[~/]*$"),str-len(get-param(0))) \
+		,"|",str(pid())) \
+		A
+
+#define LOGERROR(A) \
+	do clibwrtevntlog-write-log parameters are IWRTEVNTLOG_LEVEL_ERROR 'APPS'   \
+		str-concat(substring(get-param(0),pattern(get-param(0),"[~/]*$"),str-len(get-param(0))) \
+		,"|",str(pid())) \
+		A
+
+object barcode-store
+	type is memory
+	record is 
+		bs-supplier						like cre-accountcode
+		bs-reference					like cr-tr-reference
+		bs-batch						like cr-tr-batch-ref
+		bs-barcode						like bci-user-only-alpha20-1
+	end-record
+	key is 
+		bs-batch
+		
+
+procedure main export
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	open barcode-store 
+		temporary
+	do next main 
+end-procedure
+
+procedure public-prepost-routine export
+parameters
+	lp-batch-ref						like bci-batch-ref	
+	select *
+		from batch-creditor-invoices
+		where bci-batch-ref = :lp-batch-ref
+	detail
+		initialise barcode-store
+		set bs-supplier = bci-supplier
+		set bs-reference = bci-reference
+		set bs-batch = bci-batch-ref
+		set bs-barcode = bci-user-only-alpha20-1
+		insert barcode-store
+		on error
+			LOGERROR("Unable to store record into temp table")
+		endon
+	end-select
+end-procedure
+
+procedure public-after-post-routine export
+parameters
+	lp-batch-ref						like bci-batch-ref	
+local
+	lf-seq-no							type number
+	lf-found							type boolean
+	lf-trans-no							like cr-tr-trans-no
+	select *
+		from barcode-store
+		where bs-batch = :lp-batch-ref
+		for update
+	detail
+		// Find the trans no
+		set lf-found = FALSE
+		select *
+			from cre-trans
+			where cre-accountcode = :bs-supplier
+			and cr-tr-reference = :bs-reference
+			and cr-tr-batch-ref = :bs-batch
+			and cr-tr-type in ( "CI" "CC" )  /// need to add credit note
+		detail
+			set lf-found = TRUE
+			set lf-trans-no = cr-tr-trans-no
+			break
+		end-select
+		if not lf-found
+			LOGERROR(concat("Unable to locate matching cre-trans", 
+					bs-supplier,"/",bs-reference,"/",bs-batch))
+			continue
+		endif
+		set ql-data-area = lowercase(sys-consolidation-division)
+		set ql-table = 'cre-trans'
+		set ql-key = bs-supplier
+		string ql-key appending concat("/" bs-reference)
+		string ql-key appending concat("/" bs-batch)
+		string ql-key appending concat("/" str(lf-trans-no))
+		set lf-seq-no = 0
+		select lf-seq-no = max(ql-sequence)
+			from quick-links 
+			where ql-data-area = :ql-data-area
+			and ql-table  = :ql-table
+			and ql-key = :ql-key
+		end-select
+		set ql-sequence = lf-seq-no + 10
+		initialise quick-links
+			leaving ql-data-area ql-table ql-key ql-sequence
+		set ql-path = "https://pronto.bathurst.co.nz/ext/"
+		string ql-path appending ql-data-area
+		string ql-path appending "/"
+		string ql-path appending bs-barcode
+		string ql-path appending ".pdf"
+		set ql-description = concat("Digitised image supplier:" bs-reference)
+		set ql-code = "DI"
+		set ql-created-by-user = login-id()
+		set ql-date-time = gmt()
+		insert quick-links
+		on error
+			LOGERROR(concat("Failed to add quicklink:" ql-path))
+			LOGERROR(concat("Sequence:" str(ql-sequence)))
+#ifdef LOGDEBUG
+		else
+			LOGDEBUG(concat("Added quicklink:" ql-path))
+			LOGDEBUG(concat("Sequence:" str(ql-sequence)))
+#endif
+		endon
+		delete barcode-store
+		on error
+		endon
+	end-select
+end-procedure
+
+

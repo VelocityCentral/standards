@@ -1,0 +1,124 @@
+/*
+
+	This documentation is in RST format.  To view this as a nice pdf goto
+	https://overbits.herokuapp.com/rsteditor/ or rst.ninjs.org and paste this content.
+
+============================
+How to write a Velocity clib
+============================
+
+This document describes the general rules about how to write a Velocity clib.
+
+This includes generic clibs available for all sites and customer specific
+clibs.
+
+When to use a clib
+~~~~~~~~~~~~~~~~~~
+
+Use a clib when either: 
+
+-	You want to separate memory for global variables
+	(including file buffers) from the calling program 
+-	You are going to call the same bit of code from multiple places 
+-	The code is 'black box' in nature and it is sensible to do so.
+
+Naming
+~~~~~~
+
+Clib's should be called clibxxxxx where xxxxx contains only the characters [a-z0-9].
+
+If a clib is going to be a "velocity standard" it should be called clibvxxxxx
+
+All exported procedures in the spl should be named clibxxxxx.  Internal
+procedures that are not exported should ** NOT ** start with "clib".
+
+Use i8proglogparam
+~~~~~~~~~~~~~~~~~~
+
+i8proglog will write usage records into the system event log but the program
+name will be the name of the calling program not the name of the clib.  To Fix
+this use i8proglogparam instead.  Call this in the initialisation section
+using
+
+::
+
+	#include "../include/i8proglogparam.spl"
+	do i8proglogparam-write-log parameters are "clibvxxxxx"
+
+Use autotransaction
+~~~~~~~~~~~~~~~~~~~
+
+Where a clib updates the database always make the procedures autotransaction.
+This will also enforce using exit n for error handling.  (If unsure read the
+4gl programming manual).
+
+Error Handling
+~~~~~~~~~~~~~~
+
+There are two common approaches to error handling.  The first is to return a
+boolean indicating whether the function was successful or not.  The second is
+to use the exit statement with a non-zero return value.
+
+Autotransaction enforces the use of the exit n for error handling.  Rather
+than using two different mechanisms standardise on using exit n to raise an
+error.
+
+Rather than returning error messages, set an internal global variable of
+string x(1024) to the content of the error message and provide a
+get-last-error routine:
+
+Code::
+
+	procedure clibvxxxxx-get-last-error export
+	returning
+		lr-message							like ws-last-error
+		set lr-message = ws-last-error
+	end-procedure
+
+Test Cases
+~~~~~~~~~~
+
+It is often the case (especially when dealing with "black box" code) that some
+standard tests to check the operation of the clib are necessary.
+
+These should be included in the same code as the clib.  This is done by
+having a "procedure main" as well as a "procedure library-init".
+
+The procedure main should have the same initialisation code then display a
+menu of test cases that a developer can use to validate the operation of the
+clib.
+
+Include the test case code at the bottom of the clib and make sure it is
+clearly documented.  Make all procedures, menus and screen names start with
+"test-"
+
+Test case code should be careful never to use internal procedures (i.e. those
+procedures internal to the clib that are not exported) nor access global
+variables.  Each routine should be standalone and call only the exported
+routines within the clib.
+
+Documentation
+~~~~~~~~~~~~~~
+
+Document the clib.  It is important each exported routine has a short summary
+of what it does and the parameters are documented.
+
+A short paragraph at the start to describe the clib in general.
+
+Where certain exported procedures need to be run in a certain sequence (e.g.
+"call this once at the start and then these ones as often as necessary followed
+by this at the end before you exit ......")  make sure this process is
+documented.
+
+Rather than having a separate word document it is infinitely preferable to
+include the documentation inside the same clib as the code.  Use
+reStructuredText as this will provide a reasonably readable document in code
+and also allow for the easy extraction and conversion to PDF or HTML.
+
+See autodoc.spl for rst heading level rules and general layout.
+
+Include code samples if helpful.
+
+This line has been added for git testing
+*/
+

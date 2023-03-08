@@ -1,0 +1,511 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : Informix Table explorer
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2016
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: utility/vglidict.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 29Nov16  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+
+
+#define CHKBIT(A,B)  not(aand(A,power-of(2,B)) - power-of(2,B))
+
+mode md-select
+	prompt "Select"
+mode md-tables
+	prompt "Tables"
+mode md-layout
+	prompt "Layout"
+mode md-create-text
+	prompt "Text"
+	help "Create a text file and open with local application"
+
+object sysdatabases
+	type is indexed
+	record is
+		sd_name							pic x(20) type string db-column-name "name"
+		sd_partnum						type number db-column-name "partnum"
+		sd_owner						pic x(20) type string db-column-name "owner"
+		sd_created						type date db-column-name "created"
+		sd_is_logging					type number db-column-name "is_logging"
+		sd_is_buff_log					type number db-column-name "is_buff_log"
+		sd_is_ansi						type number db-column-name "is_ansi"
+		sd_is_nls						type number db-column-name "is_nls"
+		sd_is_case_insens				type number db-column-name "is_case_insens"
+		sd_flags						type number db-column-name "flags"
+	end-record
+	key is sd_name
+	no-rowid
+
+
+object systables
+	type is indexed
+	record is
+		st_tabname						pic x(20) type string db-column-name "tabname"
+		st_owner						pic x(20) type string db-column-name "owner"
+		st_partnum						type number db-column-name "partnum"
+		st_tabid						type number db-column-name "tabid"
+		st_rowsize						type number db-column-name "rowsize"
+		st_ncols						type number db-column-name "ncols"
+		st_nindexes						type number db-column-name "nindexes"
+		st_nrows						type number db-column-name "nrows"
+		st_created						type date db-column-name "created"
+		st_version						type number db-column-name "version"
+		st_tabtype						pic x type string db-column-name "tabtype"
+		st_locklevel					pic x type string db-column-name "locklevel"
+		st_npused						type number db-column-name "npused"
+		st_fextsize						type number db-column-name "fextsize"
+		st_nextsize						type number db-column-name "nextsize"
+		st_flags						type number db-column-name "flags"
+		st_site							pic x(20) type string db-column-name "site"
+		st_dbname						pic x(20) type string db-column-name "dbname"
+		st_type_xid						type number db-column-name "type_xid"
+		st_am_id						type number db-column-name "am_id"
+		st_pagesize						type number db-column-name "pagesize"
+		st_ustlowts						type datetime db-column-name "ustlowts"
+		st_secpolicyid					type number db-column-name "secpolicyid"
+		st_protgranularity				pic x(20) type string db-column-name "protgranularity"
+		st_statchange					pic x(20) type string db-column-name "statchange"
+		st_statlevel					pic x(20) type string db-column-name "statlevel"
+	end-record
+	key is st_tabname
+	no-rowid
+
+object syscolumns
+	type is indexed
+	record is
+		sc_colname						pic x(50) type string db-column-name  "colname"
+		sc_tabid						type number db-column-name  "tabid"
+		sc_colno						type number db-column-name  "colno"
+		sc_coltype						type number db-column-name  "coltype"
+		sc_collength					type number db-column-name  "collength"
+		sc_colmin						pic x(20) type string db-column-name  "colmin"
+		sc_colmax						pic x(20) type string db-column-name  "colmax"
+		sc_extended_id					type number db-column-name  "extended_id"
+		sc_seclabelid					type number db-column-name  "seclabelid"
+		sc_colattr						type number db-column-name  "colattr"
+	end-record
+	key is sc_colname
+	no-rowid
+	
+object memcolumns
+	type is memory
+	record is 
+		mc-colname						like sc_colname
+		mc-colno						type number 
+		mc-coltype						type number
+		mc-collength					type number 
+		mc-display-pic					pic x(255) type string
+		mc-pic-string					pic x(255) type string
+		mc-note							pic x(255) type string
+	end-record
+	key is mc-colno
+
+object text-file
+	type is text
+	record
+		tf-line							pic x(1024) type string
+	end-record
+
+procedure main
+local lf-count type number
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8proglog-write-log
+	open sysdatabases
+		file is "/sysmaster/informix.sysdatabases"
+	select lf-count = count(*) from sysdatabases
+	end-select
+//	do select-cols parameters are "sat" 189944
+	do select-db md-tables search
+end-procedure
+
+screen select-db
+	window
+	datagrid occurs 20
+	select sd_name, sd_created from sysdatabases
+detail
+	if screenmode = md-tables
+		do select-table parameters are sd_name
+	endif
+	accept sd_name @1,1
+		title "Name"
+	display sd_created @1,2
+		title "Created"
+end-screen
+
+screen select-table
+parameters
+	lp-db							like sd_name
+	window
+	datagrid occurs 20
+	select * from systables
+		where st_tabtype in ( "T" "V" )
+	allowed search md-layout
+before
+	open systables
+		file is str-concat("/",lp-db,"/informix.systables")
+	on error
+		message "Can't open systables" 
+		exit
+	endon
+detail
+	if screenmode = md-layout
+		do select-cols parameter are lp-db st_tabid
+	endif
+	accept st_tabname @1,1
+		title "Name"
+	display st_tabtype @1,2
+		title "Type"
+	display st_tabid @1,3 pic 9(6)
+		title "ID"
+	display st_owner @1,4
+		title "Owner"
+	display st_nrows @1,5 pic z(6)
+		title "Row Count"
+	display st_created @1,6
+		title "Created"
+	display st_ustlowts @1,7
+		title "Low Update stats"
+end-screen
+
+
+screen select-cols
+parameters
+	lp-db								like sd_name
+	lp-tabid							like st_tabid
+local
+	lf-type								pic x(20) type string
+	lf-qualifier						pic x(20) type string
+	window
+	datagrid occurs 20
+	select * from memcolumns order by mc-colno
+	allowed search md-create-text
+before
+	open syscolumns
+		file is str-concat("/",lp-db,"/informix.syscolumns")
+	on error
+		message "Can't open syscolumns" 
+		exit
+	endon
+	open memcolumns
+		temporary truncate
+	select * from syscolumns
+		where sc_tabid = lp-tabid
+		order by sc_colno
+	detail
+		initialise memcolumns
+		set mc-colname = sc_colname
+		set mc-colno = sc_colno
+		set mc-collength = sc_collength
+		set mc-coltype = sc_coltype
+		set mc-coltype = mc-coltype % 256  // gives just the values of the loworder byte
+		set mc-pic-string = spaces
+		set mc-display-pic = spaces
+		switch mc-coltype
+		case 0 // CHAR
+			string mc-pic-string appending " pic x("
+			string mc-pic-string appending str(mc-collength)
+			string mc-pic-string appending ")"
+			string mc-display-pic appending concat("CHAR(" str(mc-collength) ")")
+		case 1,2,3,4,5,6,8,11,17,18,45,52
+			string mc-pic-string appending " type number"
+			switch mc-coltype
+			case 1
+				string mc-display-pic appending "SMALLINT"
+			case 2
+				string mc-display-pic appending "INGEGER"
+			case 3
+				string mc-display-pic appending "FLOAT"
+			case 4
+				string mc-display-pic appending "SMALLFLOAT"
+			case 5
+				string mc-display-pic appending "DECIMAL"
+			case 6
+				string mc-display-pic appending "SERIAL"
+			case 8
+				string mc-display-pic appending "MONEY"
+			case 11
+				string mc-display-pic appending "BYTE"
+			case 17
+				string mc-display-pic appending "INT8"
+			case 18
+				string mc-display-pic appending "SERIAL8"
+			case 45
+				string mc-display-pic appending "BOOLEAN"
+			case 52
+				string mc-display-pic appending "BIGINT"
+			end-switch
+		case 7
+			string mc-pic-string appending " type date"
+			string mc-display-pic appending "DATE"
+		case 10 14
+			string mc-pic-string appending " type datetime"
+			switch mc-coltype 
+			case 10
+				string mc-display-pic appending "DATETIME"
+			case 14
+				string mc-display-pic appending "INTERVAL"
+			end-switch
+			/*
+			This is pretty ugly.   A datetime variable has a qualifier that
+			specifies the from and to levels of precision.  (e.g. MONTH TO MINUTE)
+			Imagine 4 half bytes : 0000 0000 0000
+			The first group is the storage length.
+			The second is the "FROM" qualifer,
+			the thrid is the TO Qualfier.
+			2^4 = 16 and 2^8 is 256.  Therefore:
+			the TO qualifer is n % 16
+			The 8 bits to the right of the to qualifer is int(n/16) and the 4 bits to the 
+			right of the from qualifier is int(n/256).
+			In each case the value is the that number % 16.
+			*/
+//			set lf-to = (mc-collength % power-of(2,4) )
+//			set lf-from = (integer(mc-collength / power-of(2,4) ) % 16)
+			do get-datetime-qualifier parameters are 
+				 (integer(mc-collength / power-of(2,4) ) % 16)
+				 returning lf-qualifier
+			string mc-display-pic appending concat(" ",lf-qualifier, " TO ")
+			do get-datetime-qualifier parameters are 
+				(mc-collength % power-of(2,4) )
+				 returning lf-qualifier
+			string mc-display-pic appending concat(" ",lf-qualifier)
+			set mc-collength =  (integer(mc-collength / power-of(2,8) ) % 16)
+		case 12 // text
+			string mc-pic-string appending " type varchar(16000)"
+			string mc-display-pic appending "TEXT"
+		case 15  // NCHAR
+			string mc-pic-string appending " pic x("
+			string mc-pic-string appending str(mc-collength)
+			string mc-pic-string appending ") type string"
+			string mc-display-pic appending " NCHAR("
+			string mc-display-pic appending str(mc-collength)
+			string mc-display-pic appending ") "
+		case 13,16,40 // VARCHAR NVARCHAR LVARCHAR
+			switch mc-coltype
+			case 13
+				string mc-display-pic appending "VARCHAR("
+			case 16
+				string mc-display-pic appending "NVARCHAR("
+			case 40
+				string mc-display-pic appending "LVARCHAR("
+			end-switch
+			string mc-pic-string appending " pic x("
+			if mc-collength < 2048
+				string mc-pic-string appending str(mc-collength)
+				string mc-display-pic appending str(mc-collength)
+			else 
+				string mc-pic-string appending "16000"
+				string mc-display-pic appending "max"
+			endif
+			string mc-pic-string appending ") type varchar"
+			string mc-display-pic appending ") "
+		else
+			string mc-pic-string appending str-concat(" Unknown (" str(mc-coltype) ")")
+		end-switch
+		if CHKBIT(sc_coltype,8) 
+			string mc-note appending " // "
+			string mc-note appending " NOT NULL"
+		endif
+		if mc-coltype in (5,8)
+			string mc-note appending " // "
+			string mc-note appending concat(" (" str(integer(sc_collength / 256))
+				"," str(sc_collength % 256) ")")
+			string mc-display-pic appending concat(" (" str(integer(sc_collength / 256))
+				"," str(sc_collength % 256) ")")
+		endif
+		insert memcolumns
+	end-select
+detail
+	if screenmode = md-create-text
+		do get-prefix entry once parameters lp-tabid
+	endif
+	accept mc-colno @1,1 pic s(4)
+		title "Seq"
+	display mc-colname @1,2
+		title "Name"
+	display mc-display-pic pic x(50)  @1,3 
+		title "4gl Pic"
+	display mc-coltype @1,4 pic s(5)
+		title "Type Code"
+	display mc-collength @1,5 pic z(6)
+		title "length"
+end-screen
+
+screen get-prefix
+parameters
+	lp-tabid					type number
+local
+	lf-table-name				pic x(50) type string
+	lf-prefix					pic x(50) type string
+	lf-type 					pic x
+	lf-key-field				pic x(20) type string
+	lf-title					pic x(50) type string
+	lf-use-internal				type boolean
+	i							type number
+	window
+		title is lf-title
+	form-entry
+before
+	select lf-title = max(st_tabname) from systables where st_tabid = :lp-tabid
+	end-select
+	set lf-table-name = lf-title
+	set lf-prefix = spaces
+detail
+	check-box lf-use-internal @2,20
+		values true false
+		title "Use internal field names"
+		help "prefix the table and column names with an internal field name"
+		right-coordinate
+		default is  FALSE
+		before-check-box
+			//
+		end-before-check-box
+		validations
+			//
+		end-validations
+		on change
+			if lf-use-internal
+				if substring(lf-table-name,1,4) <> "dbs-"
+					string lf-table-name inserting  "dbs-" at 1
+				endif
+				set lf-prefix = substring(lf-title,1,1)
+				for i = 2 to strlen(lf-title) - 1
+					if substring(lf-title,i,i) = "_" 
+						string lf-prefix appending substring(lf-title,i + 1, i + 1)
+					endif
+				endfor
+				string lf-prefix appending "_"
+			endif
+			refresh lf-table-name
+			refresh lf-prefix
+			//
+		endon
+	end-check-box 
+	accept lf-table-name @3,20
+		title "Internal Table Name:"
+		default lf-table-name
+		when lf-use-internal
+		show-value
+	accept  lf-prefix @4,20
+		title "Internal Column Prefix:"
+		default lf-prefix
+		when lf-use-internal
+		show-value
+	radio-button lf-type
+		@6,20 "I" title  "Indexed"
+		@6,30 "S" title  "Sequential"
+		right-coordinate
+		default "S"
+		on change 
+			if lf-type = "S"
+				set lf-key-field = spaces
+			endif
+			refresh lf-key-field
+		end-on
+	end-radio-button 
+	accept lf-key-field @7,20
+		title "Key"
+		when lf-type = "I"
+	confirm auto
+	confirmed
+		if lf-type = "I" and lf-key-field = spaces
+			message "You must specify an index field for index files"
+			re-enter lf-type
+		endif
+		do build-text parameters lf-use-internal lf-table-name lf-prefix lf-type lf-key-field 
+	end-confirm
+end-screen
+
+#define TAB chr(9)
+#define CR chr(13)
+#define ADDLINE(A) \
+	set tf-line = A \
+	string tf-line appending CR \
+	insert text-file
+
+procedure build-text
+parameters
+	lp-use-internal				type boolean
+	lp-table-name				pic x(50) type string
+	lp-prefix					pic x(50) type string
+	lp-type 					pic x
+	lp-key-field				pic x(20) type string
+local
+	lf-file-name 				pic x(200) type string
+	lf-db-col					pic x(200) type string
+	//
+	set lf-file-name = str-concat("db",str(pid()),".txt")
+	open text-file
+		file is concat("/tmp/",lf-file-name)
+		create
+	ADDLINE( concat("object ",lp-table-name))
+	ADDLINE( concat(TAB, "type is " if-then-else(lp-type = "I","indexed","db-sequential")))
+	ADDLINE( concat(TAB, 'file is "/' sd_name "/" st_owner "." st_tabname '"'))
+	ADDLINE( concat(TAB, "record is " ))
+	select * from memcolumns
+	detail
+		set lf-db-col = spaces
+		if lp-use-internal
+			string lf-db-col appending ' db-column-name "'
+			string lf-db-col appending mc-colname
+			string lf-db-col appending '"'
+		else
+			set lf-db-col = " use-name-in-db"
+		endif
+		ADDLINE( concat(TAB,TAB,lp-prefix,mc-colname,TAB,TAB,mc-pic-string,lf-db-col,mc-note))
+	end-select
+	ADDLINE( concat(TAB, "end-record" ))
+	if lp-type = "I"
+		ADDLINE( concat(TAB,"key is ",lp-key-field))
+	endif
+	ADDLINE( concat(TAB,"no-rowid"))
+	command concat("\\",node-name(),"\tmp\",lf-file-name) external wait
+	close text-file and remove
+//
+end-procedure
+
+procedure get-datetime-qualifier
+parameters are
+	lp-code								type number
+returning
+	lr-desc								pic x(20) type string
+	switch lp-code
+	case 0
+		set lr-desc = "YEAR"
+	case 2
+		set lr-desc = "MONTH"
+	case 4
+		set lr-desc = "DAY"
+	case 6
+		set lr-desc = "HOUR"
+	case 8
+		set lr-desc = "MINUTE"
+	case 10
+		set lr-desc = "SECOND"
+	case 11
+		set lr-desc = "FRACTION(1)"
+	case 12
+		set lr-desc = "FRACTION(2)"
+	case 13
+		set lr-desc = "FRACTION(3)"
+	case 14
+		set lr-desc = "FRACTION(4)"
+	case 15
+		set lr-desc = "FRACTION(5)"
+	end-switch
+end-procedure
+	

@@ -1,0 +1,530 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program :  clibvrms
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2019
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: clib/clibvrms.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 30May19  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+/*
+
+	This documentation is in RST format.  To view this as a nice pdf goto
+	https://overbits.herokuapp.com/rsteditor/ or rst.ninjs.org  and paste this content.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|           |           |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+
+	Alternatively
+
+	 =========== =========== ======================================================== 
+	  Direction   Data Type   Description                                             
+	 =========== =========== ======================================================== 
+	 =========== =========== ======================================================== 
+
+========
+clibvrms
+========
+
+Some generic routines to manage ad-hoc bookings in the resource management system
+
+clibvrms-get-next-rostered-unbooked 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Passing a resource and a start datetime, this routine will return the next
+ROSTERED un-booked time in which a given duration is available.
+Note that the duration is in seconds and can be zero.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|  In       |Number     |Resource Number                                         |
+	+-----------+-----------+--------------------------------------------------------+
+	|  In       |DateTime   | note that the passed start datetime must be in         |
+    |           |           | GMT, therefore it can be from a table.  If             |
+    |           |           | constructed via the DATE-TIME function then the        |
+    |           |           | GMT parameter should be set to TRUE                    |
+    +-----------+-----------+--------------------------------------------------------+
+	|  In       |Number     |Duration in seconds (can be zero)                       |
+	+-----------+-----------+--------------------------------------------------------+
+	|  Out      |Datetime   |The earlies possible date time that can be booked for   |
+	|           |           |the passed reource when the amount of seconds is        |
+	|           |           |Available                                               |
+	|           |           |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+*/
+
+ 
+#include "../include/i8secabt.spl"
+#include "../include/i8proglogparam.spl"
+
+#include "../include/irmsdefines.spl"
+
+#define BOOKING 'B'
+#define ROSTER 'R'
+
+#define DEBUG(A) print A ":" get-field-value(A)
+	
+ 
+field
+	ws-function-title						type string
+
+procedure main
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8secabt-check-abort
+		parameters are sys-consolidation-division login-id() "ZUSR" "R004"
+		returning ws-function-title 
+	do i8proglogparam-write-log parameters are "clibvrms"
+end-procedure
+
+procedure clibvrms-get-next-available-unbooked export
+//
+// Passing a resource and a start datetime, this routine will return the next
+// available un-booked time.
+//
+// WIP
+parameters
+	lp-resource							like resource-no
+	lp-start							type date-time
+returning
+	lr-start							type date-time
+end-procedure
+
+procedure clibvrms-get-next-rostered-unbooked export
+//
+// Passing a resource and a start datetime, this routine will return the next
+// ROSTERED un-booked time in which a given duration is available.
+// Note that the duration is in seconds and can be zero.
+// note that the passed start datetime must be in GMT, therefore it can
+// be from a table.  If constructed via the DATE-TIME function then the GMT
+// parameter should be set to TRUE
+//
+parameters
+	lp-resource							like resource-no
+	lp-start							type date-time
+	lp-duration-secs					type number
+returning
+	lr-start							type date-time // 0 indicates no possible time in the date range.
+local
+	lf-start-date						type date
+	lf-start-time						type time
+	lf-current-datetime					type datetime
+	lf-current-available-duration		type number
+	lf-count							type number
+	lf-current-booking-start			type datetime
+	lf-current-booking-end				type datetime
+	lf-current-roster-start				type datetime
+	lf-current-roster-end				type datetime
+	lf-get-next							pic x
+	lf-loop-control						type number
+	lf-potential-start					type datetime
+	//
+#ifdef DEBUG
+	report "tried this"
+					no-xml
+	print "CALLED With"
+	DEBUG("lp-resource")
+	DEBUG("lp-start")
+	DEBUG("lp-duration-secs")
+#endif
+	set lr-start = ZERO_DATE_TIME
+	// input validations
+	get resource-master 
+		on index resource-no
+		key is lp-resource
+	on error
+		exit
+	endon
+	if lp-start < today - 365
+		exit // cannot look prior more than a year
+	endif
+//	if lp-end-brake = 0
+//		set lp-end-brake = today + 365
+//	endif
+	//
+	set lf-start-date = date-from-date-time(lp-start,TRUE)
+	set lf-start-time = time-from-date-time(lp-start,TRUE)
+	//
+	set lf-current-datetime = lp-start
+	do get-next-roster parameters are lp-resource,  date-time(lf-start-date,ZERO_TIME,true)
+		returning lf-current-roster-start lf-current-roster-end
+	set lf-potential-start = lf-current-roster-start
+	set lf-get-next = BOOKING
+	set lf-current-available-duration = 0
+	set lf-current-datetime = lf-current-roster-start
+	while TRUE
+#ifdef DEBUG
+			print "Start of loop ------------------"
+			DEBUG("lf-current-available-duration")
+			DEBUG("lf-potential-start")
+			DEBUG("lf-get-next")
+			print "--------------------------------------------------------------------------------"
+#endif
+		set lf-loop-control += 1
+		if lf-loop-control > 1000
+			set lr-start = ZERO_DATE_TIME
+#ifdef DEBUG
+			print "Got to 1000"
+			report finished
+#endif
+			exit
+		endif
+		if lf-get-next = BOOKING
+			do get-next-booking-count parameters are lp-resource, lf-current-datetime
+				returning lf-count
+			if lf-count = 0
+				// then we can start at the current time
+				set lr-start = lf-current-datetime
+#ifdef DEBUG
+				print "no more bookings"
+				report finished
+#endif
+				exit
+			endif
+			do get-next-booking parameters are lp-resource, lf-current-datetime 
+				returning lf-current-booking-start lf-current-booking-end
+			// If the booking is a different day to the current roster, then
+			// we need to add the rest of today to the current available and
+			// then find the next roster.
+			if lf-current-booking-start > lf-current-roster-end
+				set lf-get-next = ROSTER
+				set lf-current-available-duration +=  lf-current-roster-end - lf-current-datetime
+				if lf-current-available-duration >= lp-duration-secs
+					set lr-start = lf-potential-start
+					report finished
+					exit
+				endif
+#ifdef DEBUG
+				print "--> from currentdate to end of rster" (lf-current-roster-end - lf-current-datetime) pic z(9)
+				DEBUG("lf-current-available-duration")
+#endif
+			else // the next booking is on the same day as the current roster day we are looking at.
+				set lf-current-available-duration +=  lf-current-booking-start - lf-current-datetime
+
+#ifdef DEBUG
+			print "--> from currentdate to booking start" (lf-current-booking-start - lf-current-datetime) pic z(9)
+			DEBUG("lf-current-available-duration")
+			DEBUG("lf-current-datetime")
+			DEBUG("lf-current-booking-start")
+			DEBUG("lf-current-booking-end")
+#endif
+
+				if lf-current-available-duration >= lp-duration-secs
+					set lr-start = lf-potential-start
+					report finished
+					exit
+				else // otherwise we start again looking for a gap in the bookings big enough for 
+					 // the duration, so zero the available and look for the
+					 // next booking.
+#ifdef DEBUG
+				print "--> reset available to 0"
+#endif
+					set lf-current-available-duration = 0
+					set lf-potential-start = lf-current-booking-end
+					set lf-current-datetime = lf-current-booking-end
+					// if the booking goes beyond the end of the day then get the
+					// next roster
+					if lf-current-booking-end >= lf-current-roster-end
+						set lf-get-next = ROSTER
+					endif
+				endif
+			endif
+		else // get a roster record
+			do get-next-roster-count parameters are lp-resource, lf-current-datetime
+				returning lf-count 
+			if lf-count = 0 // there are no roster records so cannot schedule
+				set lr-start = ZERO_DATE_TIME
+#ifdef DEBUG
+				print "no more rosters"
+				report finished
+#endif
+				exit
+			endif
+			do get-next-roster parameters are lp-resource, lf-current-datetime
+				returning lf-current-roster-start lf-current-roster-end
+#ifdef DEBUG
+			DEBUG("lf-current-roster-start")
+#endif
+			set lf-current-datetime = lf-current-roster-start
+			set lf-get-next = BOOKING
+		endif
+	end-while
+#ifdef DEBUG
+	print "end of procedure"
+	report finished
+#endif
+end-procedure
+
+procedure get-next-booking-count
+parameters
+	lp-resource					like resource-no
+	lp-start					type datetime
+returning
+	lf-count					type number
+local 
+	lf-thisdate					type date
+	set lf-thisdate = date-from-date-time(lp-start,TRUE)
+	select lf-count = count(*)
+		from resource-booking
+		where resource-no = :lp-resource
+		and rb-date >= :lf-thisdate
+	end-select
+end-procedure
+
+procedure get-next-booking
+parameters
+	lp-resource					like resource-no
+	lp-start					type datetime
+returning
+	lr-start					type datetime
+	lr-end						type datetime
+local 
+	lf-thisdate					type date
+	set lf-thisdate = date-from-date-time(lp-start,TRUE)
+	DEBUG(" lf-thisdate")
+	select *
+		from resource-booking
+		where resource-no = :lp-resource
+		and rb-date >= :lf-thisdate
+		and rb-start-date-time > lp-start
+	detail
+		set lr-start = rb-start-date-time
+		set lr-end = rb-end-date-time
+		exit
+	end-select
+end-procedure
+
+procedure get-next-roster-count
+parameters
+	lp-resource					like resource-no
+	lp-start					type datetime
+returning
+	lf-count					type number
+local 
+	lf-thisdate					type date
+	set lf-thisdate = date-from-date-time(lp-start,TRUE)
+	select lf-count = count(*)
+		from resource-roster-calendar
+		where resource-no = :lp-resource
+		and rrc-date >= :lf-thisdate
+	end-select
+end-procedure
+
+procedure get-next-roster
+parameters
+	lp-resource					like resource-no
+	lp-start					type datetime
+returning
+	lr-start					type datetime
+	lr-end						type datetime
+local 
+	lf-thisdate					type date
+	set lf-thisdate = date-from-date-time(lp-start,TRUE)
+#ifdef DEBUG
+	print "get-next-roster"
+	DEBUG("lp-start")
+	DEBUG("lf-thisdate")
+#endif
+	select *
+		from resource-roster-calendar
+		where resource-no = :lp-resource
+		and rrc-date >= :lf-thisdate
+		and rrc-start-date-time > lp-start
+	detail
+		set lr-start = rrc-start-date-time
+		set lr-end = rrc-end-date-time
+		exit
+	end-select
+end-procedure
+
+
+/*
+procedure clibvrms-check-resource-availability
+	parameters
+		lp-resource						like resource-no
+		lp-date-from					type date
+		lp-date-to						type date
+		lp-check-bookings				type boolean
+	local field
+		lf-ok							type boolean
+		lf-rostered-records-exist		type boolean
+		lf-availability-records-exist	type boolean
+		lf-date							type date
+		lf-end-time						like rb-end-time
+	//
+	// NOTE - we are deliberately not checking the overbooking allowed flag (as per Mark S.)
+	//
+	set lf-ok = FALSE
+	//
+	get resource-master
+		on index resource-no
+		key lp-resource
+	on error ENOREC
+		//resource not found
+	else
+		set lf-rostered-records-exist = FALSE
+		set lf-availability-records-exist = FALSE
+		//
+		//check if the resource has an entry in the roster calendar
+		select * from resource-roster-calendar
+		where
+			resource-no = :rfl-resource-no
+			and rrc-date between :lp-date-from and :lp-date-to
+		detail
+			set lf-rostered-records-exist = TRUE
+			//
+			if rrc-calendar-type = IRMSDEFINES_CAL_TYPE_LEAVE
+				//not available	
+			else
+				set lf-ok = TRUE
+				//
+				if lp-check-bookings = YES
+					//make sure there is no booking for this time
+					select * from resource-booking
+					where
+						resource-no = :resource-no
+						and rb-date = :rrc-date
+						and :rrc-start-time between rb-start-time and rb-end-time
+						and :rrc-end-time between rb-start-time and rb-end-time
+						and rb-declined-archive <> IRMSDEFINES_ARCHIVED_BOOKING //exclude archived
+						and rb-status <> IRMSDEFINES_BOOKING_STATUS_DECLINED
+					detail
+						set lf-ok = FALSE
+						break
+					endselect
+				endif
+				if lf-ok
+					//at least one calendar entry without any bookings
+					break
+				endif
+			endif
+		endselect
+		//
+		if not lf-rostered-records-exist
+			//check if the resource has an entry in the availability calendar
+			select * from resource-availability-calendar
+			where
+				resource-no = :rfl-resource-no
+				and rac-date between :lp-date-from and :lp-date-to
+			detail
+				set lf-availability-records-exist = TRUE
+				set lf-ok = TRUE
+				//
+				if lp-check-bookings 
+					//make sure there is no booking for this time
+					select * from resource-booking
+					where
+						resource-no = :resource-no
+						and rb-date = :rac-date
+						and :rac-start-time between rb-start-time and rb-end-time
+						and :rac-end-time between rb-start-time and rb-end-time
+						and rb-declined-archive <> IRMSDEFINES_ARCHIVED_BOOKING //exclude archived
+						and rb-status <> IRMSDEFINES_BOOKING_STATUS_DECLINED
+					detail
+						set lf-ok = FALSE
+						break
+					endselect
+				endif
+				if lf-ok
+					//at least one availability entry without any bookings
+					break
+				endif
+			endselect
+		endif
+		//
+		if not lf-rostered-records-exist
+		and not lf-availability-records-exist
+			if lp-check-bookings 
+				//must check if there are days without any bookings
+				if rms-type in {IRMSDEFINES_TYPE_EQUIPMENT}
+					//if there are bookings for the **whole** day, then
+					//the resource is **not** available that day
+					for lf-date = lp-date-from to lp-date-to
+						//set lf-ok to TRUE in case there are no bookings
+						set lf-ok = TRUE
+						//
+						set lf-end-time = 00:00:00
+						//check for any bookings
+						//make sure the resource is not booked for the whole day
+						select * from resource-booking
+						where
+							resource-no = :resource-no
+							and rb-date = :lf-date
+							and rb-declined-archive <> IRMSDEFINES_ARCHIVED_BOOKING //exclude archived
+							and rb-status <> IRMSDEFINES_BOOKING_STATUS_DECLINED
+						order by
+							resource-no rb-date rb-start-time rb-record-id
+						detail
+							if rb-start-time > lf-end-time
+								//found a gap, resource is available this date
+								set lf-ok = TRUE
+								break
+							elseif rb-end-time > lf-end-time
+								set lf-ok = FALSE
+								if rb-end-time = 23:59:59
+								or rb-all-day = TRUE
+									set lf-end-time = 23:59:59
+									//booked for the whole day
+									break
+								else
+									set lf-end-time = rb-end-time
+								endif
+							endif
+						endselect
+						if lf-ok
+							//found a day where there is no booking
+							//or found a gap in the booking times
+							//therefore this equipment is available
+							break
+						elseif lf-end-time <> 23:59:59
+							//not booked for the whole day
+							set lf-ok = TRUE
+							break
+						endif
+					endfor
+				else
+					//if there is **any** booking for a day, then
+					//the resource is **not** available that day
+					for lf-date = lp-date-from to lp-date-to
+						set lf-ok = TRUE
+						//make sure there is no booking for this time
+						select * from resource-booking
+						where
+							resource-no = :resource-no
+							and rb-date = :lf-date
+							and rb-declined-archive <> IRMSDEFINES_ARCHIVED_BOOKING //exclude archived
+							and rb-status <> IRMSDEFINES_BOOKING_STATUS_DECLINED
+						detail
+							//not available this date
+							set lf-ok = FALSE
+							break
+						endselect
+						if lf-ok
+							//found a day where there is no booking
+							//therefore this equipment is available
+							break
+						endif
+					endfor
+				endif
+			else
+				//we are not checking the bookings, so they are automatically considered available
+				set lf-ok = TRUE
+			endif
+		endif
+	endon
+	//
+endprocedure //clibres-check-resource-availability ---------------------------
+*/

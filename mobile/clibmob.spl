@@ -1,0 +1,418 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program :  common funcitions for mobile
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2020
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: mobile/clibmob.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 19Jun20  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/i8proglog.spl"
+
+link 'clib/clibsearch'
+link 'clib/clibvwp'
+
+mode md-new-order
+	prompt "New"
+mode md-select
+	prompt "Select"
+ 
+procedure library-init
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8proglog-write-log
+end-procedure
+
+
+//------------------------------------------------------------------------------
+// generic single-context search
+//------------------------------------------------------------------------------
+
+procedure clibmob-enterprise-search export
+// pass the context.  eg. "4" for customers, "2" for stock, pipe limited list
+// for multiple contexts
+parameters
+	lp-context-list						type string
+	lp-title							type string
+returning
+	lr-key								type string
+	do enterprise-search entry once
+		parameters lp-context-list lp-title
+		returning lr-key
+end-procedure
+
+screen enterprise-search 
+// pass the context.  eg. "4" for customers, "2" for stock, pipe limited list
+// for multiple contexts
+parameters
+	lp-context-list						type string
+	lp-title							type string
+returning
+	lr-key								type string
+local
+	lf-search							type string
+	window @1,1 to @6,50
+		title lp-title
+		window-position 5
+	responsive
+	//
+detail
+	screen-group
+	accept  lf-search
+		title "Search Term"
+		default lf-search
+	validations
+		do clibmob-perform-search
+			parameters  lp-context-list lf-search
+			returning lr-key
+		if lr-key = spaces
+			message-box "No search results"
+				title is "Enterprise Search"
+				message-buttons  MSG_BOX_CANCEL
+				icon MSG_BOX_INFORMATION
+				optional bell 
+			reenter lf-search
+		else
+			exit
+		endif
+	end-validations
+	end-screen-group
+end-screen
+
+procedure clibmob-perform-search export
+// This is a separate routine so that the search can be called directly from 
+// another field (such as stock code entry)
+parameters
+	lp-context-list						type string
+	lp-search-term						type string
+returning 
+	lr-key								type string
+local
+	lf-query-id							like scr-query-id
+	lf-error-found						type boolean
+	lf-context							like scr-result-context
+	lf-error-message					type string
+	lf-success-message					type string
+	lf-count							type number
+	//
+	do clibsearch-keyword-search									
+		parameter 
+			zero
+			lp-search-term
+			login-id()
+			lp-context-list
+			'N'
+			'N'
+		returning 
+			lf-query-id
+			lf-error-found
+			lf-error-message
+			lf-success-message
+	if lf-error-found
+		message-box 
+			lf-error-message
+			title is "Enterprise Search"
+			message-buttons  MSG_BOX_CANCEL
+			icon MSG_BOX_STOP
+		exit
+	else
+		// check how many
+		select lf-count = count(*)
+			from search-central-results
+			where search-central-results.scr-query-id = :lf-query-id
+		end-select
+		if lf-count = 0
+			// no results
+			set lr-key = spaces
+			exit
+		elseif lf-count > 1
+			// more than one result
+			do select-key parameters are 
+				lf-query-id, lp-search-term, spaces
+				returning lf-context lr-key
+			if lr-key = spaces
+				exit
+			endif
+		else
+			// exactly one
+			select lr-key = max(scr-result-object-key)
+				from search-central-results
+				where search-central-results.scr-query-id = :lf-query-id
+			end-select
+		endif
+		exit
+	endif
+end-procedure
+
+screen select-key
+parameter
+	lp-query-id							like scr-query-id
+	lp-search-term						type string pic x(250)
+	lp-current-lang						type string
+returning 
+	lr-context							like scr-result-context
+	lr-key								like scr-result-object-key
+	//
+	window @1,1 to @29,115
+		window-position 5
+	title concat("Keyword Search Results for ", upper-case(lp-search-term))
+	select *
+	from 
+		search-central-context-desc
+	inner join 
+		search-central-results
+		on search-central-results.scr-result-context = search-central-context-desc.ssct-context-id and
+			search-central-context-desc.ssct-context-language = lp-current-lang
+	where 
+		lp-query-id = search-central-results.scr-query-id
+	order by 
+		search-central-results.scr-result-object-key
+	//
+	allowed search md-select
+	datagrid occurs 28
+before	
+detail
+	if screenmode = md-select
+		//  Need to work out the CRM key from the searched data
+		set lr-context = scr-result-context
+		set lr-key = scr-result-object-key
+		exit
+	endif
+	accept	scr-result-object-key @1,1 pic x(25)
+		title 'Code'
+	display	scr-result-description @1,2 pic x(25)
+		title 'Description'	
+endscreen
+
+//------------------------------------------------------------------------------
+// generic notes screen  
+// default depth and width to support phone in portrait
+//
+// Call this routine passing a the title, a large varchar and the width and
+// depth of the screen.  If the width and depth are not passed then a default
+// suitable for a mobile phone in landscape are used.
+// eg
+/*
+	do clibmob-edit-notes-via-prowp "New CRM Transaction" lf-notes 0 0
+		returning lf-notes
+	if exit-status != 0
+		exit // user escaped out
+	endif
+*/
+// After the routine a large varchar is returned.
+// To break that into sensible line sizes for any notes file, repeatedly call 
+// clibmob-break-to-line.  eg:
+/* 
+	repeat
+		do clibmob-break-to-line parameters are lp-notes size-of(sol-line-description) 
+			returning sol-line-description lp-notes
+	until sol-line-description = spaces
+		// Do whatever is required to insert the line here
+	end-repeat
+*/
+//------------------------------------------------------------------------------
+// TODO: handle paragraphs that have blank lines.
+
+object prowp-notes-file
+	type text
+record
+	prowp-tmp-notes					like sol-line-description
+endrecord
+
+#define LANDSCAPEWIDTH 40
+#define LANDSCAPEDEPTH 7
+#define PORTRAITWIDTH 28
+#define PORTRAITDEPTH 10
+
+/*
+
+Don't use this. Use the one in clibvwp
+
+
+procedure clibmob-break-to-line export
+parameters
+	lp-text								pic x(16000) type varchar
+	lp-max-size							type number
+returning
+	lr-returned-line					pic x(16000) type varchar
+	lp-text
+local 
+	i 									type number
+	set lp-text = ltrim(lp-text)
+	if str-len(lp-text) < lp-max-size
+		// smaller than max so just return it
+		set lr-returned-line = lp-text
+		set lp-text = spaces
+	elseif pattern(lp-text," ") > lp-max-size
+		// space past max size so truncate it
+		set lr-returned-line = substring(lp-text,1,lp-max-size)
+		string lp-text deleting 1 to lp-max-size
+	else 
+		// At least one (possibly more) words will fit
+		set lr-returned-line = substring(lp-text,1,lp-max-size)
+		for i = str-len(lr-returned-line) down to 1
+			if substring(lr-returned-line,i,i) = space
+				string lr-returned-line deleting i to str-len(lr-returned-line)
+				string lp-text deleting 1 to str-len(lr-returned-line)
+				exit
+			endif
+		end-for
+	endif
+end-procedure
+
+*/
+
+
+screen clibmob-notes-via-multiline export
+parameters
+	lp-heading							pic x(60)
+	lp-text								pic x(16000) type varchar
+returning
+	lp-text
+	window 
+		window-position 5
+		title lp-heading
+	responsive
+	allowed correct
+	//
+detail
+	screen-group // ---- Notes ----------------------------
+		accept lp-text // @1,1
+			title "notes"
+			help "Enter your notes here"
+			multi-line
+			rows 5
+			columns 50
+	end-screen-group // ---- Notes --------------------------------------
+end-screen
+
+/*
+procedure clibmob-edit-notes-via-prowp export
+parameters
+	lp-heading							pic x(60)
+	lp-text								pic x(16000) type varchar
+	lp-width							type number
+	lp-depth							type number
+returning
+	lr-text								pic x(16000)
+	do notes-via-multiline entry once parameters lp-heading lp-text
+		returning lr-text
+end-procedure
+
+*/
+
+procedure clibmob-edit-notes-via-prowp export
+parameters
+	lp-heading							pic x(60)
+	lp-text								pic x(16000) type varchar
+	lp-width							type number
+	lp-depth							type number
+returning
+	lr-text								pic x(16000)
+	if lp-width = 0
+		set lp-width = PORTRAITWIDTH
+	endif
+	if lp-depth = 0
+		set lp-depth = PORTRAITDEPTH
+	endif
+	close prowp-notes-file and remove
+	open prowp-notes-file temporary
+	if lp-text != spaces
+		// load file with space delimited text.
+		repeat
+			do clibvwp-break-to-line parameters are lp-text size-of(prowp-tmp-notes) 
+				returning prowp-tmp-notes lp-text
+		until prowp-tmp-notes = spaces
+			insert prowp-notes-file
+		end-repeat
+	endif
+	command "prowp" parameters are 
+		"-h" lp-heading
+		"-b" str(lp-depth) str(lp-width)  "1" "1"  
+		"-v"
+		file-name(prowp-notes-file)
+	// Exit 0 - user pressed "SAVE"  Exit 2 - User pressed cancel or closed
+	// without save
+	if exit-status() != 0
+		exit 1
+	endif
+	//
+	// Now build a varchar:
+	//
+	set lr-text = spaces
+	select * from prowp-notes-file
+	detail
+		if lr-text = spaces
+			set lr-text = prowp-tmp-notes
+		else
+			string lr-text appending concat(" " prowp-tmp-notes)
+		endif
+	end-select
+	//
+endprocedure //edit-notes-via-prowp-for-trans----------------------
+
+/*
+screen clibmob-customer-open-orders export
+parameters
+	lp-customer							like accountcode
+returning 
+	lr-mode								pic x // N)ew E)xisting C)ancel
+	lr-so-order-no						like so-order-no
+	lr-so-bo-suffix						like so-bo-suffix
+	window @1,1 to @12,40
+		window-position 5
+	title "Orders"
+	select *
+		from sales-order as t0
+		inner join sales-order-status-desc as t1 on t0.so-order-status = t1.sosd-status and t1.sosd-language = spaces
+		inner join deb-master as t2 on t2.accountcode = t0.so-cust-code
+		where t0.so-cust-code = :lp-customer
+		and t0.so-order-status < "40"
+		order by t0.so-order-no t0.so-bo-suffix
+	datagrid occurs 10
+	allowed search md-select md-new-order
+before
+	refresh title
+detail
+	if screenmode = md-new-order
+		set lr-mode = "M"
+		exit
+	endif
+	if screenmode = md-select
+		set lr-mode = "E"
+		set lr-so-order-no = so-order-no
+		set lr-so-bo-suffix = so-bo-suffix
+		exit
+	endif
+	accept so-order-no @1,1
+		title "Order"
+		when screenmode = search
+		show-value
+	accept so-bo-suffix @1,2
+		title "BO"
+		when screenmode = search
+		show-value
+	display sosd-description @1,3
+		title "Status"
+	display so-cust-reference @1,4
+		title "PO"
+	display so-order-total-shipped-amount @1,5
+		title "Value"
+	display so-order-date @1,6
+		title "Date"
+	display so-delivery-date @1,7
+		title "Delivery"
+after
+	set lr-mode = "C"
+end-screen
+*/

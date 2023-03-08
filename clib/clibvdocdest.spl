@@ -1,0 +1,484 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : 
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2013
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: so/clibvdocdest.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 22Jan13  rjb log 126	re-write of i54select to clib structure
+//
+/*
+
+	This documentation is in RST format.  To view this as a nice pdf goto
+	https://overbits.herokuapp.com/rsteditor/ or rst.ninjs.org and paste this content.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|           |           |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+
+============
+clibvdocdest
+============
+
+	Originally written by Wes.  Provides support for users to select the destination 
+	of an m54custom document at runtime.
+
+clibvdocdest-invoice-destination 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|  In       | int       |Sales order number                                      |
+	+-----------+-----------+--------------------------------------------------------+
+	|  In       |String 2   |backorder suffix                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|  In       |String 1   |Default target                                          |
+	|           |           |                                                        |
+	|           |           | - "T" ) "Trueform Destination"                         |
+	|           |           | - "E" ) "Email"                                        |
+	|           |           | - "F" ) "Fax"                                          |
+	|           |           | - "P" ) "Print"                                        |
+	|           |           | - "S" ) "Spool"                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|  Out      |String 40  | Fax Number                                             |
+	+-----------+-----------+--------------------------------------------------------+
+	|  Out      |String 60  | Email Address                                          |
+	+-----------+-----------+--------------------------------------------------------+
+	|  Out      |string 16  | Printername                                            |
+	+-----------+-----------+--------------------------------------------------------+
+	|  Out      |string 1   |New target (see default target above)                   |
+	+-----------+-----------+--------------------------------------------------------+
+	|  Out      |boolean    | True - apply to other documents in this session        |
+	+-----------+-----------+--------------------------------------------------------+
+
+
+Setup in m54custom
+~~~~~~~~~~~~~~~~~~
+	These comments are added so you can copy and paste from here 
+
+	You need global variables to communicate between two different public
+	override routines so add the following:
+
+:: 
+
+	//  The following global fields are required to communicate
+	//  between public-get-contact and public-check-spool-or-print
+	ws-fax-no							type string
+	ws-email-address					type string pic x(60)
+	ws-entered-printer					pic x(16)
+	ws-print-to							pic x
+ 
+Add the following two override routines:
+
+
+.. raw:: pdf
+
+ 	PageBreak
+
+::
+
+	procedure public-check-spool-or-print export
+		parameters
+			lp-spool-report						pic x
+			lp-whse-env-printer					pic x(30)
+			lp-print-direct-param-passed		type boolean
+			lp-sales-order.*					like sales-order.*
+			lp-system-forms-layout.*			like system-forms-layout.*
+			lp-system-forms-header.*			like system-forms-header.*
+		returning 
+			lr-spool-report						pic x
+			lr-whse-env-printer					pic x(30)
+		local
+			i									type number
+		//
+		if batched()
+			set lr-spool-report = NO
+			exit
+		endif
+		if get-param(3) = "-i5reprint"
+			do clibvdocdest-invoice-destination 
+			parameters
+				lp-sales-order.so-order-no 
+				lp-sales-order.so-bo-suffix 
+				'T' // default target where we send it to.
+			returning
+				// note the need for global variables to handle communication
+				// between this routine and public-get-contact
+				ws-fax-no							
+				ws-email-address				
+				ws-entered-printer			
+				ws-print-to				
+			if ws-print-to = "S" 
+				set lr-spool-report = YES 
+			elseif ws-print-to = "P" 
+				set lp-whse-env-printer = ws-entered-printer 
+				set lr-spool-report = NO 
+			endif
+			set lr-spool-report = lp-spool-report
+			set lr-whse-env-printer = lp-whse-env-printer
+			for i = 0 to param-count()
+				if get-param(i) = "-i5reprint"
+					set lr-spool-report = "Y"
+					exit
+				endif
+			endfor
+		endif
+	end-procedure	
+
+.. raw:: pdf
+
+ 	PageBreak
+
+:: 
+
+	procedure public-get-contact export		
+		parameters 						
+			lp-program						pic x(20)	
+			lp-layout						like ssh-layout-code	
+			lp-form-type					like ssh-order-status	
+			lp-form-source					like ssh-order-source	
+			lp-method						like sso-field-code		
+			lp-account						like tdm-account		
+			lp-account-type					like tdm-account		
+			lp-invoice-field				type string pic x(300)	
+		returning 										
+			lr-field						pic x(200)					
+	//
+		if ws-print-to = "E"	
+		and lp-method = "TA"	
+			set lr-field = concat("TA",ws-email-address)	
+		elseif ws-print-to = "F"	
+		and lp-method = "TF"	
+			set lr-field = concat("TF",ws-fax-no)
+		elseif ws-print-to = "P"	
+		and lp-method = "TK"	
+			set lr-field = concat("TK",ws-entered-printer)	
+		elseif ws-print-to != "T"	
+		and get-param(3) = "-i5reprint"	
+			set lr-field = SPACES	
+		else	
+			set lr-field = lp-invoice-field 	
+		endif	
+	endprocedure 
+
+
+*/
+
+#include "../include/i8proglogparam.spl"
+#include "../include/i5sostatii.spl"
+
+object tmp-printer
+	type is external
+	separator is ','
+	record is
+		tmp-printer-name					type string pic x(15)
+		tmp-filler							pic x(1)
+	endrecord
+	
+object tmp-printer-review
+	type is memory
+	record is
+		tmp-sequence						pic 999
+		tmp-printer-name
+	endrecord
+	key is tmp-sequence
+	key is tmp-printer-name
+
+mode select-code													
+	prompt 'Select'													
+	help 'Select the current record'								
+	currency														
+
+procedure library-init
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8proglogparam-write-log parameters 'clibvdocdest'
+end-procedure
+
+procedure clibvdocdest-invoice-destination export
+parameters
+	lp-so-order-no						like so-order-no
+	lp-so-bo-suffix						like so-bo-suffix
+	lp-default-target					pic x
+returning 
+	lr-fax-no							type string
+	lr-email-address					type string pic x(60)
+	lr-entered-printer					pic x(16)
+	lr-print-to							pic x
+	lr-apply-to-all						type boolean
+	//
+	get sales-order
+		on index so-order-no so-bo-suffix
+		key is lp-so-order-no lp-so-bo-suffix
+	on error
+		get sales-order-archive
+			on index so-order-no so-bo-suffix
+			key is lp-so-order-no lp-so-bo-suffix
+		on error
+			exit
+		endon
+	endon
+	if so-order-status < I5SO_RDY_TO_PRINT_INVOICE
+	or get-param(1) = "-confirm"
+	or get-param(4) = "-confirm"
+	or get-param(5) = "-from-pos"
+		exit
+	endif
+	do invoice-destination entry once
+	parameters are
+		lp-default-target
+	returning
+		lr-fax-no							
+		lr-email-address				
+		lr-entered-printer			
+		lr-print-to				
+		lr-apply-to-all
+end-procedure
+
+screen invoice-destination 
+parameters
+	lp-default-target					pic x
+returning 
+	lr-fax-no							type string
+	lr-email-address					type string pic x(60)
+	lr-entered-printer					pic x(16)
+	lr-print-to							pic x
+	lr-apply-to-all						type boolean
+	//
+	window @5,20 to @15,80
+	title "Invoice Re-Print" 
+	allow entry
+	form-entry
+before
+	set lr-apply-to-all = FALSE
+	set lr-print-to = lp-default-target
+	if get-param(3) != "-i5reprint"
+		exit
+	endif
+	get deb-master
+		key is so-cust-code
+	on error
+		message "invalid customer " so-cust-code
+		exit
+	endon
+	do get-default-email
+		returning lr-email-address
+	do get-default-fax
+		returning lr-fax-no
+	box @6,21 to @14,79
+		title "Destination"
+detail
+	radio-button lr-print-to @7,24
+		"T"	title "Trueform Destination"
+		"E" title "Email"
+		"F" title "Fax"
+			button-when lr-fax-no != SPACES
+		"P" title "Print"
+		"S" title "Spool"
+		default is lr-print-to
+	accept lr-email-address @8,36 pic x(39)
+		default lr-email-address
+		when lr-print-to = "E"
+		show-value
+	on help-key
+		do browse-email-addresses
+			returning lr-email-address
+		reenter optional
+	endon
+	validation
+		if lr-print-to = "E"
+		and lr-email-address = SPACES
+			message "You need to specify an email"
+			reenter 
+		endif
+	endvalidation
+	accept lr-fax-no @9,36
+		default lr-fax-no 
+		when lr-print-to = "F"
+		show-value
+	validation
+		if lr-print-to = "F"
+		and lr-fax-no = SPACES
+			message "You need to specify a Fax No"
+			reenter 
+		endif
+	endvalidation
+	accept lr-entered-printer @10,36
+		when lr-print-to = "P"
+		show-value
+	on help-key
+		do load-printers
+		do printer-review
+		if tmp-printer-name <> spaces
+			set lr-entered-printer = tmp-printer-name
+			refresh lr-entered-printer
+			reenter lr-entered-printer optional
+		endif
+	endon
+	validation
+		if lr-print-to = "P"
+		and lr-entered-printer = SPACES
+			message "You need to specify a Printer Queue"
+			reenter 
+		endif
+	endvalidation
+	check-box lr-apply-to-all
+		@12,36
+		values true false
+		title "Apply these details to all documents"
+		help "Where multiple documents are selected then apply this detail to all - do not prompt for subsequent documents"
+		default is lr-apply-to-all
+	end-check-box 
+	confirm auto
+	confirmed
+		exit
+	endconfirm
+after
+	message-box "If you exit without a selection the invoice will spool, continue to exit?"
+	title "Message"
+	message-buttons MSG_BOX_YES_NO
+	default MSG_BOX_YES
+	if message-status = MSG_BOX_YES
+		set lr-print-to = "S"
+		exit
+	else
+		back-to-detail
+	endif
+endscreen //invoice-destination -------------------------------------------------
+
+screen browse-email-addresses
+returning
+	lr-email-address					like tdm-address
+	window @8,18 to @18,62
+		title is "Select email addresses's"
+	primary trueform-document-map
+		when tdm-account = accountcode
+	datagrid occurs 8
+	allow select-code next-scr prev-scr next prev
+before
+	display accountcode @8,21
+detail
+	accept tdm-document @9,25
+		title "Type"
+	accept tdm-address @9,27 pic x(40)
+		title "email address"
+	confirm auto
+	confirmed
+		if screenmode() = select-code
+			set lr-email-address = tdm-address
+			exit
+		endif
+	endconfirm
+endscreen //browse-email-addresses ------------------------------------------
+
+procedure load-printers												
+local
+	lf-printers							pic x(1024) type string
+	i									type number
+//
+//	first check that if an environment variable has been defined
+//
+	open tmp-printer-review truncate temporary
+	if get-env("PROPRINTERS") <> spaces
+		set lf-printers = get-env("PROPRINTERS")
+		set tmp-sequence = zero
+		for i = 1 to str-len(lf-printers)
+			if substring(lf-printers,i,i) = ","
+				insert tmp-printer-review
+				set tmp-printer-name = spaces
+			else
+				string tmp-printer-name appending substring(lf-printers,i,i)
+			endif
+		end-for
+		insert tmp-printer-review
+		exit
+	endif
+	open tmp-printer read-only
+		file is "$PRONTO/lib/printers"
+	on error
+		message "Can not find printer file " file-status()
+		exit
+	endon
+	set tmp-sequence = zero
+	extract tmp-printer all
+		where substring(tmp-printer-name,1,1) not in {"#" " " chr(9)}
+	detail
+		set tmp-sequence += 1
+		insert tmp-printer-review
+	endextract
+	position tmp-printer-review
+		key is zero
+endprocedure //load-printers -------------------------------------------------
+
+procedure get-default-fax
+returning 
+	lr-fax-no							type string
+	get trueform-document-map
+		key is "C" accountcode "INV" "TF"
+	on error
+		initialise trueform-document-map leaving tdm-account
+	endon
+	if tdm-contact-type = "M"
+		set lr-fax-no = tdm-address
+	else
+		get name-and-address-master
+			key is accountcode "C"
+		on error
+			initialise name-and-address-master leaving accountcode
+		endon
+		set lr-fax-no = concat(na-country-code," ",na-fax-no)
+	endif
+endprocedure //get-default-fax --------------------------------------------
+
+procedure get-default-email
+returning 
+	lr-email-address					type string pic x(60)
+	get trueform-document-map
+		key is "C" accountcode "INV" "TA"
+	on error
+		initialise trueform-document-map leaving tdm-account
+	endon
+	if tdm-contact-type = "M"
+		set lr-email-address = tdm-address
+	else
+		get name-and-address-master
+			key is accountcode "E"
+		on error
+			initialise name-and-address-master leaving accountcode
+		endon
+		set lr-email-address = concat(na-name,na-company)
+	endif
+endprocedure //get-default-email ------------------------------
+
+screen printer-review												
+	window @8,60 to @23,80
+	title is "Printers"	
+	allowed select-code search
+	primary tmp-printer-review
+		on index tmp-printer-name
+	review-from-start
+	datagrid occurs 14
+detail
+	display tmp-printer-name @8,60 pic x(21)
+		title is "Printer Name"
+	confirm auto
+	confirmed
+		if screenmode() = select-code
+			exit
+		endif
+	endconfirm
+after
+	set tmp-printer-name = spaces
+endscreen //printer-review ---------------------------------------------------
+

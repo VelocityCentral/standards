@@ -1,0 +1,744 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : Generalised routines for date handling
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2009
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: clibvdate.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 28Mar09  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+
+/*
+	This documentation is in RST format.  To view this as a nice pdf goto
+	https://overbits.herokuapp.com/rsteditor/ or rst.ninjs.org and paste this content.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|           |           |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+
+=========
+clibvdate
+=========
+
+	This clib uses some generalised returns to handle dates and nz holidays
+
+	Generally speaking a program should use BOTH clibvdate-std-working-day AND clibvdate-calendar-woking-day
+	when checking if a given date is working day or not.
+
+clibvdate-std-working-day 
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	This routine DOES NOT use pronto calendars.  It evaluates a passed date and returns
+	a boolean indicating whether a day is a working day or not.  It has hard-coded in it
+	the logic for determining public Holidays in Auckland.  It is valid as at 2020.
+
+	Observances for "next monday" are honoured. (eg. Waitangi day, Anzac Day etc)
+
+	It includes logic to determine Good Friday and Easter Monday.
+
+	
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |Date       |The date to be tested                                   |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |Boolean    |True if a working day, false if a holiday               |
+	|           |           |                                                        |
+	|           |           |Sat and Sun are considered non-working days             |
+	|           |           |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   out     |String 40  |Holdiday name if a holiday                              |
+	+-----------+-----------+--------------------------------------------------------+
+
+
+clibvdate-calendar-working-day 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	This routine uses the pronto system calendars to work out whether the given date
+	is a working date.  
+
+	Use SYS.M166 to maintain.  This routine will check the "STA" and "WHS" calendars
+
+	Note that Saturdays and Sundays are always considered non-working days.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|    In     | Date      |The date to be tested                                   |
+	+-----------+-----------+--------------------------------------------------------+
+	|    In     | char 3    |A warehouse code                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|    Out    | Boolean   |True if a working day, false if not                     |
+	+-----------+-----------+--------------------------------------------------------+
+	|    Out    | String 40 |A Desc of date if some kind of holiday                  |
+	+-----------+-----------+--------------------------------------------------------+
+
+
+clibvdate-next-working-day 
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	This routine combines both std-working-day and calendar-working-day to return the
+	NEXT working day for any given date.  
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      | Date      |The date to be tested                                   |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      | char 3    |A warehouse code                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     | Date      |The next working date                                   |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvdate-string-to-date 
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+	This slightly more generic than the pronto's date-to-julian
+	It will handle just about any sensible date in which
+	the month is specified as a string.
+
+	It will handle both "Apr" and "Apl", "Sep", "Sept" as well as the normal 3 letter or 
+	full month names.
+
+	Days and years are expected to be numbers (days names are not handled).  Numbers
+	less than 31 are expected to be days and numbers greater than 31 are years 
+	(Therefore 4 digit years work well).
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String     |The string to be converted                              |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |Date       |The converted date                                      |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvdate-epoch-string-to-datetime 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	Convert a date time string to a pronto datetime variable.  The date time string
+	is often found in things such as log files.
+
+	the input string must be in the format 
+
+	YYY-MM-DDTHH:MM:SS+HH:MM or YYY-MM-DDTHH:MM:SS
+
+	The T can be any character but cannot be ommitted
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |string 128 |The input to be converted                               |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |Boolean    |True if GMT to be returned.  False for local time       |
+	+-----------+-----------+--------------------------------------------------------+
+	|   Out     |date time  |The returned datetime variable.                         |
+	+-----------+-----------+--------------------------------------------------------+
+*/
+
+#include "../include/i8proglogparam.spl"
+#include "../include/stddef.spl"
+
+#define BLDHOL(A,B,C,D) \
+	if A = lp-date \
+		set lr-holiday = B  \
+		exit \
+	endif
+
+object matariki
+	type memory
+	record 
+		m-date					type date
+	end-record
+	key is m-date
+
+object test-hols
+	type memory
+	record
+		th-date							type date
+		th-desc							pic x(30)
+		th-working						type boolean
+	end-record 
+	key is th-date
+
+#define ADDMATARIKI(A) \
+	initialise matariki \
+	set m-date = A \
+	insert matariki
+
+procedure library-init
+	get system-control first
+	on error
+	endon
+	do i8proglogparam-write-log parameters "clibvdate"
+	do matarikidates
+end-procedure
+
+procedure main
+	get system-control first
+	on error
+	endon
+	do matarikidates
+	do test
+end-procedure
+
+
+
+procedure clibvdate-calendar-working-day export
+parameters
+	lp-date						type date
+	lp-whse						like whse-code
+returning
+	lr-ok						type boolean
+	lr-desc						type string
+//
+	set lr-ok = TRUE
+	if dow(lp-date) = 1 or dow(lp-date) = 7
+		set lr-desc =  "Date is on the weekend"
+		set lr-ok = FALSE
+		exit
+	endif
+	get system-control first
+	on error
+	else
+		get system-calendar
+			on index cal-system-code cal-resource-code cal-action-date
+			key is "LOC" sys-consolidation-division lp-date
+		on error
+		else
+			if cal-action-type = "PH"
+				set lr-ok = FALSE
+				set lr-desc = cal-holiday-desc
+			endif
+		endon
+	endon
+	get system-calendar
+		on index cal-system-code cal-resource-code cal-action-date
+		key is "LOC" lp-whse lp-date
+	on error
+	else
+		if cal-action-type = "PH"
+			set lr-ok = FALSE
+			set lr-desc = cal-holiday-desc
+		endif
+	endon
+	get system-calendar
+		on index cal-system-code cal-resource-code cal-action-date
+		key is "WHS" lp-whse lp-date
+	on error
+	else
+		set lr-ok = FALSE
+		set lr-desc = cal-holiday-desc
+	endon
+end-procedure
+	
+
+procedure clibvdate-next-working-day export
+parameters are
+	lp-date						type date
+	lp-whse						like whse-code
+returning
+	lr-next-date				type date
+local
+	lf-ok						type boolean
+	lf-counter					type number
+//
+	set lr-next-date = lp-date
+	set lf-ok = FALSE
+	set lf-counter = 0
+	while not lf-ok and lf-counter <= 20
+		set lf-counter += 1
+		do clibvdate-std-working-day
+			parameters are lr-next-date 
+			returning lf-ok
+		if not lf-ok
+			set lr-next-date += 1
+			continue
+		endif
+		if lp-whse <> spaces
+			do clibvdate-calendar-working-day
+				parameters are lr-next-date lp-whse
+				returning lf-ok
+			if not lf-ok
+				set lr-next-date += 1
+			endif
+		endif
+	end-while
+end-procedure
+
+procedure clibvdate-std-working-day export
+parameters
+	lp-date								type date
+returning
+	lr-working-day						type boolean
+	lr-holiday-name						type string
+//
+	do holiday-chk-date
+		parameters are lp-date
+		returning lr-holiday-name
+	if lr-holiday-name = spaces
+		set lr-working-day = TRUE
+	else
+		set lr-working-day = FALSE
+	endif
+	if dow(lp-date) not between 2 and 6
+		set lr-working-day = FALSE
+		set lr-holiday-name = day-name(lp-date)
+	endif
+end-procedure
+
+procedure easter-sunday
+parameters are 
+	lp-year								pic 9999
+returning 
+	lr-easter							type date
+local
+	l-firstdig							type number
+	l-remain19							type number
+	l-temp								type number
+	l-ta								type number
+	l-tb								type number
+	l-tc								type number
+	l-td								type number
+	l-te								type number
+	l-easter-day						type number
+	l-easter-month						type number
+	set l-firstdig = integer(lp-year / 100)
+	set l-remain19 = lp-year % 19
+	// calculate PFM (Pascal full Moon) date
+	set l-temp = integer((l-firstdig - 15) / 2) + 202 - (11 * l-remain19)
+	if l-firstdig > 26 
+		set l-temp = l-temp - 1
+	endif
+	if l-firstdig > 38
+		set l-temp = l-temp - 1
+	endif
+	//this next line uses underscore (_) line continuation characters
+	//in older versions of VB you may need to revert to one long line
+	if ((l-firstdig = 21) Or (l-firstdig = 24) Or (l-firstdig = 25) 
+		Or (l-firstdig = 33) Or (l-firstdig = 36) Or (l-firstdig = 37)) 
+		set l-temp = l-temp - 1
+	endif
+	set l-temp = l-temp % 30
+	set l-ta = l-temp + 21
+	If l-temp = 29 
+		set l-ta = l-ta - 1
+	endif
+	If (l-temp = 28 And l-remain19 > 10) 
+		set l-ta = l-ta - 1
+	endif
+//	'find the next Sunday
+	set l-tB = (l-tA - 19) % 7
+	set l-tC = (40 - l-firstdig) % 4
+	If l-tC = 3 
+		set l-tC = l-tC + 1
+	endif
+	If l-tC > 1 
+		set l-tC = l-tC + 1
+	endif
+        
+	set l-temp = lp-year % 100
+	set l-tD = integer(l-temp + (l-temp /  4)) % 7
+    
+	set l-tE = ((20 - l-tB - l-tC - l-tD) % 7) + 1
+	set l-easter-day = l-tA + l-tE
+//	'return the date
+	If l-easter-day > 31 
+		set l-easter-day = l-easter-day - 31
+		set l-easter-month = 4
+	Else
+		set l-easter-month = 3
+	EndIf
+	set lr-easter = julian(l-easter-day,l-easter-month,lp-year)
+end-procedure
+
+procedure holiday-chk-date
+parameters are
+	lp-date								type date
+returning 
+	lr-holiday							pic x(60)
+local
+	l-year								pic 9999
+	l-date								type date
+	get matariki
+		on index m-date
+		key is lp-date
+	on error ENOREC
+	else
+		set lr-holiday = "Matariki"
+		exit
+	endon
+	set l-year = year(lp-date)
+	set lr-holiday = spaces
+	// new year - working day following 1/1/1
+	do holiday-nearest-working-day parameters are julian(1,1,l-year) returning l-date
+	BLDHOL( l-date, "New Year", day-name(l-date) ,"Next Working day on or after 1/1")
+	// 2/1- workding day following 1/1/1
+	do holiday-nearest-working-day parameters are l-date + 1 returning l-date
+	BLDHOL( l-date, "Day after New Year", day-name(l-date) ,"Next Working day after the New Year Observance")
+	// Aniversay nearest monday to 29/1
+	do holiday-nearest-monday parameters are julian(29,1,l-year) returning l-date
+	BLDHOL( l-date, "Auckland Anniversary Day", day-name(l-date) ,"Monday Closest to 29/1")
+	// Waitangi 6/2 nearest working day
+//	do holiday-only-a-working-day parameters are julian(6,2,l-year) returning l-date
+	do holiday-nearest-working-day parameters are julian(6,2,l-year) returning l-date
+	if l-date
+		BLDHOL( l-date, "Waitangi Day", day-name(l-date) ,"6/2 if a working day")
+	endif
+	// easter
+	do holiday-easter-sunday parameters are julian(1,1,l-year) returning l-date
+	BLDHOL( l-date - 2, "Good Friday", day-name(l-date) ,"Friday before Easter Sunday")
+	BLDHOL( l-date + 1, "Easter Monday", day-name(l-date) ,"Monday after Easter Sunday")
+	// anzac 25/4 nearest working day
+//	do holiday-only-a-working-day parameters are julian(25,4,l-year) returning l-date
+	do holiday-nearest-working-day parameters are julian(25,4,l-year) returning l-date
+	if l-date
+		BLDHOL( l-date, "ANZAC Day", day-name(l-date) ,"25/4 if a working day")
+	endif
+	// queeens bday 1st mon in june
+	do holiday-nth-monday parameters are julian(1,6,l-year) 1 returning l-date
+	BLDHOL( l-date, "Queens Birthday",day-name(l-date) ,"First Monday in June")
+	// labout day 4th mon in october
+	do holiday-nth-monday parameters are julian(1,10,l-year) 4 returning l-date
+	BLDHOL( l-date, "Labour Weekend",day-name(l-date),"Fourth Monday in October")
+	// christmas & boxing day
+	do holiday-nearest-working-day parameters are julian(25,12,l-year) returning l-date
+	BLDHOL( l-date, "Christmas Day", day-name(l-date) ,"Next working day on or after 25/12")
+	do holiday-nearest-working-day parameters are l-date + 1 returning l-date
+	BLDHOL( l-date, "Boxing Day", day-name(l-date) ,"Next Working day after the Christmas Day Observance")
+//	do holiday-next-sunday parameters are julian(1,10,l-year) returning l-date
+//	BLDHOL( l-date, "Start of Daylight Saving",day-name(l-date) ,"First Sunday in October")
+//	do holiday-next-sunday parameters are julian(16,3,l-year) returning l-date // 16th is earliest possible
+//	BLDHOL( l-date, "End of Daylight Saving",day-name(l-date) ,"Third Sunday in October")
+end-procedure
+
+procedure holiday-nearest-working-day
+parameters are l-date type date
+returning lr-date type date
+local x type number
+	for x = 0 to 7
+		if dow(l-date + x) between 2 and 6
+			set lr-date = l-date + x
+			exit
+		endif
+	endfor
+end-procedure
+
+procedure holiday-only-a-working-day
+parameters are 
+	l-date								type date
+returning 
+	lr-date								type date
+	if dow(l-date) between 2 and 6
+		set lr-date = l-date
+	endif
+end-procedure
+
+procedure holiday-easter-sunday
+parameters are 
+	l-date								type date
+returning 
+	lr-date								type date
+	do easter-sunday parameters are year(l-date)
+		returning lr-date
+end-procedure
+
+procedure holiday-nearest-monday
+parameters are 
+	l-date								type date
+returning 
+	lr-date								type date
+	if dow(l-date) <= 5
+		set lr-date = l-date - dow(l-date) + 2
+	else
+		set lr-date = l-date - dow(l-date) + 9
+	endif
+end-procedure
+
+procedure holiday-nth-monday
+parameters are 
+	l-date								type date
+	n									type number
+returning lr-date type date
+	set lr-date = l-date - dow(l-date) +  2
+	if dow(l-date) <= 2
+		set lr-date = lr-date + ( (n - 1) * 7 )
+	else
+		set lr-date = lr-date + ( n * 7 )
+	endif
+end-procedure
+
+procedure holiday-next-sunday
+parameters are 
+	l-date								type date
+returning 
+	lr-date								type date
+	set lr-date = l-date
+	repeat
+	until dow(lr-date) = 1
+		set lr-date += 1
+	end-repeat
+end-procedure
+
+procedure clibvdate-string-to-date export
+//  
+//  This slightly more generic than the pronto's date-to-julian
+//  It will handle just about any sensible date in which
+//  the month is specified as a string
+//
+parameters
+	lp-date-string						type string
+returning
+	lr-date								type date
+local
+	lf-work-string						like lp-date-string
+	lf-date-parts						type number occurs 3 // dd mm yy
+	lf-current-part						like lp-date-string
+	// step 1 - break into component strings
+	// Loop through the string 1 character at a time
+	// Decide what to do with it then delete it from the input
+	if lp-date-string = spaces
+		exit 1
+	endif
+	set lf-work-string = lp-date-string
+	set lf-work-string = ltrim(lf-work-string)
+	while lf-work-string != spaces
+		if pattern(substring(lf-work-string,1,1), "[A-Za-z0-9]") != 0
+			// then we have either a month name or a number
+			string lf-current-part appending substring(lf-work-string,1,1)
+			string lf-work-string deleting 1 to 1
+			continue
+		endif
+		//  The current character is some kind of separator, we don't care
+		//  what.  We just need to drop it off the input.
+		//  BUT, before we do we need to check if we have found something, 
+		//  and if we have what is it?
+		if lf-current-part != spaces
+			// what have we got
+			do what-have-we-got parameters are lf-current-part lf-date-parts returning lf-date-parts
+		endif
+		// clear out current part ready for the next bit
+		set lf-current-part = spaces
+		// trim off the character that was found
+		string lf-work-string deleting 1 to 1
+	end-while
+	// is there anything we haven't processed?
+	if lf-current-part != spaces
+		do what-have-we-got parameters are lf-current-part lf-date-parts returning lf-date-parts
+	endif
+	// if anything is wrong it will simply return 0
+	set lr-date = julian(lf-date-parts[1], lf-date-parts[2], lf-date-parts[3])
+end-procedure
+
+procedure what-have-we-got
+parameters
+	lp-string							pic x(128) type string
+	lp-date-parts						type number occurs 3
+returning
+	lr-date-parts						type number occurs 3 // day month year
+local
+	i									type number
+	for i = 1 to 3
+		set lr-date-parts[i] = lp-date-parts[i]
+	end-for
+	// is it a number?
+	if valid-number(lp-string)
+		if num(lp-string) <= 31
+			// must be a day
+			set lr-date-parts[1] = num(lp-string)
+			exit 
+		else
+			// must be a year
+			set lr-date-parts[3] = num(lp-string)
+			exit
+		endif
+	endif
+	// if we get here it must be the month
+	switch uppercase(lp-string)
+	case "JAN" "JANUARY" set lr-date-parts[2] = 1
+	case "FEB" "FEBRUARY" set lr-date-parts[2] = 2
+	case "MAR" "MARCH" set lr-date-parts[2] = 3
+	case "APR" "APL" "APRIL" set lr-date-parts[2] = 4
+	case "MAY" set lr-date-parts[2] = 5
+	case "JUN" "JUNE" set lr-date-parts[2] = 6
+	case "JUL" "JULY" set lr-date-parts[2] = 7
+	case "AUG" "AUGUST" set lr-date-parts[2] = 8
+	case "SEP" "SEPT" "SEPTEMBER" set lr-date-parts[2] = 9
+	case "OCT" "OCTOBER" set lr-date-parts[2] = 10
+	case "NOV" "NOVEMBER" set lr-date-parts[2] = 11
+	case "DEC" "DECEMBER" set lr-date-parts[2] = 12
+	end-switch
+end-procedure
+
+procedure clibvdate-epoch-string-to-datetime export
+parameters are
+	lp-string							pic x(128) type string
+	lp-gmt								type boolean  // If TRUE then GMT is returned else local
+returning
+	lr-datetime							type datetime
+local
+	lf-date								type date
+	lf-time								type time
+	lf-adjustment						type number
+	// the input string must be in the format 
+	//	YYYY-MM-DDTHH:MM:SS+HH:MM
+	//	1234567890123456789012345
+	//	or 
+	//	YYYY-MM-DDTHH:MM:SS
+	//  The T can be any character but cannot be ommitted
+	// validate-input
+	if strlen(lp-string) not in (19,25)
+		exit 1
+	endif
+	set lf-date = date2julian(substring(lp-string,1,10))
+	set lf-time = num(substring(lp-string,12,13)) * 60 * 60
+				+ num(substring(lp-string,15,16)) * 60 
+				+ num(substring(lp-string,18,19)) 
+	set lr-datetime = datetime(lf-date,lf-time,FALSE)
+	if strlen(lp-string) = 25
+		set lf-adjustment = num(substring(lp-string,21,22)) * 60 * 60
+					      + num(substring(lp-string,24,25)) * 60 
+		if substring(lp-string,20,20) = "-"
+			set lf-adjustment = 0 - lf-adjustment
+		endif
+		set lr-datetime += lf-adjustment
+	endif
+	if lp-gmt
+		set lr-datetime += time-zone()
+	endif
+endprocedure
+
+procedure matarikidates
+returning
+	lr-date						type date occurs 31
+	/*
+	These are the government published dates for 30 years from 2022
+	*/
+	open matariki temporary
+	ADDMATARIKI(julian(24,6,2022))
+	ADDMATARIKI(julian(14,7,2023))
+	ADDMATARIKI(julian(28,6,2024))
+	ADDMATARIKI(julian(20,6,2025))
+	ADDMATARIKI(julian(10,7,2026))
+	ADDMATARIKI(julian(25,6,2027))
+	ADDMATARIKI(julian(14,7,2028))
+	ADDMATARIKI(julian(6,7,2029))
+	ADDMATARIKI(julian(21,6,2030))
+	ADDMATARIKI(julian(11,7,2031))
+	ADDMATARIKI(julian(2,7,2032))
+	ADDMATARIKI(julian(24,6,2033))
+	ADDMATARIKI(julian(7,7,2034))
+	ADDMATARIKI(julian(29,6,2035))
+	ADDMATARIKI(julian(18,7,2036))
+	ADDMATARIKI(julian(10,7,2037))
+	ADDMATARIKI(julian(25,6,2038))
+	ADDMATARIKI(julian(15,7,2039))
+	ADDMATARIKI(julian(6,7,2040))
+	ADDMATARIKI(julian(19,7,2041))
+	ADDMATARIKI(julian(11,7,2042))
+	ADDMATARIKI(julian(3,7,2043))
+	ADDMATARIKI(julian(24,6,2044))
+	ADDMATARIKI(julian(7,7,2045))
+	ADDMATARIKI(julian(29,6,2046))
+	ADDMATARIKI(julian(19,7,2047))
+	ADDMATARIKI(julian(3,7,2048))
+	ADDMATARIKI(julian(25,6,2049))
+	ADDMATARIKI(julian(15,7,2050))
+	ADDMATARIKI(julian(30,6,2051))
+	ADDMATARIKI(julian(21,6,2052))
+end-procedure
+
+/*
+ Test Routines
+*/
+
+menu test
+	window
+	no-hide
+detail
+	option "Year Hols" @1,1
+		do test-hols
+end-menu
+
+#ifdef BMS_DICT_VER < 7600
+
+procedure test-hols
+	message "Only implmented for ginger"
+end-procedure
+
+#else
+
+screen test-hols
+	window
+	responsive
+	allowed entry-once
+local
+	lf-start-date					type date
+	lf-no-days						type number
+detail
+	screen-group // ---- Parameters ----------------------------
+		title "Parameters"  // The title is optional
+	accept lf-start-date
+		title "Start Date"
+	accept lf-no-days
+		title "No of days to calc"
+	end-screen-group // ---- Parameters --------------------------------------
+	confirm 
+	confirmed
+		do test-build-hols parameters are lf-start-date lf-no-days
+		do show-hols
+	end-confirm 
+end-screen
+
+screen show-hols
+	window 
+	datagrid
+	select * from test-hols
+detail
+	accept th-date  col 1
+		title "Date"
+		when screenmode = search
+		show-value
+		colour if-then-else(th-working,0,red)
+	display th-desc col 2
+		title "Desc"
+		colour if-then-else(th-working,0,red)
+end-screen
+
+#endif
+
+procedure test-build-hols
+parameters
+	lp-start-date					type date
+	lp-no-days						type number
+local
+	i 								type number	
+	if lp-start-date <= 0
+	or lp-no-days <= 0
+		exit 1
+	endif
+	close test-hols and remove
+	open test-hols temporary
+	//
+	for i = 1 to lp-no-days
+		initialise test-hols
+		set th-date = lp-start-date + i - 1
+		do clibvdate-std-working-day
+			parameters th-date 
+			returning th-working th-desc
+		insert test-hols
+		on error
+			exit 2
+		endon
+	end-for
+end-procedure
+
+	

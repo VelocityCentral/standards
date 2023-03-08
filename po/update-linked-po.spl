@@ -1,0 +1,84 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : 
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2017
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: po/update-linked-po.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 06Jul17  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+ 
+field
+	ws-function-title						type string
+	ws-so-order-no		like so-order-no
+	ws-so-bo-suffix     like so-bo-suffix
+
+procedure main
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	//do i8secabt-check-abort
+	//	parameters are sys-consolidation-division login-id() "ZUSR" "R004"
+	//	returning ws-function-title 
+	do i8proglog-write-log
+	if get-param(1) = '-s'
+		set ws-so-order-no = num(get-param(2))
+		set ws-so-bo-suffix = get-param(3)
+	else
+		do update-po-ref-links
+	endif
+end-procedure
+
+procedure update-po-ref-links
+	select * from sales-order-line-purchase
+	detail
+		get sales-order on index so-order-no so-bo-suffix key is so-order-no so-bo-suffix
+		on error
+		else
+			get purchase-order on index po-order-no po-backorder-flag key is solp-po-order-no solp-backorder-flag
+			lock
+			on error
+			else
+				if so-cust-reference <> SPACES
+					set po-notes = so-cust-reference
+					update purchase-order
+				endif
+			endon
+		endon
+	end-select
+end-procedure
+
+procedure update-po-ref-link
+	parameters are
+	lp-so-order-no like so-order-no
+	lp-so-bo-suffix like so-bo-suffix
+	select * from sales-order-line-purchase
+		where so-order-no = lp-so-order-no
+	detail
+		get sales-order on index so-order-no so-bo-suffix key is so-order-no so-bo-suffix
+		on error
+		else
+			get purchase-order on index po-order-no po-backorder-flag key is solp-po-order-no solp-backorder-flag
+			lock
+			on error
+			else
+				if so-cust-reference <> SPACES
+					set po-notes = so-cust-reference
+					update purchase-order
+				endif
+			endon
+		endon
+	end-select
+end-procedure
+

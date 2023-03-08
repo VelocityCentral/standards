@@ -1,0 +1,76 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : 
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2016
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: nan/cusbudg2.spl
+//
+//  This program will populate deb_sales_budget_periods.  At at 730.3 this
+//  table is required for the cognos sales dashboard but is not used anywhere
+//  else.  There are also some crazy email from the help desk saying the table
+//  is deprecated but it still used in cognos!!!
+//
+//
+// Modification History
+// Date		Who	SDR		What
+// 23Jun16  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/bmsdef.spl"  // for version
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+ 
+field
+	ws-function-title						type string
+
+#if BMS_DICT_VER > 7501
+procedure main
+	message "pgm retired use configurable budgets"
+end-procedure
+
+#else
+
+procedure main
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do build-it
+end-procedure
+
+procedure build-it
+local
+	i							type number 
+	open deb-sales-budget-periods
+	on error
+		open deb-sales-budget-periods create permanent
+		on error
+			abort "Can't create table"
+		endon
+	endon
+	sql-delete deb-sales-budget-periods
+		where dsbp-budget-status = "DT"
+	select *
+		from deb-sales-budget
+		where deb-budget-status = "DT"
+		and deb-budget-year = 0
+	detail
+		set dsbp-budget-status = "DT"
+		set dsbp-accountcode = accountcode
+		set dsbp-territory = territory
+		set dsbp-stock-group = stock-group
+		for i = 1 to 12
+			set dsbp-period = i
+			set dsbp-budget-amount = deb-sales-budget[i]
+			insert deb-sales-budget-periods
+		end-for
+	end-select
+end-procedure
+
+#endif
+

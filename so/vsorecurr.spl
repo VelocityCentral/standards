@@ -1,0 +1,613 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : Program to manage recurring invoices for velocity
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2020
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: so/vsorecurr.spl
+//   several calling methods:
+//   	-appservice :  Run as an application service
+//   	
+//
+// Modification History
+// Date		Who	SDR		What
+// 09Apr20  rjb         written 
+////////////////////////////////////////////////////////////////////////////////
+ 
+#include "../include/i8secabt.spl"
+#include "../include/i8proglog.spl"
+#include "../include/i5sostatii.spl"
+#include "../include/i5source.spl"
+#include "../include/i85codes.spl"		// All code table stuff
+#include "../include/i8gparam.spl"
+#include "../include/i8secok.spl"
+#include "../so/i50headso.spl"
+ 
+field
+	ws-function-title						type string
+	ws-SO-M053							type boolean		
+	ws-SO-E007							type boolean		
+
+mode md-order-detail
+	prompt "View Detail"
+	when ws-SO-E007
+
+mode md-order-edit
+	prompt "Edit Order"
+	when ws-SO-M053
+
+procedure main
+	returning lr-message					pic x(1024) type string // used when called as appservice
+local
+	lf-run-as-service						type boolean
+	lf-new-status							like so-order-status
+	lf-hold-reason							like so-order-reason-code
+	//
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+if node-name() != '123ray7502.velocityglobal.co.nz'
+	do i8secabt-check-abort
+		parameters are sys-consolidation-division login-id() "ZUSR" "T005"
+		returning ws-function-title 
+endif
+	do i8secok-check-ok parameters
+			sys-consolidation-division login-id() "SO" "M053"
+			returning ws-SO-M053 
+	do i8secok-check-ok parameters
+			sys-consolidation-division login-id() "SO" "E007"
+			returning ws-SO-E007 
+	do i8proglog-write-log
+	I8GPARAM_FLAG("-service",false,lf-run-as-service)
+	I8GPARAM_ALPHA("-status",spaces,lf-new-status)
+	I8GPARAM_ALPHA("-holdreason",spaces,lf-hold-reason)
+	if lf-run-as-service
+		do validate-paras parameters are lf-new-status,lf-hold-reason
+		if exit-status != 0
+			set lr-message = "One or more passed parameters are invalid"
+			exit
+		endif
+		do create-orders-and-run
+			parameters are lf-new-status lf-hold-reason
+			returning lr-message
+	else
+		do main-menu entry once
+	endif
+end-procedure
+
+menu main-menu
+	window @1,1 to @24,80
+	title is "Recurring Sales Orders"
+detail
+	option "Create Orders" @1,1
+		do prompt-and-run entry once
+	option "Review Templates" @2,1
+		spl "so/m5recurrso"
+	option "View Created Orders" @3,1
+		do view-generated-orders
+end-menu // main-menu-------------------------------------
+
+procedure validate-paras
+parameters
+	lp-new-status					like so-order-status
+	lp-hold-reason					like so-order-reason-code
+//
+	if lp-new-status not in {
+		I5SO_ENTERED_ON_HOLD,
+		I5SO_RDY_FOR_PICKING,
+		I5SO_RDY_TO_PRINT_INVOICE }
+		exit 1
+	endif
+	if lp-new-status = I5SO_ENTERED_ON_HOLD
+		get system-table
+			on index sys-tbl-type sys-tbl-code
+			key is "HR" lp-hold-reason
+		on error ENOREC
+			exit 1
+		endon
+	endif
+end-procedure
+
+procedure check-company-service
+// use this to check if a particular application services
+// exists for a particular company.
+// the first parameter should be something like "%m5sorecu%"
+parameters 
+	lp-program-pattern					type string pic x(80)
+	lp-company							like sys-consolidation-division
+returning 
+	lr-active							type boolean
+	set lp-company = uppercase(lp-company)
+	select 
+		lr-active = count(*)
+		from application-services-companies as t0
+		inner join application-services-master as t1
+			on t0.asm-id = t1.asm-id
+		where t1.asm-program like :lp-program-pattern
+		and t0.ascomp-comp-code = :lp-company
+	database-sql
+	end-select
+end-procedure
+
+screen prompt-and-run
+local
+	lf-new-status							like so-order-status
+	lf-std-app-service-exists				type boolean
+	lf-this-app-service-exists				type boolean
+	lf-create-service						type boolean
+	lf-hold-reason							pic xx
+	lf-message								pic x(1024) type string
+	window @1,1 to @12,80
+	title ws-function-title
+	form-entry
+before
+	do check-company-service parameters are "%m5recurr%" sys-consolidation-division
+		returning lf-std-app-service-exists
+	do check-company-service parameters are "%vsorecurr%" sys-consolidation-division
+		returning lf-this-app-service-exists
+	set lf-create-service = TRUE
+	if lf-std-app-service-exists or lf-this-app-service-exists
+		set lf-create-service = FALSE
+	endif
+detail
+	box @2,2 to @3.5,50
+		title "New Status"
+	radio-button lf-new-status
+		@3,10 I5SO_ENTERED_ON_HOLD title  "Held"
+		@3,22 I5SO_RDY_FOR_PICKING title  "Picking Slip"
+		@3,30 I5SO_RDY_TO_PRINT_INVOICE	 title  "Invoice"
+		right-coordinate
+		default I5SO_ENTERED_ON_HOLD
+		before-radio-button
+			//
+		end-before-radio-button
+		validations
+			//
+		end-validations
+		on change
+			refresh lf-hold-reason
+		end-on
+	end-radio-button 
+	accept lf-hold-reason @5,40
+		title "Hold Reason Code"
+		help "Enter a valid reason code for held orders"
+		uppercase
+		when lf-new-status = I5SO_ENTERED_ON_HOLD
+	on help-key
+		set sys-tbl-type = "HR"
+		do i85codes-table-help
+		if sys-tbl-code != SPACES
+			set lf-hold-reason = sys-tbl-code
+		endif
+		reenter optional
+	endon
+	before-accept
+		if screenmode = form-entry-defaults
+			set lf-hold-reason = lf-hold-reason
+		endif
+	end-before-accept
+	validations
+		get system-table
+			on index sys-tbl-type sys-tbl-code
+			key is "HR" lf-hold-reason
+		on error ENOREC
+			message-box param-text("<<P1>><<BR>><<p2>>"
+				,"Invalid Hold Reason Code"
+				,"Try the help key")
+				title is ws-function-title
+				message-buttons  MSG_BOX_CANCEL
+				icon MSG_BOX_STOP
+		endon
+	end-validations 
+	display if-then-else(lf-this-app-service-exists,
+		"An application service for this program already exists",
+		" ") @6,10 colour red on 0
+	display if-then-else(lf-std-app-service-exists,
+		"An application service for the standard program exists.",
+		" ") @7,10 colour red on 0
+	display if-then-else(lf-std-app-service-exists,
+		"It will need to be disabled for this company before a new one is created",
+		" ") @8,10 colour red on 0
+	check-box lf-create-service @10,40
+		values True False
+		title "Create application service with these parameters"
+		right-coordinate
+		default is lf-create-service
+		when not lf-this-app-service-exists and not lf-std-app-service-exists
+		help "Select to create a new application service with these options"
+		before-check-box
+			if screenmode = form-entry-defaults
+				set lf-create-service = lf-create-service
+			endif
+		end-before-check-box
+		validations
+			//
+		end-validations
+		on change
+			//
+		endon
+	end-check-box 
+	confirm auto
+		if lf-create-service
+			do create-app-service parameters are lf-new-status lf-hold-reason
+			message-box param-text("<<P1>><<BR>><<p2>>"
+				,"Application Service Created"
+				,"(No Orders Created)")
+				title is ws-function-title
+				message-buttons  MSG_BOX_OK
+				icon MSG_BOX_INFORMATION
+		else
+			do create-orders-and-run parameters are lf-new-status lf-hold-reason
+				returning lf-message
+			if exit-status != 0
+				message-box param-text("<<P1>><<BR>><<p2>>"
+					"There was a problem while creating the orders"
+					,if-then-else(strlen(lf-message) < 80, lf-message,
+						concat(substring(lf-message,1,77),"..."))
+						)
+					title is ws-function-title
+					message-buttons  MSG_BOX_CANCEL
+					icon MSG_BOX_STOP
+			else
+				message-box param-text("<<P1>><<BR>><<p2>>"
+					,"Orders created successfully"
+					,if-then-else(strlen(lf-message) < 80, lf-message,
+						concat(substring(lf-message,1,77),"..."))
+						)
+					title is ws-function-title
+					message-buttons  MSG_BOX_OK
+					icon MSG_BOX_INFORMATION
+			endif
+		endif
+	end-confirm
+end-screen // prompt-and-run ------------------------------------------
+
+procedure create-app-service
+parameters
+	lp-new-status					like so-order-status
+	lp-hold-reason					like so-order-reason-code
+//returning
+//	lr-r1
+local
+	lf-new-id						like asm-id
+	i 								type number
+	lf-commit						type boolean
+	//
+	set lf-commit = TRUE
+	transaction begin
+	select lf-new-id = max(asm-id)
+		from application-services-master
+		where asm-id >= 1000
+	end-select
+	set lf-new-id += 1
+	initialise application-services-master
+	set asm-id = lf-new-id
+	set asm-description = "Velocity Recurring Order Create"
+	set asm-start-method = "A"
+	set asm-version-from = 700
+	set asm-version-to = 9999.99
+	set asm-start-date = today
+	set asm-run-time = 7 * 3600
+	set asm-frequency = "D"
+	set asm-minutes = 15
+	set asm-daily-flag = "D"
+	set asm-daily-days = 2
+	set asm-weekly-n-weeks = 1
+	set asm-monthly-day-type = "D"
+	for i = 1 to 12
+		set asm-monthly-month[i] = 1
+	endfor
+	set asm-type = "C"
+	set asm-program = "so/vsorecurr"
+	set asm-parameters[1] = "-service"
+	set asm-parameters[2] = "-status"
+	set asm-parameters[3] = lp-new-status
+	if lp-new-status = I5SO_ENTERED_ON_HOLD
+		set asm-parameters[4] = "-holdreason"
+		set asm-parameters[5] = lp-hold-reason
+	endif
+	set asm-has-returning-parameter = 1
+	insert application-services-master
+	on error
+		set lf-commit = FALSE
+	endon
+	initialise application-services-companies
+	set asm-id = lf-new-id
+	set ascomp-comp-code = sys-consolidation-division
+	insert application-services-companies
+	on error
+		set lf-commit = FALSE
+	endon
+	if lf-commit 
+		transaction commit
+	else
+		transaction rollback
+		message-box param-text("<<P1>><<BR>><<p2>>"
+			,"Failed to Add Application Service"
+			,"You may have to do this manually")
+			title is ws-function-title
+			message-buttons  MSG_BOX_CANCEL
+			icon MSG_BOX_STOP
+		exit 1
+	endif
+	spl 'appservices' parameters are "-correct-service" lf-new-id
+//
+end-procedure // create-app-servcice ----------------------------------------
+
+procedure create-orders-and-run
+parameters
+	lp-new-status					like so-order-status
+	lp-hold-reason					like so-order-reason-code
+returning
+	lr-message						pic x(1024) type string
+local
+	lf-commit 						type boolean
+	lf-new-orders-count				type number
+	lf-so-count						type number
+	lf-sql-cf-date					type date
+//
+//
+	set lf-sql-cf-date = today
+	select lf-so-count = count(*)
+		from recurring-schedule-transaction
+		where rst-type = "SO"
+		and rst-creation-date = :lf-sql-cf-date
+		and rst-process-date-time != ZERO_DATE_TIME
+	end-select
+	if lf-so-count != 0
+		set lr-message = "Already Sales orders created for today - No Action taken"
+		exit 1
+	endif
+	spl "so/m5recurrso" parameters are "-recurring-so-process" "SO"
+	on error
+		set lr-message = "Unable to run recurrence program"
+		exit 1
+	endon
+	// Now find the sales orders and deal to them.
+	set lf-commit = TRUE
+	transaction begin
+	set lf-sql-cf-date = today
+	select *
+		from recurring-schedule-transaction
+		where rst-type = "SO"
+		and rst-creation-date = :lf-sql-cf-date
+	detail
+		get recurring-schedule-master
+			on index rsm-type rsm-key-1
+			key is "SO" rst-key1
+		on error
+			set lf-commit = FALSE
+			set lr-message = "Unable to access recurring schedule master"
+			break
+		endon
+		set lf-new-orders-count += 1
+		get sales-order
+			on index so-order-no so-bo-suffix
+			key is num(rst-new-value-1) spaces
+			lock
+		on error 
+			set lf-commit = FALSE
+			set lr-message = concat("Failed to find order:" rst-new-value-1)
+		else
+			set so-order-status = lp-new-status
+			if lp-new-status = I5SO_ENTERED_ON_HOLD
+				set so-order-reason-code = lp-hold-reason
+			endif
+			update sales-order
+			on error
+				set lf-commit = FALSE
+				set lr-message = concat("Failed to update order:" rst-new-value-1)
+			endon
+			if not lf-commit 
+				break // don't process any more
+			endif
+			do process-sales-order-lines
+				parameters are so-order-no so-bo-suffix lp-new-status
+				returning lf-commit lr-message
+			if not lf-commit
+				break
+			endif
+			do i50headso-calc-total-amounts-update		
+		endon
+	end-select
+	if lf-commit
+		transaction commit
+		set lr-message  = concat(str(lf-new-orders-count), " Orders Processed")
+	else
+		transaction rollback
+		exit 1
+	endif
+end-procedure // create-orders-and-run ----------------------------------------
+
+procedure process-sales-order-lines
+parameters
+	lp-order-no							like so-order-no
+	lp-bo-suffix						like so-bo-suffix
+	lp-new-status						like so-order-status
+returning
+	lr-commit							type boolean
+	lr-message							pic x(1024) type string
+	//
+	set lr-commit = TRUE
+	select *
+		from sales-order-line as t0
+		where so-order-no = :lp-order-no
+		and so-bo-suffix = :lp-bo-suffix
+		for update
+		database-sql
+	detail
+		if sol-line-type = "DN"
+			if pattern(sol-line-description,"{") != 0
+				do string-substitute parameters are sol-line-description "{frequency}"
+					returning sol-line-description
+				do string-substitute parameters are sol-line-description "{start_date}"
+					returning sol-line-description
+				do string-substitute parameters are sol-line-description "{end_date}"
+					returning sol-line-description
+				do string-substitute parameters are sol-line-description "{template}"
+					returning sol-line-description
+				do string-substitute parameters are sol-line-description "{time_stamp}"
+					returning sol-line-description
+				do string-substitute parameters are sol-line-description "{user_stamp}"
+					returning sol-line-description
+			endif
+		endif
+		if lp-new-status = I5SO_RDY_TO_PRINT_INVOICE
+			set sol-shipped-qty = sol-ordered-qty
+			set sol-shipped-amount = sol-ordered-qty * sol-item-price * (1 - (sol-disc-rate / 100))
+		endif
+		update sales-order-line
+		on error
+			set lr-commit = FALSE
+			set lr-message = "Failed to update sales order line"
+			exit 1
+		endon
+	end-select
+end-procedure
+
+procedure string-substitute
+// assumes currency on recurring-schedule-master and
+// recurring-schedule-transaction sales-order
+parameters
+	lp-string							pic x(1024) type string
+	lp-substitute-keyword				pic x(1024) type string
+returning
+	lr-string							pic x(1024) type string
+local
+	lf-keyword-position 				type number
+	lf-replacement-string				pic x(1024) type string
+	lf-end-date							type date
+	//
+	set lr-string = lp-string
+	set lf-keyword-position = pattern(lr-string,lp-substitute-keyword)
+	if lf-keyword-position = 0
+		exit
+	endif
+	switch lowercase(lp-substitute-keyword)
+	case "{template}"
+		set lf-replacement-string = concat(rsm-type, ":", rsm-key-1)
+	case "{time_stamp}"
+		set lf-replacement-string = concat(format-picture(today, "dd-mmm-yyyy")
+					" " format-picture(tod(),"HH:MM:SS"))
+	case "{user_stamp}"
+		set lf-replacement-string = login-id
+	case "{frequency}"
+		switch on rsm-schedule-frequency
+		case 0
+			set lf-replacement-string = "Daily"
+		case 1
+			set lf-replacement-string = "Weekly"
+		case 2
+			set lf-replacement-string = "Monthly"
+		case 5
+			set lf-replacement-string = "Annual"
+		end-switch
+	case "{start_date}"
+		set lf-replacement-string = format-picture( 
+			julian(1,month(so-order-date),year(so-order-date)),
+			"dd-mmm-yyyy")
+	case "{end_date}"
+		switch rsm-schedule-frequency 
+		case  0
+			set lf-end-date = so-order-date
+		case 1
+			set lf-end-date = so-order-date + 7
+		case 2
+			set lf-end-date = julian(1,month(so-order-date),year(so-order-date))
+			set lf-end-date = add-months(lf-end-date,1,true) - 1
+		case 5
+			set lf-end-date = julian(1,month(so-order-date),year(so-order-date))
+			set lf-end-date = add-months(lf-end-date,12,true) - 1
+		end-switch
+		set lf-replacement-string = format-picture( lf-end-date, "dd-mmm-yyyy")
+	end-switch
+	if lf-replacement-string != spaces
+		string lr-string deleting lf-keyword-position to lf-keyword-position + str-len(lp-substitute-keyword) - 1
+		string lr-string inserting lf-replacement-string at lf-keyword-position
+	endif
+end-procedure
+
+screen view-generated-orders
+	window @1,1 to @24,80
+	title ws-function-title
+	select *
+		from sales-order as t0
+		inner join deb-master as t1 on t0.so-cust-code = t1.accountcode
+		inner join sales-order-status-desc as t2 on t0.so-order-status = t2.sosd-status
+													and t2.sosd-language = spaces
+		where t0.so-order-source = I5SOURCE_RECURRING_ORDER
+	datagrid occurs 22
+	allowed search md-order-detail md-order-edit
+detail
+	if screenmode = md-order-detail
+		spl "so/m5ordenq" parameters are '-e' so-order-no so-bo-suffix
+	endif
+	if screenmode = md-order-edit
+		spl "so/m50ordent" parameters are '-E' so-order-no so-bo-suffix
+	endif
+	accept so-order-no @1,1
+		title "Order Number"
+		help "Order Number"
+		when screenmode in {search}
+		show-value
+	accept so-bo-suffix @1,2
+		title "Suffix"
+		help "Enter Order Suffix"
+		when screenmode in {search}
+	display so-cust-code @1,3
+		title "Customer"
+	display shortname @1,4
+		title "Name"
+	display so-order-date @1,5
+		title "Order Date"
+	display sosd-description @1,6
+		title "Status Desc"
+	display so-order-total-amount @1,7
+		title "Amount"
+	display so-date-stamp @1,8
+		title "Create Tate"
+	display so-time-stamp @1,9
+		title "Create Time"
+	display so-user-id-code @1,10
+		title "Create User"
+	confirm auto
+	end-confirm
+end-screen // view-generated-orders ------------------------------------------
+
+/*
+
+//  Test Routines
+
+
+screen test-subsitute
+local 
+	lf-string						pic x(1024) type string
+	lf-keyword						pic x(20) type string
+	lf-return						pic x(1024) type string
+	window
+before
+		set lf-string =  "{frequency} is from {start-period} to {end-period}" 
+		set lf-keyword = "{frequency}"
+detail
+	accept lf-string @1,10 pic x(50)
+		title lf-string
+		default lf-string
+	accept lf-keyword @2,20 
+		title "key"
+		default lf-keyword
+	accept so-order-date @3,20
+		title "date"
+		default today()
+	accept rsm-schedule-frequency @4,20
+		title "freq"
+		default 3
+	do string-substitute parameters are lf-string lf-keyword returning lf-return
+	display lf-return @5,20
+	pause
+end-screen
+*/

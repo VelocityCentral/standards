@@ -1,0 +1,635 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : Product Entry Recording
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2011
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: c:\usr\pronto\cus\sample\rayb\vglrfprod.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 24Mar11	rayb		written
+////////////////////////////////////////////////////////////////////////////////
+//  Be Careful:
+//  ===========
+//  This program needs to run on both vt100 type dumb devices as well as
+//  proclient.  
+//  Remember: proclient will allow display / accepts on the last line of a
+//  screen but vt100 type terminals do not.  Therefore if the screen supports
+//  8 lines, you can only use 7.
+//  Other points to consider with dumb terminals
+//  - Must use the WINDOW statement
+//  - Must use "clear" as the first command in the before section of screens.
+//  - Menus must have no-hide clause specified to ensure they do not use tree
+//  menus
+//	- Proclient supports proportional fonts whereas dumb terminals do not.
+//	Therefore care should be taken on menus and prompts to ensure they do not
+//	overflow the available space - they will look ok on proclient but not the
+//	dumb terminals
+//
+//	        *******************************************************
+//	        *  You must test on both kinds of devices             *
+//	        *  Use PuTTY for vt100 testing.  Set TERM=vt100       *
+//	        *******************************************************
+//
+////////////////////////////////////////////////////////////////////////////////
+//
+
+ 
+#include "../include/i8secabt.spl" 
+#include "../include/i8proglog.spl" 
+#include "../include/bms-dict.spl" 
+#define WINDOWSIZE @1,1 to @ws-max-lines,ws-max-columns
+
+link 'vglrf/vglrfclib'
+link 'clib/clib403'
+#if BMS_DICT_VER >= 7000
+link 'clib/clibserial'
+#else
+#include "../include/bmsdef.spl"
+#endif
+
+
+field 
+	ws-function-title					type string
+	// Remember to use environment variables COLUMNS and LINES to set these
+	ws-max-columns						type number
+	ws-max-lines						type number
+	//
+	ws-whse-code						like whse-code
+
+object temp-file
+	type is memory
+	record is 
+		tf-stock-code					like stock-code
+		tf-qty							like prod-entry-qty
+		tf-count						pic 9(6)
+	end-record
+	key is tf-stock-code
+
+ 
+procedure main 
+	get system-control first 
+	on error
+		abort "No Control Record"
+	endon
+	do i8secabt-check-abort
+		parameters are sys-consolidation-division login-id() "ZUSR" "T003"
+		returning ws-function-title 
+	do i8proglog-write-log
+	do vglrfclib-screen-size 
+		returning ws-max-columns ws-max-lines
+	do rf-menu
+end-procedure
+
+procedure test
+local
+	lf-ok					type boolean
+	do vglrfclib-confirm parameters are "Enter Y to display message box \n or N to exit program"
+		returning lf-ok
+	if lf-ok
+		do vglrfclib-display-message parameters are "TEst option that is quite long \n\n enter y" 8
+	else
+		exit
+	end
+end
+
+menu rf-menu
+local
+	lf-ok								type boolean
+    window WINDOWSIZE
+	no-hide // not a tree menu
+before
+	clear
+detail
+    option "1. Record Production" @3,2 to @3,ws-max-columns - 2
+        help "Scan Production"
+		do get-paras once returning lf-ok
+		if lf-ok
+			do rf-prod-entry initial-mode is entry 
+		endif
+		refresh
+    option "2. Production Enquiry" @4,2 to @4,ws-max-columns - 2
+        help "Outstanding Production"
+		do get-paras once returning lf-ok
+		if lf-ok
+			do rf-prod-enq initial-mode is entry 
+		endif
+		refresh
+    option "3. Record Summary" @5,2 to @5,ws-max-columns - 2
+        help "Scan Production"
+		do get-paras once returning lf-ok
+		if lf-ok
+			do rf-prod-entry-single-post initial-mode is entry 
+		endif
+		refresh
+    option "9. Finish" @6,2 to @6,ws-max-columns - 2
+        help "Logout"
+		exit
+endmenu //rf-stocktake ---------------------------------------------------------
+
+screen rf-prod-entry
+local field
+	lf-docket							pic 9(6)
+	lf-pic-clause						pic x(10)
+	i									type number
+	lf-can-override-qty					type boolean
+	lf-entered-stock-code				like stock-code
+	lf-qty-produced						type number
+	lf-qty								type number
+	lf-ok								type boolean
+	lf-serial-lot						pic x(40) type string 
+	lf-message							pic x(128) type string
+	lf-current-soh						like whse-qty-on-hand	
+	lf-stock-code						like stock-code
+	lf-last-stock-code					like stock-code
+	lf-scan-count						pic 9(5)
+	lf-scan-qty							pic 9(5)
+    allowed entry
+	primary production-entry-dockets
+	no-ok-cancel
+before
+	clear
+	set lf-pic-clause = "s(7)9"
+	if sys-default-no-of-decimals > 0
+		string lf-pic-clause appending "."
+		for i = 1 to sys-default-no-of-decimals
+			string lf-pic-clause appending "9"
+		end-for
+	endif
+	//
+	set lf-can-override-qty = FALSE
+	display "Scan:" @1,1
+	display "Scan Count:" @6,1
+	display "Scan Qty:" @7,1
+	set lf-last-stock-code = spaces
+	set lf-scan-count = 0
+	set lf-scan-qty = 0
+	//
+detail
+	display lf-scan-count @6,13 pic s(5)
+	display lf-scan-qty @7,13 pic s(5)
+	set lf-can-override-qty = FALSE
+	if lf-entered-stock-code = "Q"
+		set lf-entered-stock-code = space
+	endif
+	// ------------------------------------------------------------
+    accept lf-entered-stock-code @2,1
+        help "Code 9)Quit "
+        uppercase
+		default lf-entered-stock-code
+    validation
+        if lf-entered-stock-code = "9"
+            exit
+        endif
+		if lf-entered-stock-code = SPACES
+			reenter optional
+		endif
+		//
+		// Get the actual stock Code from the entered one.
+		// The field we now work on will of lf-stock-code
+		//
+		do vglrfclib-validate-product parameters are lf-entered-stock-code spaces
+			returning lf-ok lf-stock-code lf-qty lf-serial-lot lf-message
+		get stock-master 
+			on index stock-code
+			key is lf-stock-code
+		on error
+			set lf-ok = FALSE
+			set lf-message = "Invalid Stock Code"
+		endon
+		if not lf-ok
+			do vglrfclib-display-message parameters are  lf-message 4
+			re-enter lf-entered-stock-code
+		else
+			set lf-qty-produced = lf-qty
+		endif
+		//"K","L" and "Z" type items should not be used in a stock take.
+		//
+		if stk-stock-status not in ("M")
+			do vglrfclib-display-message parameters are  "Invalid item type." 3
+			reenter optional
+		endif
+		display strconcat(stock-code,"(",stk-unit-desc,")") @3,1 background
+		display stk-description @4,1 background
+		do vglrfclib-check-can-override-qty parameters are stock-code
+			returning lf-can-override-qty
+    endvalidation
+	// ------------------------------------------------------------
+    accept lf-qty-produced @5,6 pic lf-pic-clause
+		title "QTY:"
+        default lf-qty-produced
+        help "Qty Counted"
+		when lf-can-override-qty 
+//		no-clear
+		show-value
+	validations
+		//
+		// attempt to trap the user scanning another bar code
+		// into the qty field
+		do clib403-calculate-available
+			parameters stock-code whse-code
+			returning lf-current-soh
+		if (lf-current-soh > 0 and  lf-qty-produced > lf-current-soh * 100)
+		or (lf-qty-produced > 99999)
+            do vglrfclib-confirm
+				parameters  "Qty scanned looks excessive \n Select Y to confirm" 
+				returning lf-ok
+			if not lf-ok
+				set lf-qty-produced = 1
+				re-enter lf-qty-produced
+			endif
+		endif
+	end-validations
+	// ------------------------------------------------------------
+	if lf-stock-code <> lf-last-stock-code
+		set lf-scan-count = 1
+		set lf-scan-qty = lf-qty-produced
+	else
+		set lf-scan-count += 1
+		set lf-scan-qty += lf-qty-produced
+	endif
+	// ------------------------------------------------------------
+	set lf-last-stock-code = lf-stock-code
+  	confirm auto
+	before
+#if BMS_DICT_VER >= 7000
+		do clibserial-next-serial-number
+			parameters "DO"
+			returning lf-docket
+#else
+		BMSDEF_NEXT_SERIAL_NUMBER('DO',lf-docket,lf-docket)
+#endif			
+		set prod-entry-docket-number =
+			fstr(lf-docket,size-of(prod-entry-docket-number),0)							
+		set prod-entry-date = today()
+		set prod-entry-type = "P"
+		set prod-entry-status = 'E'
+		set prod-whse-code = ws-whse-code
+		set prod-comp-whse-code = ws-whse-code
+		set prod-entry-shift = "D"
+		set stock-code = lf-stock-code
+		set prod-entry-qty = lf-qty-produced
+		set prod-entry-reference = str-concat( login-id ":" format-picture(tod,"hh:MM"))
+		set prod-entry-finish-flag = "D"
+		set prod-entry-date-time = systime()
+		set prod-entry-screen-type = "P"
+		set prod-entry-user-id = login-id()
+#if BMS_DICT_VER >= 7000
+		get stock-warehouse-detail
+			on index stock-code whse-code
+			key is stock-code ws-whse-code
+		on error
+		else
+			set prod-entry-bom-id = whse-costing-bom-id
+		endon
+#endif
+    confirmed 
+    end-confirm
+after
+    back-to-detail
+end-screen //rf-stocktake-normal-----------------------------------------------
+
+screen rf-prod-entry-single-post
+local field
+	lf-docket							pic 9(6)
+	lf-pic-clause						pic x(10)
+	i									type number
+	lf-can-override-qty					type boolean
+	lf-entered-stock-code				like stock-code
+	lf-qty-produced						type number
+	lf-qty								type number
+	lf-ok								type boolean
+	lf-serial-lot						pic x(40) type string 
+	lf-message							pic x(128) type string
+	lf-current-soh						like whse-qty-on-hand	
+	lf-stock-code						like stock-code
+	lf-last-stock-code					like stock-code
+	lf-scan-count						pic 9(5)
+	lf-scan-qty							pic 9(5)
+    allowed entry
+	primary temp-file
+	no-ok-cancel
+before
+	clear
+	set lf-pic-clause = "s(7)9"
+	if sys-default-no-of-decimals > 0
+		string lf-pic-clause appending "."
+		for i = 1 to sys-default-no-of-decimals
+			string lf-pic-clause appending "9"
+		end-for
+	endif
+	//
+	open temp-file temporary
+	set lf-can-override-qty = FALSE
+	display "Scan:" @1,1
+	display "Scan Count:" @6,1
+	display "Scan Qty:" @7,1
+	set lf-last-stock-code = spaces
+	set lf-scan-count = 0
+	set lf-scan-qty = 0
+	//
+detail
+	display lf-scan-count @6,13 pic s(5)
+	display lf-scan-qty @7,13 pic s(5)
+	set lf-can-override-qty = FALSE
+	if lf-entered-stock-code = "Q"
+		set lf-entered-stock-code = space
+	endif
+	// ------------------------------------------------------------
+    accept lf-entered-stock-code @2,1
+        help "Code 9)Quit "
+        uppercase
+		default lf-entered-stock-code
+    validation
+        if lf-entered-stock-code = "9"
+			do post-temp-file
+            exit
+        endif
+		if lf-entered-stock-code = SPACES
+			reenter optional
+		endif
+		//
+		// Get the actual stock Code from the entered one.
+		// The field we now work on will of lf-stock-code
+		//
+		do vglrfclib-validate-product parameters are lf-entered-stock-code spaces
+			returning lf-ok lf-stock-code lf-qty lf-serial-lot lf-message
+		get stock-master 
+			on index stock-code
+			key is lf-stock-code
+		on error
+			set lf-ok = FALSE
+			set lf-message = "Invalid Stock Code"
+		endon
+		if not lf-ok
+			do vglrfclib-display-message parameters are  lf-message 4
+			re-enter lf-entered-stock-code
+		else
+			set lf-qty-produced = lf-qty
+		endif
+		//"K","L" and "Z" type items should not be used in a stock take.
+		//
+		if stk-stock-status not in ("M")
+			do vglrfclib-display-message parameters are  "Invalid item type." 3
+			reenter optional
+		endif
+		display strconcat(stock-code,"(",stk-unit-desc,")") @3,1 background
+		display stk-description @4,1 background
+		do vglrfclib-check-can-override-qty parameters are stock-code
+			returning lf-can-override-qty
+    endvalidation
+	// ------------------------------------------------------------
+    accept lf-qty-produced @5,6 pic lf-pic-clause
+		title "QTY:"
+        default lf-qty-produced
+        help "Qty Counted"
+		when lf-can-override-qty 
+//		no-clear
+		show-value
+	validations
+		//
+		// attempt to trap the user scanning another bar code
+		// into the qty field
+		do clib403-calculate-available
+			parameters stock-code whse-code
+			returning lf-current-soh
+		if (lf-current-soh > 0 and  lf-qty-produced > lf-current-soh * 100)
+		or (lf-qty-produced > 99999)
+            do vglrfclib-confirm
+				parameters  "Qty scanned looks excessive \n Select Y to confirm" 
+				returning lf-ok
+			if not lf-ok
+				set lf-qty-produced = 1
+				re-enter lf-qty-produced
+			endif
+		endif
+	end-validations
+	// ------------------------------------------------------------
+	if lf-stock-code <> lf-last-stock-code
+		set lf-scan-count = 1
+		set lf-scan-qty = lf-qty-produced
+		do post-temp-file
+	else
+		set lf-scan-count += 1
+		set lf-scan-qty += lf-qty-produced
+	endif
+	// ------------------------------------------------------------
+	set lf-last-stock-code = lf-stock-code
+  	confirm auto
+	before
+		set tf-stock-code = lf-stock-code
+		set tf-qty = lf-qty-produced
+    confirmed 
+    end-confirm
+after
+    back-to-detail
+end-screen //rf-stocktake-normal-----------------------------------------------
+
+procedure post-temp-file
+local
+	lf-docket							pic 9(6)
+	lf-total-qty					like tf-qty
+	lf-total-scans					like tf-count
+//
+	set lf-total-qty = 0
+	set lf-total-scans = 0
+	select * from temp-file
+	detail
+		set lf-total-qty += tf-qty
+		set lf-total-scans += 1
+	end-select
+	if lf-total-scans <= 0
+		exit
+	endif
+#if BMS_DICT_VER >= 7000
+	do clibserial-next-serial-number
+		parameters "DO"
+		returning lf-docket
+#else
+	BMSDEF_NEXT_SERIAL_NUMBER('DO',lf-docket,lf-docket)
+#endif			
+	initialise production-entry-dockets
+	set prod-entry-docket-number =
+		fstr(lf-docket,size-of(prod-entry-docket-number),0)							
+	set prod-entry-date = today()
+	set prod-entry-type = "P"
+	set prod-entry-status = 'E'
+	set prod-whse-code = ws-whse-code
+	set prod-comp-whse-code = ws-whse-code
+	set prod-entry-shift = "D"
+	set stock-code = tf-stock-code
+	set prod-entry-qty = lf-total-qty
+	set prod-entry-reference = str-concat( login-id "-" format-picture(tod,"hh:MM") "-" str(lf-total-scans))
+	set prod-entry-finish-flag = "D"
+	set prod-entry-date-time = systime()
+	set prod-entry-screen-type = "P"
+	set prod-entry-user-id = login-id()
+#if BMS_DICT_VER >= 7000
+	get stock-warehouse-detail
+		on index stock-code whse-code
+		key is stock-code ws-whse-code
+	on error
+	else
+		set prod-entry-bom-id = whse-costing-bom-id
+	endon
+#endif
+	insert production-entry-dockets
+	on error
+		do vglrfclib-display-message parameters 
+			concat("Cannot record production\n",error-description(file-status())) 3
+	endon
+	select * from temp-file
+		for update
+	detail
+		delete temp-file
+	end-select
+end-procedure
+
+
+screen rf-prod-enq
+local field
+	lf-qty-produced						type number
+	lf-message							pic x(128) type string
+	lf-stock-code						like stock-code
+	lf-serial-lot						pic x(40) type string 
+	lf-ok								type boolean
+	lf-entered-stock-code				like stock-code
+	lf-pic-clause						pic x(10)
+	i									type number
+	lf-count							pic 9(5)
+	lf-qty								pic 9(5)
+    allowed entry
+	no-ok-cancel
+before
+	clear
+	set lf-pic-clause = "s(7)9"
+	if sys-default-no-of-decimals > 0
+		string lf-pic-clause appending "."
+		for i = 1 to sys-default-no-of-decimals
+			string lf-pic-clause appending "9"
+		end-for
+	endif
+	//
+	display "Scan:" @1,1
+	display "Scan Count:" @6,1
+	display "Scan Qty:" @7,1
+	//
+detail
+	// ------------------------------------------------------------
+    accept lf-entered-stock-code @2,1
+        help "Code 9)Quit "
+        uppercase
+		default lf-entered-stock-code
+    validation
+        if lf-entered-stock-code = "9"
+            exit
+        endif
+		if lf-entered-stock-code = SPACES
+			reenter optional
+		endif
+		//
+		// Get the actual stock Code from the entered one.
+		// The field we now work on will of lf-stock-code
+		//
+		do vglrfclib-validate-product parameters are lf-entered-stock-code spaces
+			returning lf-ok lf-stock-code lf-qty lf-serial-lot lf-message
+		get stock-master 
+			on index stock-code
+			key is lf-stock-code
+		on error
+			set lf-ok = FALSE
+			set lf-message = "Invalid Stock Code"
+		endon
+		if not lf-ok
+			do vglrfclib-display-message parameters are  lf-message 4
+			re-enter lf-entered-stock-code
+		else
+			set lf-qty-produced = lf-qty
+		endif
+		//"K","L" and "Z" type items should not be used in a stock take.
+		//
+		if stk-stock-status not in ("M")
+			do vglrfclib-display-message parameters are  "Invalid item type." 3
+			reenter optional
+		endif
+		display strconcat(stock-code,"(",stk-unit-desc,")") @3,1 background
+		display stk-description @4,1 background
+		//
+		// Count open production
+		//
+		set lf-count = 0
+		set lf-qty  = 0
+		select * from production-entry-dockets
+			where stock-code = :lf-stock-code
+			and prod-entry-status = "E"
+			order by stock-code prod-entry-docket-number prod-entry-status
+		detail
+			set lf-count += 1
+			set lf-qty  += prod-entry-qty
+		end-select
+		display  lf-count @6,13
+		display  lf-qty @7,13
+    end-validation
+  	confirm auto
+    confirmed 
+    end-confirm
+after
+    back-to-detail
+end-screen //rf-stocktake-normal-----------------------------------------------
+
+screen get-paras
+returning
+	lr-ok								type boolean
+    allowed entry
+    window WINDOWSIZE
+//		title is "RF Stocktake"
+	no-ok-cancel
+before
+	clear
+    display "Warehouse" @3,3
+    if getenv("DEFWHSE") <> spaces
+        set ws-whse-code = getenv("DEFWHSE")
+    endif
+    get system-user
+        on index sys-comp-code user-id
+        key is sys-consolidation-division login-id()
+    on error
+        set ws-whse-code = spaces
+    else
+        set ws-whse-code = user-whse
+    endon
+	set lr-ok = FALSE
+detail
+    accept ws-whse-code @3,14
+        help "Enter WHSE Code 9)exit"
+        default ws-whse-code
+        uppercase
+    validation
+		if ws-whse-code = "9"
+			exit
+		endif
+        get system-table
+            key is "WH" ws-whse-code
+        on error
+			do vglrfclib-display-message  parameter "Not a WHSE"  4
+            reenter optional
+		else
+			if sys-tbl-sales-mtd <> 0
+				do vglrfclib-display-message parameter "Not a Normal WHSE"  4
+				reenter optional
+			endif
+        endon
+    end-validation
+	set lr-ok = TRUE
+after
+	// can't escape
+	if not lr-ok
+		back-to-detail
+	endif
+end-screen //get-whse-code-----------------------------------------------------
+

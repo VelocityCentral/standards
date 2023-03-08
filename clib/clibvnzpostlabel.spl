@@ -1,0 +1,2404 @@
+////////////////////////////////////////////////////////////////////////////////
+// Program : Provide NZpost API address and label generation functionality
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2017
+//
+// PRONTO is a registered trademark of PRONTO Software P/L.
+//
+// All Rights Reserved. Unauthorized copying is prohibited.
+//=========================================================================//
+//
+// File: clib/clibvnzpostlabel.spl
+//
+// Modification History
+// Date		Who	SDR		What
+// 20Jul17  stf         written 
+////////////////////////////////////////////////////////////////////////////////
+//EXPORTED PROCEDURES
+////////////////////////////////////////////////////////////////////////////////
+/*
+
+
+
+	This documentation is in RST format.  To view this as a nice pdf goto
+	https://overbits.herokuapp.com/rsteditor/ or rst.ninjs.org and paste this content.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|           |           |                                                        |
+	+-----------+-----------+--------------------------------------------------------+
+
+	Alternatively
+
+	 =========== =========== ======================================================== 
+	  Direction   Data Type   Description                                             
+	 =========== =========== ======================================================== 
+	 =========== =========== ======================================================== 
+
+================
+clibvnzpostlabel
+================
+
+	Clib to manage addresses and labels for NZPOST.  Interfaces with NZPOST API's.
+
+	Customer must register for API's and get a key.  Stored in SUOT.
+
+	Errors reported via non-zero exit-status.  Use -get-last-error for error message.
+
+clibvnzpostlabel-create-so-consignment 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	Verifies address ID from sales-order-delivery or debtor delivery address.
+	Uses existing address ID if there otherwise it will get one.
+	
+	Displays a package details entry screen for user interface.  Will get available 
+	shipping options for each package from NZPOST.
+
+	Creates and prints label based on entered data.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      | Int       |Sales order number                                      |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |String 2   |Backorder suffix                                        |
+	+-----------+-----------+--------------------------------------------------------+
+
+
+clibvnzpostlabel-api-cleanup-address 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	accepts a name and address master record, uses the apis to obtain possible 
+	addresses and address ID, offers selection and updates record if selected
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   In      |String 10  |Accountcode                                             |
+	+-----------+-----------+--------------------------------------------------------+
+	|   In      |String 2   |Address type (na-type)                                  |
+	+-----------+-----------+--------------------------------------------------------+
+
+clibvnzpostlabel-api-cleanup-delivery-address 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	Same as -api-cleanup-address but for sales-order-delivery addresses.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|    In     |number     |Sales order Number                                      |
+	+-----------+-----------+--------------------------------------------------------+
+	|    In     |string 2   |Backorder Suffix                                        |
+	+-----------+-----------+--------------------------------------------------------+
+	|    Out    |Number     |Delivery Address ID                                     |
+	+-----------+-----------+--------------------------------------------------------+
+
+*/
+
+
+
+#include "../include/i8proglogparam.spl"
+#define  ADDRESSLINES 6
+#define CLIENT_ID "622d5e237ed94f4eb10ab42b2b0c9c1f"
+#define SECRET_KEY "e88d660532814b888BD8542392529145"
+#define FILEPATH "labelfiles/"
+#define MAX_ADDRESSES 100
+
+#define DEBUG
+#include "../include/i8cmnds.spl"
+
+object tmp-brtn
+	type external
+	record tmp-body		type varchar	pic x(16000)
+	end-record
+
+object tmp-addresses
+	type memory
+record
+	tmp-address-index	type number
+	tmp-address-id		type number
+	tmp-full-address	type string pic x(256)
+end-record
+key is tmp-address-index, tmp-address-id
+
+object tmp-parcels
+	type memory 
+record
+	tmp-parcel-id							type number
+	tmp-courier								type string pic x(16)
+	tmp-type								type string pic x(16)
+	tmp-envelope							type string pic x(3)
+	tmp-length								like ccd-length
+	tmp-width								like ccd-width
+	tmp-height								like ccd-height
+	tmp-weight								like ccd-weight
+	tmp-service-code						type string pic x(16)
+	tmp-addon1								type string pic x(16)
+	tmp-addon2								type string pic x(16)
+	tmp-addon3								type string pic x(16)
+	tmp-addon4								type string pic x(16)
+	tmp-pace-number							type string pic x(16)
+end-record
+key is tmp-parcel-id
+
+object tmp-service-codes
+	type memory
+record
+	tmp-srv-index								pic 99
+	tmp-srv-service-code						type string pic x(16)
+	tmp-srv-courier								type string pic x(16)
+	tmp-srv-description							type string pic x(50)
+	tmp-srv-addon1								type string pic x(16)
+	tmp-srv-addon2								type string pic x(16)
+	tmp-srv-addon3								type string pic x(16)
+	tmp-srv-addon4								type string pic x(16)
+	tmp-srv-addon1d								type string pic x(50)
+	tmp-srv-addon2d								type string pic x(50)
+	tmp-srv-addon3d								type string pic x(50)
+	tmp-srv-addon4d								type string pic x(50)
+end-record
+key is tmp-srv-index tmp-srv-service-code
+key is tmp-srv-service-code
+
+object tmp-tracking
+	type memory
+record
+	tmp-consignment-id							pic x(20)
+	tmp-tracking-num							pic x(30)
+end-record
+key is tmp-consignment-id tmp-tracking-num
+
+mode md-select
+	prompt "Select"
+	currency
+
+field
+	ws-secret-key						type string pic x(100)
+	ws-client-id						type string pic x(100)
+	ws-logo-id							type string pic x(100)
+	ws-authorised						type boolean
+	ws-bearer-token						type string pic x(1024)
+	ws-delivery-address-id				type number
+	ws-site-id							type number
+	ws-pickup-address-id				type number
+	//json-xml functionality support
+	ws-xml-doc							type xml-handle
+	ws-xml-root							type xml-handle
+	ws-reference						type string pic x(64)
+	ws-name								type string pic x(64)
+	ws-phone							type string pic x(64)
+	ws-receiver-name					type string pic x(64)
+	ws-consignment-id					type string pic x(10)
+	ws-email							type string pic x(64)
+	ws-printername						type string pic x(64)
+	ws-last-error						pic x(1024) type string
+
+procedure library-init
+	local lf-okay							type boolean
+	get system-control first
+	on error
+		abort "No Control Record"
+	endon
+	do i8proglogparam-write-log parameters are "clibvnzpostlabel"
+	//set ws-secret-key = SECRET_KEY
+//	set ws-client-id = CLIENT_ID
+	set ws-consignment-id = spaces
+	set ws-authorised = false
+	set	ws-delivery-address-id = 0
+	open tmp-parcels temporary truncate
+	open tmp-tracking temporary truncate
+	do get-company-codes returning lf-okay
+	if not lf-okay
+		message 'cannot get required company setup codes'
+		exit
+	endif
+	do api-authorise
+end-procedure
+
+procedure clibvnzpostlabel-get-last-error export
+returning
+	lr-message							like ws-last-error
+	set lr-message = ws-last-error
+end-procedure
+
+procedure clibvnzpostlabel-create-so-consignment export
+parameters are 
+	lp-order-no							like so-order-no
+	lp-bo-suffix						like so-bo-suffix
+local
+	lf-delivery-address					type boolean	
+	lf-consigment-id					type string pic x(20)
+//	lf-ok								type boolean
+//	lf-message							type string pic x(1024)	
+	x									type number
+//get so master
+	get sales-order
+		on index so-order-no so-bo-suffix
+		key is lp-order-no lp-bo-suffix
+		lock
+	on error
+		message "Sales order not found: " str(so-order-no) so-bo-suffix
+		set ws-last-error = concat( "Sales order not found: " str(so-order-no) so-bo-suffix)
+		exit 1
+	else
+		if so-consignment-note <> SPACES
+			if file-exists(str-concat(get-env('DATADIR'),
+									'/labelfiles/nzpost_labels_',
+									str-concat(so-consignment-note),".pdf")
+							,FALSE)
+				message-box concat("A label file already exists for consignment: "
+									,str-concat(so-consignment-note)," on this sales order. "
+									,"Do you wish to reprint instead of generating a new consignement?")
+					title "Reprint?"
+					message-buttons MSG_BOX_OK_CANCEL
+					default MSG_BOX_CANCEL
+					icon MSG_BOX_QUESTION
+				if message-status = MSG_BOX_OK	
+					if ws-printername <> spaces
+						command "sh" parameters	are '-c' 					
+						concat("lp -o PageSize=Custom.4x7in -o fitplot -d "
+							,str-concat(ws-printername), " "
+							, str-concat(get-env('DATADIR')'/labelfiles/nzpost_labels_'
+										,str-concat(so-consignment-note),".pdf")
+							)
+					else
+						message "Printer not configured, aborting"
+						set ws-last-error = "Printer not configured, aborting"
+					endif	
+					exit 1
+				else
+				endif
+			endif
+		endif
+	endon
+	set ws-reference = concat(str-concat(so-cust-reference),' Order: ',str-concat(str(so-order-no),so-bo-suffix))
+//verify delivery address
+	get sales-order-delivery
+		on index so-order-no so-bo-suffix so-text-type
+		key is lp-order-no lp-bo-suffix 'DA'
+	on error
+		set lf-delivery-address = false
+	else
+		if so-dl-text[1] = 'XXMULTDA'
+			set lf-delivery-address = false
+		endif
+	endon
+	//	message 'no delivery address'   lp-order-no lp-bo-suffix
+	if lf-delivery-address = false
+		get name-and-address-master
+			on index accountcode na-type
+			key is so-cust-code 'DA'
+		on error 
+			message 'No account address found: ' accountcode
+			set ws-last-error = concat('No account address found: ' accountcode)
+			exit 1
+		else
+			if na-user-only-num1 = 0
+				do clibvnzpostlabel-api-cleanup-address
+					parameters are accountcode 'DA'
+					returning ws-delivery-address-id
+				get name-and-address-master
+					on index accountcode na-type
+					key is so-cust-code 'DA'
+				on error 
+				endon
+				set ws-receiver-name = na-name	
+				set ws-delivery-address-id = na-user-only-num1
+			else
+				set ws-receiver-name = na-name
+				set ws-delivery-address-id = na-user-only-num1
+			endif
+		endon
+	else
+		if so-dl-address-id = spaces or num(so-dl-address-id) = 0
+		do clibvnzpostlabel-api-cleanup-delivery-address
+			parameters are lp-order-no lp-bo-suffix
+			returning ws-delivery-address-id
+		endif
+		set lf-delivery-address = true
+		set ws-receiver-name = so-dl-text[1]
+		set ws-delivery-address-id = num(so-dl-address-id)
+	endif
+	if ws-delivery-address-id = 0
+		message 'Delivery Address cannot be identified'
+		set ws-last-error = 'Delivery Address cannot be identified'
+		exit 1
+	endif
+//add parcels
+//	message ws-delivery-address-id ":" ws-pickup-address-id
+	do get-parcels 
+	get tmp-parcels
+	on error
+		message "No packages entered"
+		set ws-last-error =  "No packages entered"
+		exit 1
+	endon
+//generate labels
+	do api-generate-labels
+	returning
+		lf-consigment-id
+	if exit-status != 0
+		message ws-last-error
+		exit 1
+	endif
+//update tracking
+//	message "consignment complete: " lf-consigment-id
+	set so-consignment-note = lf-consigment-id
+	select so-order-packages = count(*) from tmp-parcels
+	detail
+	end-select
+	update sales-order
+	on error
+		message 'cannot save consignment note'
+	endon
+	initialise carrier-consignments
+		set carrier-code = 'CP'
+		set cc-connote-no = lf-consigment-id
+	insert carrier-consignments
+	on error
+	endon
+	set x = 1
+	select * from tmp-parcels
+	detail
+		initialise carrier-connote-detail
+		set carrier-code = 'CP'
+		set cc-connote-no = lf-consigment-id
+		set ccd-seq-no = x
+		set x += 1
+		set ccd-commodity-code = tmp-service-code
+		set ccd-length = tmp-length
+		set ccd-width = tmp-width
+		set ccd-height = tmp-height
+		set ccd-weight = tmp-weight
+		set ccd-no-of-items = 1
+		insert carrier-connote-detail
+		on error
+		endon
+		end-select
+	do api-update-so-notes-tracking
+		parameters are lp-order-no lp-bo-suffix
+end-procedure
+
+procedure api-update-so-notes-tracking 
+parameters are 
+	lp-order-no							like so-order-no
+	lp-bo-suffix						like so-bo-suffix
+local
+	lf-last-sequence					type number
+	set lf-last-sequence = ZERO
+	select * from sales-order-notes
+		where so-order-no = :lp-order-no
+		and so-bo-suffix = :lp-bo-suffix
+		and so-user-code = "TRACK-AND-TRACE"
+		and so-note-type = 'B'
+		order by so-order-no so-bo-suffix so-note-type 
+			so-user-code so-note-sequence-no
+	detail
+		set lf-last-sequence = so-note-sequence-no
+	end-select
+	select * from tmp-tracking
+	detail
+		set lf-last-sequence += 1
+		initialise sales-order-notes
+		set so-order-no = lp-order-no
+		set so-bo-suffix = lp-bo-suffix
+		set so-note-sequence-no = lf-last-sequence
+		set so-user-code = "TRACK-AND-TRACE"
+		set so-note-type = 'B'
+		set so-note-text = left-justify(tmp-tracking-num)
+		insert sales-order-notes
+		on error
+		endon
+	end-select
+end-procedure
+
+procedure api-authorise 
+//	set ws-authorised = true
+//	set ws-bearer-token = "eyJhbGciOiJIUzI1NiIsImtpZCI6IlRFU1QifQ.eyJjbGllbnRfaWQiOiI2MjJkNWUyMzdlZDk0ZjRlYjEwYWI0MmIyYjBjOWMxZiIsImV4cCI6MTUwMzM3NDMzNywic2NvcGUiOltdfQ.1C83tLTu3njIrq2ZqF8p3FTrXTJ7APXK0QjF2rHEgdI"
+local
+	lf-url								pic x(1024) type varchar
+	lf-hsnd								type blob
+	lf-bsnd								type blob
+	lf-hrtn								type blob
+	lf-brtn								type blob
+	lf-root								type xml-handle
+	lf-result							type xml-handle
+//	lf-result2							type xml-handle
+//	lf-result3							type xml-handle
+//	lf-result4							type xml-handle
+//	lf-result5							type xml-handle
+//	lf-response							type string
+//	lf-success							type string
+//	lf-ok								type boolean
+//	x									type number
+	set lf-url =  "https://oauth.nzpost.co.nz/as/token.oauth2"
+	set lf-hsnd = "Content-Type:application/x-www-form-urlencoded"
+	set  lf-bsnd = concat("client_id=",ws-client-id,"&","client_secret=",ws-secret-key,"&","grant_type=client_credentials")
+	call-url lf-url 
+	http-headers are lf-hsnd
+	http-body is lf-bsnd
+		http-method is "POST"
+		returning http-body in lf-brtn
+			http-headers in lf-hrtn
+	on error
+		message "call url failed"
+		set ws-last-error =  "call url failed"
+		exit 1
+	endon
+	do start-jsontoxml parameters are lf-brtn
+	set lf-root = xml-get-root-node(ws-xml-doc)
+	//check for error
+	set lf-result = xml-get-child-by-name(lf-root,"access_token",spaces)
+	if lf-result = 0
+		set ws-last-error =  "No access token"
+		set ws-authorised = false
+		exit 1
+	else
+		set ws-bearer-token = xml-node-text(xml-get-child-by-name(lf-root,"access_token",spaces))
+		set ws-authorised = true
+	endif
+end-procedure
+
+procedure clibvnzpostlabel-api-cleanup-address export
+parameters are
+	lp-accountcode						like accountcode
+	lp-na-type							like na-type	
+returning
+	lr-delivery-address-id				like ws-delivery-address-id
+local
+	lf-search-string					type string pic x(256)
+	lf-search-string-clean				type string pic x(256)
+	lf-try-company						type boolean
+	lf-x								pic 99
+	lf-first							type boolean
+	lf-ok								type boolean
+	lf-found							type boolean
+	lf-message							type string pic x(1024)
+	lf-original							type string pic x(256)					
+	lf-try-manual						type boolean
+	//
+	set lf-try-company = false
+	set lf-found = false
+	set lr-delivery-address-id = 0
+	get name-and-address-master
+		on index accountcode na-type
+		key is lp-accountcode lp-na-type
+		lock
+	on error
+		message "Address record not found in name and address master."
+		exit
+	else
+		set lf-search-string = na-company
+		if na-street <> spaces
+			string lf-search-string appending str-concat(", ",na-street)
+		endif
+		if na-suburb <> spaces
+			string lf-search-string appending str-concat(", ",na-suburb)
+		endif
+		if postcode <> spaces
+			string lf-search-string appending str-concat(", ",postcode)
+		endif
+//		if na-country <> spaces
+//			string lf-search-string appending str-concat(", ",na-country)
+//		endif
+	endon
+//	message lf-search-string
+while lf-found = false
+	set lf-search-string-clean = lf-search-string
+	set lf-x = pattern(lf-search-string-clean," ")
+	set lf-first = true
+	if lf-x
+		while lf-x
+			string lf-search-string-clean deleting lf-x to lf-x
+			if lf-first 
+				string lf-search-string-clean inserting "%20" at lf-x
+				set lf-first = false 
+			else
+				string lf-search-string-clean inserting "%20" at lf-x
+			endif
+			set lf-x = pattern(lf-search-string-clean," ")
+		endwhile
+	endif
+	do get-address
+		parameters are 	lf-search-string-clean
+						lp-accountcode
+						lp-na-type
+	if ws-delivery-address-id = 0
+		if lf-try-company = false
+			set lf-original = lf-search-string
+			set lf-x = pattern(lf-search-string,',')
+				if lf-x != 0
+					string lf-search-string deleting 1 to lf-x
+				endif
+			set lf-try-company = true
+			set lf-try-manual = false
+		else
+			if lf-try-manual = false
+				set lf-search-string = lf-original
+			endif
+			message-box "No address found,do you wish to enter a manual search?"
+				title "Confirmation"
+				message-buttons MSG_BOX_OK_CANCEL
+				default MSG_BOX_CANCEL
+				icon MSG_BOX_QUESTION
+			if message-status = MSG_BOX_OK			
+				set lf-try-manual = true
+				do enter-search-string
+					parameters are
+						lf-search-string
+					returning	
+					lf-search-string
+			else
+				set lf-found = true
+			endif
+		endif
+	else
+		set lf-found = true
+		set lr-delivery-address-id = ws-delivery-address-id
+		do call-address-detail
+		parameters are 	
+			ws-delivery-address-id
+		returning
+			lf-ok
+			lf-message
+			//na-company
+			na-street
+			na-suburb
+			na-country
+			na-address-6
+			postcode				
+		if not lf-ok
+			message lf-message
+			exit
+		endif
+		if uppercase(na-company) = uppercase(na-street)
+			set na-company = spaces
+		endif
+		set na-user-only-num1 = ws-delivery-address-id
+		update name-and-address-master
+		on error
+			message "problem updating name and address master"
+		endon
+	endif
+end-while
+end-procedure
+
+procedure clibvnzpostlabel-api-cleanup-delivery-address export
+parameters are
+	lp-so-order-no						like so-order-no
+	lp-so-bo-suffix						like so-bo-suffix	
+returning
+	lr-delivery-address-id				like ws-delivery-address-id
+local
+	lf-search-string					type string pic x(256)
+	lf-search-string-clean				type string pic x(256)
+	lf-x								pic 99
+	lf-first							type boolean
+	lf-ok								type boolean
+	lf-found							type boolean
+	lf-message							type string pic x(1024)
+//	lf-text								type string
+	//
+	set lr-delivery-address-id = 0
+	get sales-order-delivery
+		on index so-order-no so-bo-suffix so-text-type
+		key is lp-so-order-no lp-so-bo-suffix 'DA'
+		lock
+	on error
+		message "No sales order delivery address found"
+		set ws-last-error =  "No sales order delivery address found"
+		exit 1
+	else
+		set lf-search-string = so-dl-text[2]
+		if so-dl-text[3] <> spaces
+			string lf-search-string appending str-concat(", ",so-dl-text[3])
+		endif
+		if so-dl-text[4] <> spaces
+			string lf-search-string appending str-concat(", ",so-dl-text[4])
+		endif
+		if so-dl-postcode <> spaces
+			string lf-search-string appending str-concat(", ",so-dl-postcode)
+		endif
+	endon
+	while lf-found = false
+		set lf-search-string-clean = lf-search-string
+		set lf-x = pattern(lf-search-string-clean," ")
+		set lf-first = true
+		if lf-x
+			while lf-x
+				string lf-search-string-clean deleting lf-x to lf-x
+				if lf-first 
+					string lf-search-string-clean inserting "%20" at lf-x
+					set lf-first = false 
+				else
+					string lf-search-string-clean inserting "%20" at lf-x
+				endif
+				set lf-x = pattern(lf-search-string-clean," ")
+			endwhile
+		endif
+		do get-address
+			parameters are 	lf-search-string-clean
+							spaces
+							spaces
+		if ws-delivery-address-id = 0
+			message-box "No address found,do you wish to enter a manual search?"
+				title "Confirmation"
+				message-buttons MSG_BOX_OK_CANCEL
+				default MSG_BOX_CANCEL
+				icon MSG_BOX_QUESTION
+			if message-status = MSG_BOX_OK
+				do enter-search-string
+					parameters are
+						lf-search-string
+					returning
+						lf-search-string
+			else
+				set lf-found = true
+			endif
+		else
+			set lf-found = true
+			set so-dl-text[2] = spaces
+			set so-dl-text[3] = spaces
+			set so-dl-text[4] = spaces
+			set so-dl-text[5] = spaces
+			set so-dl-text[6] = spaces
+			set so-dl-postcode = spaces
+			set lr-delivery-address-id = ws-delivery-address-id
+			do call-address-detail
+			parameters are 	
+				ws-delivery-address-id
+			returning
+				lf-ok
+				lf-message
+				so-dl-text[2]
+				so-dl-text[3]
+				so-dl-text[4]
+				so-dl-text[5]
+				so-dl-postcode				
+			if not lf-ok
+				message lf-message
+				set ws-last-error =  lf-message
+				exit 1
+			endif
+			set so-dl-address-id = str(ws-delivery-address-id)
+			update sales-order-delivery
+			on error
+				message "problem updating sales order delivery record"
+			endon
+		endif
+	end-while
+end-procedure
+
+
+
+
+procedure api-generate-labels 
+returning 
+	lr-consigment-id					type string pic x(20)
+local
+	lf-ok								type boolean
+	lf-message							like ws-last-error
+	get tmp-parcels
+	on error
+		message "No parcels defined"
+		set ws-last-error =  "No parcels defined"
+		exit 1
+	endon
+	do generate-labels
+	returning 
+		lr-consigment-id
+		lf-ok
+		lf-message
+	if not lf-ok
+		set ws-last-error = lf-message
+		exit 1
+	endif
+end-procedure
+
+procedure generate-labels
+returning 
+	lr-consigment-id					type string pic x(20)
+	lr-ok								type boolean
+	lr-message							type string pic x(1024)	
+local
+	lf-url									pic x(1024) type varchar
+	lf-hsnd									type blob
+	lf-bsnd									type blob
+	lf-vsnd									type varchar pic x(16000)
+	lf-vtmp									type varchar pic x(16000)
+//	lf-hrtn									type blob
+	lf-brtn									type blob
+	lf-root									type xml-handle
+	lf-result								type xml-handle
+	lf-result2								type xml-handle
+//	lf-result3								type xml-handle
+//	lf-result4								type xml-handle
+//	lf-result5								type xml-handle
+	lf-response								type string
+	lf-success								type string
+//	lf-ok									type boolean
+	lf-status								type string
+	x										type number
+//	lf-size									pic 9999
+	lf-filename								type string pic x(256)
+	lf-curlname								type string pic x(15)
+	set ws-consignment-id = spaces
+	set lr-ok = true
+	set lf-curlname = str-concat(login-id(),"resp.json")
+	//generate label call.
+	//headers
+	//set lf-hsnd = concat("accept: application/json",ASCII-CHAR(10),"authorization: Bearer ",ws-bearer-token,ASCII-CHAR(10),"client_id: ",ws-client-id,ASCII-CHAR(10),"content-type: application/json") 
+	set lf-hsnd = concat("-H 'accept: application/json', -H 'authorization: Bearer "
+						,ws-bearer-token
+						,"' -H 'client_id: "
+						,ws-client-id
+						,"' -H 'content-type: application/json'") 
+	//body 
+	set lf-vsnd = concat('{"carrier": "'
+						,uppercase(tmp-courier)
+						,'","orientation": "PORTRAIT","format": "PDF","logo_id":"'
+						,ws-logo-id
+						,'",')
+	//sender details
+	set lf-vtmp =  concat('"sender_reference_1": "' ,ws-reference
+							,'","sender_details": {"name": "' ,ws-name
+							,'","phone": "' ,ws-phone
+							,'","email": "' ,ws-email
+							,'","site_code":' ,str(ws-site-id)
+							,'},')
+	string lf-vsnd appending lf-vtmp
+//	set lf-vtmp =  '"paper_dimensions": {"width_cm":15,"height_cm":9,"stationery_size":"A5"},'
+//	set lf-vtmp =  '"paper_dimensions": {"stationery_size":"A5"},'
+//	string lf-vsnd appending lf-vtmp
+	//pickup address
+	set lf-vtmp =  concat('"pickup_address": {"address_id": ',str(ws-pickup-address-id),', "country_code": "NZ"},')
+	string lf-vsnd appending lf-vtmp
+	//sender details
+	set lf-vtmp =  concat('"receiver_details": {"name": "',ws-receiver-name,'"},')
+	string lf-vsnd appending lf-vtmp
+	//delivery address
+	set lf-vtmp =  concat('"delivery_address": {"address_id": '
+		,str(ws-delivery-address-id),', "country_code": "NZ"},"parcel_details": [')
+	string lf-vsnd appending lf-vtmp
+	//build parcel label request
+	set x = 1
+	select * from tmp-parcels
+	detail
+		if x > 1
+			set lf-vtmp =  ","
+			string lf-vsnd appending lf-vtmp
+		endif
+		set x += 1
+		set lf-vtmp =  concat('{"service_code": "'
+								,tmp-service-code
+								,'","return_indicator":"OUTBOUND","description": "'
+								,tmp-type,'",')
+		string lf-vsnd appending lf-vtmp
+//		addons
+		if tmp-addon1 <> spaces
+			set lf-vtmp =  concat('"add_ons": ["',tmp-addon1,'"')
+			string lf-vsnd appending lf-vtmp
+			if tmp-addon2 <> spaces
+				set lf-vtmp =  concat('","',tmp-addon2,'"')
+				string lf-vsnd appending lf-vtmp
+			endif
+			if tmp-addon3 <> spaces
+				set lf-vtmp =  concat('","',tmp-addon2,'"')
+				string lf-vsnd appending lf-vtmp
+			endif
+			if tmp-addon4 <> spaces
+				set lf-vtmp =  concat('","',tmp-addon2,'"')
+				string lf-vsnd appending lf-vtmp
+			endif
+			set lf-vtmp =  '],'
+			string lf-vsnd appending lf-vtmp
+		endif
+		set lf-vtmp =  '"dimensions": {'
+		string lf-vsnd appending lf-vtmp
+		if tmp-envelope = spaces
+			//dimensions
+			set lf-vtmp =  concat('"length_cm": ' ,str(tmp-length)
+									,',"width_cm":' ,str(tmp-width)
+									,',"height_cm": ' ,str(tmp-height)
+									,',"weight_kg": ' ,str(tmp-weight))
+			string lf-vsnd appending lf-vtmp
+		else
+			//envelope
+			set lf-vtmp =  concat('"weight_kg": ',str(tmp-weight))
+			string lf-vsnd appending lf-vtmp
+		endif
+		set lf-vtmp =  '}}'
+		string lf-vsnd appending lf-vtmp
+	end-select
+	set lf-vtmp =  ']}'
+	string lf-vsnd appending lf-vtmp
+	set lf-bsnd = lf-vsnd
+	set x = write-blob-to-file(lf-bsnd,'/tmp/bodysend.json')
+	//complete body
+	set lf-url =  "https://api.nzpost.co.nz/parcellabel/v3/labels/"
+//turn off call-url because of bugs
+/*
+	Shaun:  Really?  What was the problem?
+*/
+/*	call-url lf-url 
+		http-headers lf-hsnd
+		http-body file "/tmp/labelreqbod.json"
+		http-method is 'POST'
+		time-out is 60
+	returning
+			http-header lf-hrtn
+			http-body lf-brtn		
+	on error
+		message "call url failed"
+		set lr-ok = FALSE
+		set lr-message =  "call to url failed"
+		exit
+	endon*/
+//	set lf-hrtn = concat("curl -X POST https://api.nzpost.co.nz/parcellabel/v3/labels/ ",lf-hsnd," -d '",lf-bsnd,"' -o /tmp/curlresp.json")
+//	curl to bypass call-url problem for now
+//	message-box concat("curl -X POST https://api.nzpost.co.nz/parcellabel/v3/labels/ ",lf-hsnd," -d '",lf-bsnd,"' -o /tmp/curlresp.json")
+	command "sh" parameters	are '-c' 					
+		concat("curl -s -X POST https://api.nzpost.co.nz/parcellabel/v3/labels/ ",lf-hsnd," -d '",lf-bsnd,"' -o /tmp/",lf-curlname)
+	open tmp-brtn
+		file is concat("/tmp/",lf-curlname)//'/tmp/curlresp.json'
+	on error 
+		message exit-status
+		set ws-last-error = error-description(exit-status())
+		exit
+	endon
+	set lf-vtmp = spaces
+	select * from tmp-brtn
+	detail
+		string lf-vtmp appending tmp-body
+	end-select
+	set lf-brtn =  lf-vtmp
+	do start-jsontoxml parameters are lf-brtn
+//	report "nzpost testing"
+//		no-message
+//		width 200
+//	do debug-traverse-xml-tree parameters are ws-xml-root 1
+//	report finished
+	close tmp-brtn
+	//remove temp file
+	command "sh" parameters	are '-c' 					
+		concat("rm /tmp/",lf-curlname)
+	//check for errors
+	set lf-root = xml-get-root-node(ws-xml-doc)
+	set lf-result = xml-get-child-by-name(lf-root,"success",spaces)
+	if lf-result = 0
+		set lr-message =  "No success reported on label request"
+		set lf-result2 = xml-get-child-by-name(lf-root,"error",spaces)
+ 		set lf-response = xml-node-text(xml-get-child-by-name(lf-root,"description",spaces))
+		if lf-response <> spaces
+			set lr-message = lf-response
+		endif
+		set lr-ok = false
+		exit
+	else
+		set lf-success = xml-node-text(lf-result)
+		if lf-success = 'false'
+			set lr-message = "Failure reported on label request"
+			set lf-result2 = xml-get-child-by-name(lf-root,"errors",spaces)
+ 			set lf-response = xml-node-text(xml-get-child-by-name(lf-result2,"message",spaces))
+			if lf-response <> spaces
+				set lr-message = lf-response
+			endif
+			set lr-ok = false
+			exit
+		else
+			//found consignment
+			set lf-result2 = xml-get-child-by-name(lf-root,"consignment_id",spaces)
+			set lf-response = xml-node-text(lf-result2)
+			if lf-response = spaces
+				set lr-message = "consigment ID missing"
+				set lr-ok = false
+				exit
+			else
+				set ws-consignment-id = lf-response
+			endif
+		endif
+	endif
+	//poll for status update
+	//
+	do label-status-screen
+		returning lf-status lr-ok lr-message
+	if not lr-ok
+		exit
+	endif
+	do call-label-download
+		returning lr-ok lr-message lf-filename
+	if lr-ok
+			if ws-printername <> spaces
+			command "sh" parameters	are '-c' 	
+				concat("lp -o PageSize=Custom.4x7in -o fitplot -d "
+					,str-concat(ws-printername)
+					, " "
+					, str-concat(get-env('DATADIR')
+					,'/labelfiles/'
+					,lf-filename) )
+				message "printing to: " str-concat(ws-printername) "file: " 
+					str-concat(get-env('DATADIR'),'/labelfiles/',lf-filename)
+		else
+			set lr-message = lf-filename
+			message "label downloaded: " str-concat(get-env('DATADIR'),FILEPATH,lf-filename)
+		endif
+		set lr-consigment-id = ws-consignment-id
+	endif
+end-procedure
+
+procedure label-status-screen
+window @10,16 to @22,68
+	no-hide
+	title 'Waiting for label status'
+returning
+	lr-status					type string
+	lr-ok						type boolean
+	lr-message					type string pic x(1024)
+local 
+	lf-status					type string
+	lf-start-time				type date-time
+	display "Checking status - In Progress" @11,29 bold prompt
+	box @12,17 to @14,67
+	display "Consigment:" @13,19 background prompt
+	display ws-consignment-id @13,38 foreground prompt
+	box @15,17 to @19,67
+	//
+	display "Progress" @16,38 bold background prompt
+	set lr-status = spaces
+	//loop to get status
+	set lf-start-time = gmt()
+	while lr-status = spaces
+		do call-label-status
+			returning lf-status lr-ok lr-message
+	display "Loaded" @16,61 bold background prompt
+	if uppercase(lf-status) in { 'PROCESSING' 'ACCEPTED' SPACES }
+		display "In Progress" @17,38 color red on silver prompt
+	endif
+	if uppercase(lf-status) = 'COMPLETE'
+		display "Complete" @17,38 color red on silver prompt
+		set lr-status = 'COMPLETE'
+	endif
+	if uppercase(lf-status) = 'FAILED'
+		display "Failed" @17,38 color red on silver prompt
+		set lr-status = 'FAILED'
+		pause
+	endif
+	if lf-start-time < gmt() - 30
+		set lr-status = 'TIMEOUT'
+	endif
+	end-while
+end-procedure
+
+procedure call-label-status
+//make sure ws-consigment-id is set
+returning
+	lr-status								type string
+	lr-ok									type boolean
+	lr-message								type string pic x(1024)
+local
+	lf-url									pic x(1024) type varchar
+	lf-hsnd									type blob
+	lf-hrtn									type blob
+	lf-brtn									type blob
+	lf-root									type xml-handle
+	lf-result								type xml-handle
+	lf-result2								type xml-handle
+//	lf-result3								type xml-handle
+	lf-result4								type xml-handle
+//	lf-result5								type xml-handle
+	lf-response								type string
+	lf-success								type string
+	lf-ok									type boolean
+	x										type number
+	set lr-ok = true
+	set lf-url =  "https://api.nzpost.co.nz/parcellabel/v3/labels/"
+	string lf-url appending str-concat(ws-consignment-id)
+	string lf-url appending '/status'
+	//message-box lf-url
+	//set  lf-hsnd = concat("Authorization:Bearer ", ws-bearer-token,",","client_id:622d5e237ed94f4eb10ab42b2b0c9c1f",",","Accept:application/json")
+	set  lf-hsnd = concat("Authorization:Bearer ",ws-bearer-token,ASCII-CHAR(10),"client_id:",ws-client-id)
+	//message-box lf-hsnd
+	call-url lf-url 
+	http-headers are lf-hsnd
+		http-method is "GET"
+		returning http-body in lf-brtn
+			http-headers in lf-hrtn
+	on error
+		set x = write-blob-to-file(lf-hsnd,'/tmp/statusheadsend.json')
+		set x = write-blob-to-file(lf-brtn,'/tmp/statusresponse.json')
+		message "call url failed"
+		set lr-ok = FALSE
+		set lr-message =  "call to url failed"
+		exit
+	endon
+	do start-jsontoxml parameters are lf-brtn	
+	set lf-root = xml-get-root-node(ws-xml-doc)
+	//check for error
+	set lf-result = xml-get-child-by-name(lf-root,"consignment_status",spaces)
+	if lf-result = 0
+		set lr-message =  "No consignment status"
+		set lf-result2 = xml-get-child-by-name(lf-root,"error",spaces)
+ 		set lf-response = xml-node-text(xml-get-child-by-name(lf-root,"description",spaces))
+		if lf-response <> spaces
+			set lr-message = lf-response
+		endif
+		set lr-ok = false
+		exit
+	else
+		set lf-success = xml-node-text(lf-result)
+		if lf-success = 'Failed'
+			set lr-message = "Consigment failed"
+			set lf-result2 = xml-get-child-by-name(lf-root,"errors",spaces)
+ 			set lf-response = xml-node-text(xml-get-child-by-name(lf-result2,"message",spaces))
+			if lf-response <> spaces
+				set lr-message = lf-response
+			endif
+			set lr-ok = false
+			exit
+		else
+			if lf-success in ("Processing" "Accepted")
+				set lr-status = "PROCESSING"
+				set lr-ok = false
+				exit
+			elseif lf-success in ('Complete' 'Complete with warnings')
+				//get tracking numbers
+				set lf-ok = false
+				set lf-result4 = xml-get-child-by-name(lf-root,"labels",spaces)
+				open tmp-tracking temporary truncate
+				while lf-ok = false
+					if lf-result4 = 0
+						break
+					endif
+					if  xml-node-text(xml-get-child-by-name(lf-result4,"tracking_reference",spaces)) <> spaces
+						initialise tmp-tracking
+						set tmp-consignment-id = ws-consignment-id
+						set tmp-tracking-num = xml-node-text(xml-get-child-by-name(lf-result4,"tracking_reference",spaces))
+						insert tmp-tracking
+						on error
+						endon
+					end-if
+					set lf-result4 = XML-NEXT-ELEMENT-SIBLING(lf-result4)
+					end-while
+				//end tracking
+				set lr-status = "COMPLETE"
+				set lr-ok = true
+				exit
+			else
+				set lr-status = "FAILED"
+				set lr-ok = false
+				exit
+			endif
+		endif
+	endif
+end-procedure
+
+procedure call-label-download
+//make sure ws-consigment-id is set
+returning
+	lr-ok									type boolean
+	lr-message								type string pic x(1024)
+	lr-filename								type string pic x(64)
+local
+	lf-url									pic x(1024) type varchar
+	lf-hsnd									type blob
+	lf-hrtn									type blob
+//	lf-brtn									type blob
+//	lf-root									type xml-handle
+//	lf-result								type xml-handle
+//	lf-result2								type xml-handle
+//	lf-result3								type xml-handle
+//	lf-result4								type xml-handle
+//	lf-result5								type xml-handle
+//	lf-response								type string
+//	lf-success								type string
+//	lf-ok									type boolean
+//	x										type number
+	lf-fullfilepath							type string pic x(1024)
+	set lr-ok = true
+	set lr-filename = str-concat("nzpost_labels_",ws-consignment-id,".pdf")
+	set lf-fullfilepath = str-concat(get-env('DATADIR'),'/labelfiles/',lr-filename)
+	set lf-url =  "https://api.nzpost.co.nz/parcellabel/v3/labels/"
+	string lf-url appending str-concat(ws-consignment-id)
+	string lf-url appending '?format=PDF'
+	//message-box lf-url
+	//set  lf-hsnd = concat("Authorization:Bearer ", ws-bearer-token,",","client_id:622d5e237ed94f4eb10ab42b2b0c9c1f",",","Accept:application/json")
+	set  lf-hsnd = concat("Authorization:Bearer ",ws-bearer-token,ASCII-CHAR(10),"client_id:",ws-client-id)
+	//message-box lf-hsnd
+	call-url lf-url 
+	http-headers are lf-hsnd
+		http-method is "GET"
+		returning http-body in file lf-fullfilepath
+			http-headers in lf-hrtn
+	on error
+		message "call url failed"
+		set lr-ok = FALSE
+		set lr-message =  "call to url failed"
+		exit
+	endon
+		command "sh" parameters	are '-c' 					
+		concat("cp ", lf-fullfilepath ," /tmp")
+	//message-box lf-hrtn
+end-procedure
+
+procedure get-parcel-service-codes
+	parameters are 
+		lp-parcel-id like tmp-parcel-id
+		lp-default-code like tmp-service-code
+	local
+	lf-addon1					PIC X
+	lf-addon2					PIC X
+	lf-addon3					PIC X
+	lf-addon4					PIC X
+	lf-ok type boolean
+	lf-message								type string pic x(1024)
+	lf-count type number
+	get tmp-parcels 
+		on index tmp-parcel-id
+		key is lp-parcel-id
+		lock
+	on error
+		exit
+	endon
+	//get service codes
+	open tmp-service-codes temporary truncate
+	do call-shipping-options
+		parameters are lp-parcel-id
+		returning lf-ok lf-message lf-count
+	//stf testing fake entries 
+	if not lf-ok
+		message lf-message
+		exit
+	endif
+	/*
+	initialise tmp-service-codes
+	set tmp-srv-service-code = "CPOLE"
+	set tmp-srv-courier = 'CourierPost'
+	set tmp-srv-description = "CP Online Economy"
+	set tmp-srv-addon1 = "CPSR"
+	set tmp-srv-addon1d = "CP Online Sig Rq"
+	set tmp-srv-addon2 = "CPOLRD"
+	set tmp-srv-addon2d = "CP Online Rural Delivery"
+	insert tmp-service-codes
+	initialise tmp-service-codes
+	set tmp-srv-service-code = "CPOLP"
+	set tmp-srv-courier = 'CourierPost'
+	set tmp-srv-description = "CP Online Parcel"	
+	set tmp-srv-addon1 = "CPSR"
+	set tmp-srv-addon1d = "CP Online Sig Rq"
+	set tmp-srv-addon2 = "CPOLRD"
+	set tmp-srv-addon2d = "CP Online Rural Delivery"
+	insert tmp-service-codes
+	*/
+	//stf end fake codes
+	do choose-service-code
+	parameters are 
+		lp-default-code
+	returning 
+		tmp-service-code
+		lf-addon1
+		lf-addon2
+		lf-addon3
+		lf-addon4
+	if tmp-service-code = spaces
+		message "Service code must be selected"
+		do choose-service-code
+			parameters are lp-default-code
+			returning tmp-service-code lf-addon1 lf-addon2 lf-addon3 lf-addon4
+	endif
+	if tmp-service-code = spaces
+		message "no service code selected"
+		exit
+	endif
+	get tmp-service-codes 
+		on index tmp-srv-service-code
+		key is tmp-service-code
+	on error
+	endon
+	if lf-addon1 = 'Y'
+		set tmp-addon1 = tmp-srv-addon1
+	endif
+	if lf-addon2 = 'Y'
+		set tmp-addon2 = tmp-srv-addon1
+	endif
+	if lf-addon3 = 'Y'
+		set tmp-addon3 = tmp-srv-addon1
+	endif
+	if lf-addon4 = 'Y'
+		set tmp-addon4 = tmp-srv-addon1
+	endif
+	set tmp-courier = tmp-srv-courier
+// stf add pace function
+//	if tmp-courier = 'Pace'
+//		do get-pace-number
+//		parameters are tmp-service-code
+//		returning tmp-pace-number
+//	endif
+	//set tmp-service-code = 'CPOLP'
+	//set tmp-courier = 'CourierPost'
+	//set tmp-addon1 = 'CPSR'
+	update tmp-parcels
+	on error		
+		message 'Problem updating parcel courier details'
+	endon
+end-procedure
+
+screen choose-service-code
+parameters are
+		lp-default-code like tmp-service-code
+form-entry 
+	returning
+		lr-service-code					like tmp-srv-service-code
+		lr-addon1						PIC X
+		lr-addon2						PIC X
+		lr-addon3						PIC X
+		lr-addon4						PIC X
+	window @1,1 to @9,90
+	title is "NZPost Service Codes"
+	allowed  entry
+before
+	if lp-default-code = spaces
+		get tmp-service-codes
+			on index tmp-srv-index 
+			key is 1
+		on error
+		endon
+	else
+		get tmp-service-codes
+		on index tmp-srv-service-code 
+		key is lp-default-code
+		on error
+			get tmp-service-codes
+				on index tmp-srv-index 
+				key is 1
+			on error
+			endon
+		endon
+	endif
+	set lr-service-code = tmp-srv-service-code
+detail
+	accept lr-service-code @2,20
+		title "Service Code"
+		default lr-service-code
+	on help-key 
+		do help-screen-service-code
+		returning lr-service-code
+		reenter
+	end-on
+	on change
+		if lr-service-code <> space
+			get tmp-service-codes on index tmp-srv-service-code key is lr-service-code
+			on error
+				message "not found"
+			endon
+		endif
+	endon
+	display 'Addons' @3,20
+	//	title "Description"	
+	accept lr-addon1  @4,20
+	title tmp-srv-addon1d
+	default 'Y'
+	help 'Use this addon, Y or N'
+	validations
+		if lr-addon1 not in ('Y',SPACES,'N')
+			reenter
+		endif
+	end-validations
+	accept lr-addon2 @5,20
+	title tmp-srv-addon2d
+	help 'Use this addon, Y or N'
+	validations
+		if lr-addon2 not in ('Y',SPACES,'N')
+			reenter
+		endif
+	end-validations
+	accept lr-addon3 @6,20
+	title tmp-srv-addon3d
+	help 'Use this addon, Y or N'
+	validations
+		if lr-addon3 not in ('Y',SPACES,'N')
+			reenter
+		endif
+	end-validations
+	accept lr-addon4 @7,20
+	title tmp-srv-addon4d
+	help 'Use this addon, Y or N'
+	validations
+		if lr-addon4 not in ('Y',SPACES,'N')
+			reenter
+		endif
+	end-validations
+confirm auto
+confirmed
+	if screenmode() = entry
+		set lr-service-code = tmp-srv-service-code
+		exit
+	endif
+not-confirmed
+		set lr-service-code = spaces
+end-confirm
+end-screen
+
+screen help-screen-service-code
+	returning
+		lr-service-code						type string
+	window @1,1 to @16,50
+	title is 'Select Service Code'
+	allowed  md-select search
+	select * from tmp-service-codes order by tmp-srv-index
+	datagrid occurs 6
+	review-from-start
+detail
+	display tmp-srv-service-code @1,1 pic x(10) title 'Code'
+	display tmp-srv-description @1,2 pic x(50) title SPACES
+	display tmp-srv-index @1,3 pic 99 title 'Index'
+	confirm auto
+	confirmed
+		if screenmode() = md-select
+			
+			set lr-service-code = tmp-srv-service-code
+			exit
+		endif
+	endconfirm
+endscreen //help-screen-manual ----------------------------------------------------------
+
+screen get-parcels 
+	window @1,1 to @15,90
+	title is "Consigment Packages"
+	allowed  entry correct remove
+	datagrid occurs 10
+	primary tmp-parcels
+local 
+	lf-parcel-id like tmp-parcel-id
+	lf-code like tmp-service-code
+before
+	select lf-parcel-id = max(tmp-parcel-id) from tmp-parcels
+	endselect	
+detail
+	if screenmode() = entry
+		set lf-parcel-id += 1
+		set tmp-parcel-id = lf-parcel-id
+	endif
+	accept tmp-type @1,1 pic x(10)
+		title 'Parcel Type'
+		default tmp-type
+		uppercase
+	on help-key 
+		do help-screen-parcel-type
+		returning tmp-type
+		reenter tmp-type
+	end-on
+	validations
+		if tmp-type in ('A4','A4B','A5','A5B','DL','FS','LF','CDL','CA5','CFS','XL')
+			set tmp-envelope = tmp-type
+			set tmp-length = 0
+			set tmp-width = 0
+			set tmp-height = 0
+		elseif tmp-type <> space
+			set tmp-envelope = spaces
+			get system-user-only-table 
+				on index suot-tbl-type suot-tbl-code
+				key is 'NZPTYPE' tmp-type
+			on error
+				reenter
+			else
+				set tmp-length = suot-numeric1
+				set tmp-width = suot-numeric2
+				set tmp-height = suot-numeric3
+				set lf-code = suot-alpha-20-1
+			endon
+		else
+			reenter
+		endif
+	end-validations
+	accept tmp-length @1,3  pic zzzzzzzz9.9
+		default tmp-length
+		title 'Length (cm)'
+		when tmp-envelope = spaces
+		show-value
+	accept tmp-width @1,5  pic zzzzzzzz9.9
+		default tmp-width
+		title 'Width (cm)'
+		when tmp-envelope = spaces
+		show-value
+	accept tmp-height @1,6  pic zzzzzzzz9.9
+		default tmp-height
+		title 'Height (cm)'
+		when tmp-envelope = spaces
+		show-value
+	accept tmp-weight @1,7  pic zzzzzzzz9.9
+		default tmp-weight
+		title 'Weight (kg)'
+		disallow 0
+	display tmp-service-code @1,8 title 'Service Code'
+confirm auto
+confirmed
+	if screenmode() = entry or screenmode() = correct
+		do get-parcel-service-codes
+			parameters are tmp-parcel-id lf-code
+		if tmp-service-code = spaces
+			reenter
+		endif	
+
+	endif
+end-confirm
+end-screen
+
+screen help-screen-parcel-type
+	returning
+		lr-parcel-type						like tmp-type
+	window @1,1 to @16,50
+	title is 'Select Parcel Type'
+	allowed md-select search
+	select * from system-user-only-table where suot-tbl-type = "NZPTYPE"
+		order by suot-numeric1 desc, suot-description
+	datagrid occurs 12
+	review-from-start
+before
+	get system-user-only-table 
+		on index suot-tbl-type
+		key is 'NZPTYPE'
+detail
+	display suot-tbl-code @1,1 pic x(10) title 'Type'
+	display suot-description @1,2 pic x(50) title SPACES
+	display suot-numeric1 @1,3 pic 999.99 title 'Length'
+	display suot-numeric2 @1,4 pic 999.99 title 'Width'
+	display suot-numeric3 @1,5 pic 999.99 title 'Height'
+	confirm auto
+	confirmed
+		if screenmode() = md-select
+			set lr-parcel-type = suot-tbl-code
+			exit
+		endif
+	endconfirm
+endscreen //help-screen-manual ----------------------------------------------------------
+
+procedure get-address
+//first param search empty to use name-address-master address
+parameters are
+	lp-search-string					type string pic x(256)
+	lp-accountcode						like accountcode
+	lp-na-type							like na-type
+local
+//	lf-addon1							PIC X
+//	lf-addon2							PIC X
+//	lf-addon3							PIC X
+//	lf-addon4							PIC X
+	lf-ok								type boolean
+	lf-message							type string pic x(1024)
+	lf-count							type number
+	//get service codes  
+	do call-address-suggest
+		parameters are lp-search-string
+		returning lf-ok lf-message lf-count
+	if not lf-ok
+		exit 1
+	endif
+	do choose-address
+		returning ws-delivery-address-id
+	if ws-delivery-address-id = 0	
+		do choose-address
+			returning ws-delivery-address-id
+	endif
+	if ws-delivery-address-id = 0
+		exit
+	endif
+end-procedure
+
+
+screen enter-search-string
+parameters 
+	lp-search-string					type string pic x(256)
+returning
+	lr-search-string					type string pic x(256)
+	window @1,1 to @6,90
+		title is "Enter/edit Address search string"
+	allowed  entry
+	form-entry 
+before
+	set lr-search-string = lp-search-string
+detail
+	accept lr-search-string @2,20 pic X(50)
+		title 'Search string'
+		default lr-search-string
+	confirm auto
+	confirmed
+		if screenmode() = entry
+			exit
+		endif
+	not-confirmed
+		set lr-search-string = lp-search-string
+	end-confirm
+end-screen
+
+screen choose-address
+local 
+	lf-full-address						like tmp-full-address
+returning
+	lr-address-id						like ws-delivery-address-id
+	form-entry 
+	window @1,1 to @6,90
+	title is "NZPost Suggested Addresses"
+	allowed  entry
+before
+	set lr-address-id = 0
+	get tmp-addresses
+		first
+	on error
+	//	message "No Addresses found"
+		exit	
+	endon
+	set lr-address-id = tmp-address-id
+detail
+	accept lr-address-id @2,20 pic 9999999999
+		title 'Address ID'
+		default lr-address-id
+	on help-key 
+		do help-screen-address
+		returning lr-address-id,lf-full-address
+		Display lf-full-address @ 3,20 pic x(50)
+		reenter
+	end-on
+	on change
+		if lr-address-id <> 0
+		Display lf-full-address @ 3,20 pic x(50)
+		endif
+	endon
+	before-accept
+		Display tmp-full-address @ 3,20 pic x(50)
+	end-before-accept
+	confirm auto
+	confirmed
+		if screenmode() = entry
+			exit
+		endif
+	not-confirmed
+		set lr-address-id = 0
+	end-confirm
+end-screen
+
+screen help-screen-address
+	returning
+		lr-address-id						like ws-delivery-address-id
+		lr-full-address						like tmp-full-address
+	window @1,1 to @16,50
+	title is 'Select Address'
+	allowed  md-select search
+	select * from tmp-addresses
+	datagrid occurs 6
+	review-from-start
+detail
+	display tmp-address-id @1,1 pic 9999999999 title 'ID'
+	display tmp-full-address @1,2 pic x(50) title SPACES
+	confirm auto
+	confirmed
+		if screenmode() = md-select
+		//	message "address selected: " tmp-address-id ": " tmp-full-address
+			set lr-full-address = tmp-full-address
+			set lr-address-id = tmp-address-id
+			exit
+		endif
+	endconfirm
+endscreen //help-screen-manual ----------------------------------------------------------
+
+procedure get-company-codes
+returning 
+	lr-okay								type boolean
+	set lr-okay = true
+//source essential information from suot tables as required
+	get system-user-only-table
+	on index suot-tbl-type suot-tbl-code
+	key is "NZPOST" "SITEID"
+	on error
+		message "Company site id must be set"
+		set lr-okay = false
+	else
+		set ws-site-id = num(suot-description)
+	endon
+	get system-user-only-table
+	on index suot-tbl-type suot-tbl-code
+	key is "NZPOST" "ADDRESSID"
+	on error
+		message "Company address id must be set"
+		set lr-okay = false
+	else
+		set ws-pickup-address-id = num(suot-description)
+	endon
+	get system-user-only-table
+	on index suot-tbl-type suot-tbl-code
+	key is "NZPOST" "CLIENTID"
+	on error
+		message "Company client id must be set"
+		set lr-okay = false
+	else
+		set ws-client-id = suot-description
+	endon	
+	get system-user-only-table
+	on index suot-tbl-type suot-tbl-code
+	key is "NZPOST" "SECRET"
+	on error
+		message "Company secret key must be set"
+		set lr-okay = false
+	else
+		set ws-secret-key = suot-description
+	endon
+	get system-user-only-table
+	on index suot-tbl-type suot-tbl-code
+	key is "NZPOST" "NAME"
+	on error
+		message "Company name must be set"
+		set lr-okay = false
+	else
+		set ws-name = suot-description
+	endon	
+	get system-user-only-table
+	on index suot-tbl-type suot-tbl-code
+	key is "NZPOST" "PHONE"
+	on error
+		message "Company phone must be set"
+		set lr-okay = false
+	else
+		set ws-phone = suot-description
+	endon
+	get system-user-only-table
+	on index suot-tbl-type suot-tbl-code
+	key is "NZPOST" "LOGOID"
+	on error
+	else
+		set ws-logo-id = suot-description
+	endon
+	get system-user-only-table
+	on index suot-tbl-type suot-tbl-code
+	key is "NZPOST" "EMAIL"
+	on error
+			set ws-email = spaces
+	else
+		set ws-email = suot-description
+	endon
+	get system-user-only-table
+	on index suot-tbl-type suot-tbl-code
+	key is "NZPOST" "PRINTER"
+	on error
+		set ws-printername = spaces
+	else
+		set ws-printername = suot-description
+	endon
+//	testing override
+//	set ws-pickup-address-id = 373956
+//	set ws-client-id = '622d5e237ed94f4eb10ab42b2b0c9c1f'
+//	set ws-secret-key = 'e88d660532814b888BD8542392529145'
+//	set ws-name = "CSL Ltd"
+//	set ws-phone = "09 928 1000"
+//	set ws-logo-id = "0EB676B0-4A26-4038-9A3D-2055EB8E0032"
+end-procedure
+
+//api calls
+
+procedure call-shipping-options
+//MAKE SURE YOU HAVE CURRENCY ON tmp-parcels
+parameters are 
+	lp-parcel-id						like tmp-parcel-id
+returning
+	lr-ok								type boolean
+	lr-message							type string pic x(1024)
+	lr-result-count						type number
+local
+	lf-url								pic x(1024) type varchar
+	lf-hsnd								type blob
+	lf-hrtn								type blob
+	lf-brtn								type blob
+	lf-root								type xml-handle
+	lf-result							type xml-handle
+	lf-result2							type xml-handle
+	lf-result3							type xml-handle
+	lf-result4							type xml-handle
+//	lf-result5							type xml-handle
+	lf-response							type string
+	lf-success							type string
+	lf-ok								type boolean
+	x									type number
+	lf-index							type number
+//	message tmp-envelope ":" tmp-weight ":" str(ws-pickup-address-id) ":"  str(ws-delivery-address-id)
+	set lr-ok = true
+	set lf-url =  "https://api.nzpost.co.nz/shippingoptions/2.0/domestic?"
+	if tmp-envelope <> spaces
+		string lf-url appending str-concat("envelope_size=", tmp-envelope)
+	else
+		string lf-url appending str-concat("weight=",str(tmp-weight))
+		string lf-url appending str-concat("&length=",str(tmp-length))
+		string lf-url appending str-concat("&width=",str(tmp-width))
+		string lf-url appending str-concat("&height=",str(tmp-height))
+	endif
+	string lf-url appending str-concat("&pickup_address_id=" str(ws-pickup-address-id))
+	string lf-url appending str-concat("&delivery_address_id=" str(ws-delivery-address-id))
+	//message-box lf-url
+	//set  lf-hsnd = concat("Authorization:Bearer ", ws-bearer-token,",","client_id:622d5e237ed94f4eb10ab42b2b0c9c1f",",","Accept:application/json")
+	set  lf-hsnd = concat("Authorization:Bearer "
+							,ws-bearer-token
+							,ASCII-CHAR(10)
+							,"Accept:application/json"
+							,ASCII-CHAR(10)
+							,"client_id:"
+							,ws-client-id)
+	//message-box lf-hsnd
+	call-url lf-url 
+	http-headers are lf-hsnd
+		http-method is "GET"
+		returning http-body in lf-brtn
+			http-headers in lf-hrtn
+	on error
+		message "call url failed"
+		set lr-ok = FALSE
+		set lr-message =  "call to url failed"
+		exit
+	endon
+	do start-jsontoxml parameters are lf-brtn
+//	report "nzpost testing"
+//		no-message
+//		width 200
+//	do debug-traverse-xml-tree parameters are ws-xml-root 1
+//	report finished
+	set lf-root = xml-get-root-node(ws-xml-doc)
+//	message  xml-node-name(lf-root)
+	//check for error
+	set lf-result = xml-get-child-by-name(lf-root,"success",spaces)
+	if lf-result = 0
+		set lr-message =  "No root success"
+		set lf-result2 = xml-get-child-by-name(lf-root,"error",spaces)
+ 		set lf-response = xml-node-text(xml-get-child-by-name(lf-root,"description",spaces))
+		if lf-response <> spaces
+			set lr-message = lf-response
+		endif
+		set lr-ok = false
+		exit
+	else
+		set lf-success = xml-node-text(lf-result)
+		if lf-success = 'false'
+			set lr-message = "false success"
+			set lf-result2 = xml-get-child-by-name(lf-root,"errors",spaces)
+ 			set lf-response = xml-node-text(xml-get-child-by-name(lf-result2,"message",spaces))
+			if lf-response <> spaces
+				set lr-message = lf-response
+			endif
+			set lr-ok = false
+			exit
+		else
+			set lf-result2 = xml-get-child-by-name(lf-root,"services",spaces)
+			set lf-ok = false
+			//process returns
+			set lf-index = 1
+			while lf-ok = false
+				if lf-result2 = 0
+				//	message "no more services"
+					set lf-response = spaces
+					break
+				endif
+				set lf-result3 = xml-get-child-by-name(lf-result2,"service_code",spaces)
+				if lf-result3 <> 0
+				//	message "service code found:" xml-node-text(lf-result3)	
+					//get code details
+					if uppercase(xml-node-text(xml-get-child-by-name(lf-result2,"carrier",spaces))) = 'PACE'
+						set lf-result2 = XML-NEXT-ELEMENT-SIBLING(lf-result2)
+						continue
+					endif
+					initialise tmp-service-codes
+					set tmp-srv-index = lf-index
+					set lf-index += 1
+					set tmp-srv-service-code = xml-node-text(lf-result3)
+					set tmp-srv-courier = xml-node-text(xml-get-child-by-name(lf-result2,"carrier",spaces))
+					set tmp-srv-description = xml-node-text(xml-get-child-by-name(lf-result2,"description",spaces))
+					set x = 1
+					set lf-result4 = xml-get-child-by-name(lf-result2,"addons",spaces)
+					while lf-ok = false
+						if lf-result4 = 0
+							break
+						endif
+						if x = 1
+							set tmp-srv-addon1 = xml-node-text(xml-get-child-by-name(lf-result4,"addon_code",spaces))
+							set tmp-srv-addon1d = xml-node-text(xml-get-child-by-name(lf-result4,"description",spaces))
+						elseif x = 2
+							set tmp-srv-addon2 = xml-node-text(xml-get-child-by-name(lf-result4,"addon_code",spaces))
+							set tmp-srv-addon2d = xml-node-text(xml-get-child-by-name(lf-result4,"description",spaces))
+						elseif x = 3
+							set tmp-srv-addon3 = xml-node-text(xml-get-child-by-name(lf-result4,"addon_code",spaces))
+							set tmp-srv-addon3 = xml-node-text(xml-get-child-by-name(lf-result4,"description",spaces))
+						else
+							set tmp-srv-addon4 = xml-node-text(xml-get-child-by-name(lf-result4,"addon_code",spaces))
+							set tmp-srv-addon4d = xml-node-text(xml-get-child-by-name(lf-result4,"description",spaces))
+						endif
+						set x += 1
+						set lf-result4 = XML-NEXT-ELEMENT-SIBLING(lf-result4)
+					end-while
+					insert tmp-service-codes
+				endif
+			set lf-result2 = XML-NEXT-ELEMENT-SIBLING(lf-result2)
+			end-while
+		endif
+	endif
+end-procedure
+
+procedure call-address-suggest
+parameters are 
+	lp-search-string					type string pic x(256)
+returning
+	lr-ok								type boolean
+	lr-message							type string pic x(1024)
+	lr-result-count						type number
+local
+	lf-url								pic x(1024) type varchar
+	lf-hsnd								type blob
+	lf-hrtn								type blob
+	lf-brtn								type blob
+	lf-root								type xml-handle
+	lf-result							type xml-handle
+	lf-result2							type xml-handle
+	lf-result3							type xml-handle
+//	lf-result4							type xml-handle
+//	lf-result5							type xml-handle
+	lf-response							type string
+	lf-success							type string
+	lf-ok								type boolean
+	x									type number
+	open tmp-addresses temporary truncate
+	set lr-ok = true
+	set lf-url =  "https://api.nzpost.co.nz/parceladdress/2.0/domestic/addresses?"
+	string lf-url appending str-concat("q=", lp-search-string)
+	string lf-url appending str-concat("&count=5")
+//	message-box lf-url
+	//set  lf-hsnd = concat("Authorization:Bearer ", ws-bearer-token,",","client_id:622d5e237ed94f4eb10ab42b2b0c9c1f",",","Accept:application/json")
+	set  lf-hsnd = concat("accept:application/json"
+						,ASCII-CHAR(10)
+						,"authorization:Bearer "
+						,ws-bearer-token,)
+	call-url lf-url 
+	http-headers are lf-hsnd
+		http-method is "GET"
+		returning http-body in lf-brtn
+			http-headers in lf-hrtn
+	on error
+		message "call url failed"
+		set lr-ok = FALSE
+		set lr-message =  "call to url failed"
+		exit
+	endon
+	do start-jsontoxml parameters are lf-brtn
+	
+//	report "nzpost address testing"
+//		no-message
+//		width 200
+//	do debug-traverse-xml-tree parameters are ws-xml-root 1
+//	report finished
+	set lr-result-count = 0
+	set x = 0
+	set lf-root = xml-get-root-node(ws-xml-doc)
+//	message  xml-node-name(lf-root)
+	//check for error
+	set lf-result = xml-get-child-by-name(lf-root,"success",spaces)
+	if lf-result = 0
+		set lr-message =  "No root success"
+		set lf-result2 = xml-get-child-by-name(lf-root,"error",spaces)
+ 		set lf-response = xml-node-text(xml-get-child-by-name(lf-root,"description",spaces))
+		if lf-response <> spaces
+			set lr-message = lf-response
+		endif
+		set lr-ok = false
+		exit
+	else
+		set lf-success = xml-node-text(lf-result)
+		if lf-success = 'false'
+			set lr-message = "false success"
+			set lf-result2 = xml-get-child-by-name(lf-root,"errors",spaces)
+ 			set lf-response = xml-node-text(xml-get-child-by-name(lf-result2,"message",spaces))
+			if lf-response <> spaces
+				set lr-message = lf-response
+			endif
+			set lr-ok = false
+			exit
+		else
+			set lf-result2 = xml-get-child-by-name(lf-root,"addresses",spaces)
+			set lf-ok = false
+			//process returns
+			while lf-ok = false
+				if lf-result2 = 0
+				//	message "no more services"
+					set lf-response = spaces
+					break
+				endif
+				set lf-result3 = xml-get-child-by-name(lf-result2,"address_id",spaces)
+				if lf-result3 <> 0
+				//	message "service code found:" xml-node-text(lf-result3)	
+					//get code details
+					initialise tmp-addresses
+					set tmp-address-id = num(xml-node-text(lf-result3))
+					set tmp-full-address = xml-node-text(xml-get-child-by-name(lf-result2,"full_address",spaces))
+					set x += 1
+					set tmp-address-index = x
+					insert tmp-addresses
+				endif
+			set lf-result2 = XML-NEXT-ELEMENT-SIBLING(lf-result2)
+		end-while
+	endif
+	endif
+	set lr-result-count = x
+end-procedure
+
+procedure call-address-detail
+parameters are 
+	lp-address-id						like ws-delivery-address-id
+returning
+	lr-ok								type boolean
+	lr-message							type string pic x(1024)
+	lr-na-company						like na-company
+	lr-na-street						like na-street
+	lr-na-suburb						like na-suburb
+	lr-na-country						like na-country
+	lr-na-postcode						like postcode
+local
+	lf-url								pic x(1024) type varchar
+	lf-hsnd								type blob
+	lf-hrtn								type blob
+	lf-brtn								type blob
+	lf-root								type xml-handle
+	lf-result							type xml-handle
+	lf-result2							type xml-handle
+	lf-result3							type xml-handle
+//	lf-result4							type xml-handle
+//	lf-result5							type xml-handle
+	lf-response							type string
+	lf-success							type string
+	lf-ok								type boolean
+//	x									type number
+	set lr-ok = true
+	set lf-url =  "https://api.nzpost.co.nz/parceladdress/2.0/domestic/addresses/"
+
+		string lf-url appending str(lp-address-id)
+//	message-box lf-url
+	//set  lf-hsnd = concat("Authorization:Bearer ", ws-bearer-token,",","client_id:622d5e237ed94f4eb10ab42b2b0c9c1f",",","Accept:application/json")
+	set  lf-hsnd = concat("Authorization:Bearer "
+							,ws-bearer-token
+							,ASCII-CHAR(10)
+							,"Accept:application/json"
+							,ASCII-CHAR(10)
+							,"client_id:"
+							,ws-client-id)
+	//message-box lf-hsnd
+	call-url lf-url 
+	http-headers are lf-hsnd
+		http-method is "GET"
+		returning http-body in lf-brtn
+			http-headers in lf-hrtn
+	on error
+		message "call url failed"
+		set lr-ok = FALSE
+		set lr-message =  "call to url failed"
+		exit
+	endon
+	do start-jsontoxml parameters are lf-brtn
+//	report "nzpost address detail testing"
+//		no-message
+//		width 200
+//	do debug-traverse-xml-tree parameters are ws-xml-root 1
+//	report finished
+	set lf-root = xml-get-root-node(ws-xml-doc)
+	//check for error
+	set lf-result = xml-get-child-by-name(lf-root,"success",spaces)
+	if lf-result = 0
+		set lr-message =  "No root success"
+		set lf-result2 = xml-get-child-by-name(lf-root,"error",spaces)
+ 		set lf-response = xml-node-text(xml-get-child-by-name(lf-root,"description",spaces))
+		if lf-response <> spaces
+			set lr-message = lf-response
+		endif
+		set lr-ok = false
+		exit
+	else
+		set lf-success = xml-node-text(lf-result)
+		if lf-success = 'false'
+			set lr-message = "false success"
+			set lf-result2 = xml-get-child-by-name(lf-root,"errors",spaces)
+ 			set lf-response = xml-node-text(xml-get-child-by-name(lf-result2,"message",spaces))
+			if lf-response <> spaces
+				set lr-message = lf-response
+			endif
+			set lr-ok = false
+			exit
+		else
+			set lf-result2 = xml-get-child-by-name(lf-root,"address",spaces)
+			set lf-ok = false
+			//process returns
+			while lf-ok = false
+				if lf-result2 = 0
+				//	message "no more services"
+					set lf-response = spaces
+					break
+				endif
+				set lf-result3 = xml-get-child-by-name(lf-result2,"address_id",spaces)
+				if lf-result3 <> 0
+				//	message "service code found:" xml-node-text(lf-result3) 	
+					//get code details
+					if xml-node-text(xml-get-child-by-name(lf-result2,"unit_type",spaces)) <> spaces
+						set lr-na-company =  concat (
+								xml-node-text(xml-get-child-by-name(lf-result2,"unit_type",spaces))
+								," "
+								,xml-node-text(xml-get-child-by-name(lf-result2,"unit_value",spaces))
+								,", "
+								,xml-node-text(xml-get-child-by-name(lf-result2,"street_number",spaces))
+								,xml-node-text(xml-get-child-by-name(lf-result2,"street_alpha",spaces))
+								," "
+								,xml-node-text(xml-get-child-by-name(lf-result2,"street",spaces))
+								," "
+								,xml-node-text(xml-get-child-by-name(lf-result2,"street_type",spaces))
+								)
+					else
+						set lr-na-company = concat(
+									xml-node-text(xml-get-child-by-name(lf-result2,"street_number",spaces))
+									,xml-node-text(xml-get-child-by-name(lf-result2,"street_alpha",spaces))
+									," "
+									,xml-node-text(xml-get-child-by-name(lf-result2,"street",spaces))
+									," "
+									,xml-node-text(xml-get-child-by-name(lf-result2,"street_type",spaces))
+									)
+					endif	
+			
+					if xml-node-text(xml-get-child-by-name(lf-result2,"street_suffix",spaces)) <> spaces
+						set lr-na-company =  concat(
+								str-concat(lr-na-company)
+								," "
+								,left-justify(xml-node-text(xml-get-child-by-name(lf-result2,"street_suffix",spaces))))
+					endif
+					set lr-na-street = xml-node-text(xml-get-child-by-name(lf-result2,"suburb",spaces))
+					set lr-na-suburb = xml-node-text(xml-get-child-by-name(lf-result2,"city",spaces))
+					set lr-na-country = xml-node-text(xml-get-child-by-name(lf-result2,"country",spaces))
+					set lr-na-postcode = xml-node-text(xml-get-child-by-name(lf-result2,"postcode",spaces))
+				endif
+			set lf-result2 = XML-NEXT-ELEMENT-SIBLING(lf-result2)
+		end-while
+	endif
+	endif
+end-procedure
+
+
+//json processing routines after this
+
+//Adding JSON-XML function directly here
+#define THISBYTE substring(lp-blob,lf-pointer,lf-pointer)
+#define LASTBYTE substring(lp-blob,lf-pointer - 1,lf-pointer - 1)
+#define DOUBLEQUOTE '"'
+#define CR ascii-char(13)
+#define LF ascii-char(10)
+#define TAB ascii-char(9)
+#define FF ascii-char(12)
+#define VT ascii-char(11)
+#define OBJECTSTART "{"
+#define OBJECTEND "}"
+#define ARRAYSTART "["
+#define ARRAYEND "]"
+#define COLON ":"
+#define COMMA ","
+#define PERIOD "."
+#define TOKEN pic x(4096) type varchar
+
+procedure start-jsontoxml 
+parameters
+	lp-blob								type blob
+//returning
+//	lr-handle							type xml-handle
+//	lr-finalxml							pic x(16000) type varchar //type blob
+local
+	lf-interim							pic x(16000) type varchar			
+//	lf-finalxml							pic x(16000) type varchar
+	if xml-free-node-handle(ws-xml-root) endif
+	if xml-free-node-handle(ws-xml-doc) endif
+	set ws-xml-root = 0
+	set ws-xml-doc = 0
+	report "json report"
+		no-xml
+	print "Raw JSON"
+	do debug-print-blob parameters are lp-blob
+	report finished
+	do jsontoxml parameters are lp-blob 1 0 returning lf-interim
+//	PRINT SPACES
+//	do debug-traverse-xml-tree parameters are ws-xml-root 1
+//	print SPACES
+	//if xml-save-as-text(ws-xml-root,lf-finalxml, SPACES) = 0
+	//	print "there was a problem saving the final xml as text"
+//	else
+//		do debug-print-string parameters are lf-finalxml
+//	endif
+//	set lr-finalxml = lf-finalxml
+//	set lr-handle = ws-xml-root 
+end-procedure
+
+procedure debug-print-string
+parameters are
+	lp-bigstring				pic x(16000) type varchar //type blob
+local
+	i							type number
+	//print lp-bigstring
+	while i < strlen(lp-bigstring) 
+	print substring(lp-bigstring,i,i + 100)
+		set i += 100
+	endwhile
+end-procedure
+
+procedure debug-print-blob
+parameters are
+	lp-bigstring				type blob
+local
+	i							type number
+	//print lp-bigstring
+	while i < strlen(lp-bigstring) 
+	print substring(lp-bigstring,i,i + 100)
+		set i += 100
+	endwhile
+end-procedure
+
+
+//  Shaun - we probably don't need this.  It should be automatic now.
+//
+procedure jsontoxml
+parameters
+	lp-blob								type blob
+	lp-pointer							type number
+	lp-basenode							type xml-handle
+returning
+	lr-blob								pic x(16000) type varchar //type blob
+	lr-pointer							type number
+local
+	lf-pointer							type number
+	lf-this-token						TOKEN
+	lf-rtn-xml							pic x(16000) type varchar //type blob
+	lf-lhs								TOKEN
+	lf-rhs								TOKEN
+	lf-in-array							type boolean
+	lf-root-node-added					type boolean
+	//
+	lf-doc								type xml-handle
+	lf-root								type xml-handle
+	lf-node								type xml-handle
+	//
+	lf-rtn-doc							type xml-handle
+	lf-rtn-root							type xml-handle
+//	lf-rtn-node							type xml-handle
+	//
+	lf-newnode							type xml-handle
+//	x									type number
+//	lf-char								pic x(16000) type varchar
+	set lf-newnode = lp-basenode
+	set lf-root-node-added = FALSE
+	for lf-pointer = lp-pointer to str-len(lp-blob)	
+		if THISBYTE in (spaces,CR,LF,TAB,FF,VT)
+			continue
+		endif
+		if THISBYTE = DOUBLEQUOTE or VALID-NUMBER(THISBYTE) 
+			if THISBYTE = DOUBLEQUOTE
+				do extract-next-quoted-string
+					parameters are lp-blob lf-pointer + 1
+					returning lf-this-token lf-pointer
+			endif
+			if VALID-NUMBER(THISBYTE) 
+				do extract-next-number
+					parameters are lp-blob lf-pointer
+					returning lf-this-token lf-pointer
+			endif
+			if lf-lhs = spaces 
+				set lf-lhs = lf-this-token
+				if not lf-root-node-added
+					if ws-xml-root = 0
+						set ws-xml-doc = xml-new-document(spaces,concat("newroot",str(lf-pointer)))
+						set ws-xml-root = xml-get-root-node(ws-xml-doc)
+						set lp-basenode = ws-xml-root
+					endif
+					set lf-doc = xml-new-document(spaces,concat("root",str(lf-pointer)))
+					set lf-root = xml-get-root-node(lf-doc)
+					set lf-root-node-added = TRUE
+				endif
+				if lf-lhs <> "#text" and  lf-lhs <> "-seq"
+					set lf-node =  xml-add-child-node(lf-root,lf-lhs,spaces) 
+					set lf-newnode = xml-add-child-node(lp-basenode,lf-lhs,spaces)
+				endif
+			else
+				if lf-lhs <> "#text" and  lf-lhs <> "-seq"
+				set lf-rhs = lf-this-token
+				if xml-modify-node-text(lf-node,lf-this-token) endif
+				if xml-modify-node-text(lf-newnode,lf-this-token) endif
+				else
+					if  lf-lhs <> "-seq"
+						if xml-modify-node-text(lf-root,lf-this-token) endif
+						if xml-modify-node-text(lp-basenode,lf-this-token) endif
+					endif
+				endif
+				if lf-in-array
+				//	if xml-free-node-handle(lf-node) endif
+					set lf-node =  xml-add-child-node(lf-root,lf-lhs,spaces)
+				//	if xml-free-node-handle(lp-basenode) endif
+					set lf-newnode = xml-add-child-node(lp-basenode,lf-lhs,spaces)
+				endif
+			endif
+			continue
+		endif
+		if THISBYTE = COMMA
+			//message LASTBYTE THISBYTE " - " lf-lhs
+			if not lf-in-array
+				set lf-lhs = spaces
+			else
+			//	message 'In array ' lf-lhs
+				if lf-lhs <> "#text" and  lf-lhs <> "-seq"
+					set lf-node =  xml-add-child-node(lf-root,lf-lhs,spaces) 
+					set lf-newnode = xml-add-child-node(lp-basenode,lf-lhs,spaces)
+				endif
+			endif
+			continue
+		endif
+		if THISBYTE in ( ARRAYEND)
+			if xml-delete-node(lf-node) endif
+			if xml-delete-node(lf-newnode) endif
+			set lf-lhs = spaces
+			set lf-in-array = FALSE
+			continue
+		endif
+		if THISBYTE in ( OBJECTEND)
+			if xml-save-as-text(lf-doc,lr-blob,spaces) = 0
+		//	print "there was a problem saving the recursed xml as text"
+			else
+			endif
+			set lr-pointer = lf-pointer + 1
+			exit 0
+		endif
+		if THISBYTE in ( ARRAYSTART)
+			set lf-in-array = TRUE
+			continue
+		endif
+		if THISBYTE in ( OBJECTSTART)
+			// ***************************************************
+			// recurse
+			// ***************************************************
+			//message "entering recursion lhs:" str-concat(lf-lhs) " " lf-in-array
+			do jsontoxml parameters are lp-blob, lf-pointer + 1, lf-newnode
+				returning lf-rtn-xml lf-pointer
+			if THISBYTE = ","
+				set lf-pointer = lf-pointer - 1
+			endif
+			set lf-rtn-doc = xml-parse-text(lf-rtn-xml)
+	//		if lf-rtn-doc = 0
+		//		print "an error occurred parsing the xml"
+		//	endif
+			set lf-rtn-root = xml-get-root-node(lf-rtn-doc)
+		endif
+	end
+	exit
+end-procedure
+
+procedure extract-next-number
+parameters
+	lp-blob								type blob
+	lp-pointer							type number
+returning
+	lr-string							TOKEN
+	lr-pointer							type number
+local
+	lf-pointer							type number
+	lf-prev-space						type boolean
+	set lf-pointer = lp-pointer
+	set lf-prev-space = FALSE
+	while VALID-NUMBER(THISBYTE) OR THISBYTE = PERIOD
+		if THISBYTE = spaces
+			set lf-prev-space = TRUE
+		endif
+		if THISBYTE not in ( CR LF TAB VT FF space)
+			if lf-prev-space 
+				string lr-string appending concat(" ",THISBYTE)
+				set lf-prev-space = FALSE
+			else
+				set lr-string = concat(lr-string,THISBYTE)
+			endif
+		endif
+		set lf-pointer += 1
+		if lf-pointer > str-len(lp-blob)
+			exit 1
+		endif
+	endwhile
+	set lr-pointer = lf-pointer - 1
+end-procedure
+
+procedure extract-next-quoted-string
+parameters
+	lp-blob								type blob
+	lp-pointer							type number
+returning
+	lr-string							TOKEN
+	lr-pointer							type number
+local 
+	lf-pointer							type number
+	lf-prev-space						type boolean
+	lf-prev-esc							type boolean
+	set lf-pointer = lp-pointer
+	set lf-prev-space = FALSE
+	set lf-prev-esc = FALSE
+	while THISBYTE <> DOUBLEQUOTE
+		if THISBYTE = spaces
+			set lf-prev-space = TRUE
+		endif
+		if THISBYTE = '\'
+			set lf-prev-esc = TRUE
+		endif
+		if THISBYTE not in ( CR LF TAB VT FF space '\')
+			if lf-prev-space 
+				string lr-string appending concat(" ",THISBYTE)
+				set lf-prev-space = FALSE
+			else
+				set lr-string = concat(lr-string,THISBYTE)
+			endif
+			set lf-prev-esc = FALSE
+		endif
+		set lf-pointer += 1
+		if lf-pointer > str-len(lp-blob)
+			exit 1
+		endif
+		if lf-prev-esc = TRUE 
+			if THISBYTE = DOUBLEQUOTE	
+				set lr-string = concat(lr-string,'"')
+				set lf-pointer += 1
+				if lf-pointer > str-len(lp-blob)
+					exit 1
+				endif	
+			endif
+			set lf-prev-esc = false
+		endif
+	endwhile
+	set lr-pointer = lf-pointer
+end-procedure
+
+
+
+/*
+procedure debug-traverse-xml-tree
+parameters
+	lp-node						type XML-HANDLE
+	lp-level					pic 999
+local
+	lf-this-node				type XML-HANDLE
+	lf-child-node				type XML-HANDLE
+	lf-print-line				pic x(100) type string
+	i						type number
+	set lf-this-node = lp-node
+	while lf-this-node <> 0
+		set lf-print-line = spaces
+		for i = 1 to lp-level
+			set lf-print-line = concat(lf-print-line,chr(9))
+		end-for
+		set lf-print-line = concat(lf-print-line
+			,str(xml-node-type(lf-this-node)),"."
+			,xml-node-name(lf-this-node),":"
+			,xml-node-text(lf-this-node))
+		print lf-print-line
+		set lf-child-node = xml-get-first-child-node(lf-this-node)
+		if lf-child-node <> 0
+			do debug-traverse-xml-tree parameters are lf-child-node, lp-level + 1
+		endif
+		set lf-this-node = xml-get-next-node(lf-this-node)
+	end-while
+	if xml-free-node-handle(lf-this-node) endif
+end-procedure 
+*/

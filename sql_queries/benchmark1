@@ -1,0 +1,32 @@
+select 
+first 100
+t0.stock_code,
+t0.stk_accountcode,
+t0.stk_trans_value,
+t1.stk_description,
+t1.stock_group,
+t2.sys_description,
+substr(t2.sys_tbl_alpha_1,5,4) as class,
+t3.sys_description,
+-- highest priority supplier as sub select
+(select cre_accountcode from stock_supplier s0
+	where s0.stock_code = t0.stock_code 
+	and s0.sup_priority = (select max(s1.sup_priority)
+		from stock_supplier s1 where s1.stock_code = t0.stock_code)
+	and s0.cre_accountcode = (select min(s2.cre_accountcode)
+		from stock_supplier s2 where s2.stock_code = t0.stock_code)
+		)
+ as default_supplier,
+-- the start on deb master.
+t4.shortname,
+t4.rep_code,
+t5.rep_description,
+'END'
+from stock_movements t0
+left outer join stock_master t1 on t0.stock_code = t1.stock_code
+left outer join system_table t2 on t2.sys_tbl_type = 'PG' and t2.sys_tbl_code = t1.stock_group 
+left outer join system_table t3 on t3.sys_tbl_type = 'OG' and t3.sys_tbl_code = substr(t2.sys_tbl_alpha_1,5,4)
+left outer join deb_master t4 on t4.accountcode = t0.stk_accountcode
+left outer join rep_master t5 on t5.rep_code = t4.rep_code
+where t0.stk_trans_type = 'SO'
+order by t5.rep_description, t4.shortname, t1.stk_description

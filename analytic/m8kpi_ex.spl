@@ -1,0 +1,190 @@
+//
+// *****   Automatically Generated Code   *****
+//
+// *****   Built by psd on Friday 18-SEP-2020 at 05:50:53
+// *****   In DataSet/Company: SAT - Test SAT
+//
+// *****   DO NOT EDIT   *****
+// *****   DO NOT DELETE this .spl   *****
+// *****   You - YES You will BREAK KPI Exclusions  ******
+// *****   IN FACT STOP EDITING THIS AND GO AWAY   *****
+
+
+
+procedure m8kpi_ex-check-if-record-excluded export
+	parameter
+		lp-comp-code 					like kpi-comp-code
+		lp-id							like kpi-id
+	returning
+		lr-ok							type boolean
+	//
+
+procedure m8kpi_ex-calculated-dimension export
+	parameter
+		lp-comp-code 					like kpi-comp-code
+		lp-kpi-id						like kpi-id
+		lp-fld-id						pic 999
+		lp-fld-value					type numeric
+	//
+
+procedure m8kpi_ex-asset-master export
+	parameter
+		asset-master.*					global
+
+procedure m8kpi_ex-cre-master export
+	parameter
+		cre-master.*					global
+
+procedure m8kpi_ex-cre-trans export
+	parameter
+		cre-trans.*					global
+
+procedure m8kpi_ex-contract-master export
+	parameter
+		contract-master.*				global
+
+procedure m8kpi_ex-deb-master export
+	parameter
+		deb-master.*					global
+
+procedure m8kpi_ex-deb-trans export
+	parameter
+		deb-trans.*					global
+
+procedure m8kpi_ex-gl-master export
+	parameter
+		gl-master.*						global
+
+procedure m8kpi_ex-job-cost-master export
+	parameter
+		job-cost-master.*				global
+
+procedure m8kpi_ex-job-cost-parent-file export
+	parameter
+		job-cost-parent-file.*			global
+
+procedure m8kpi_ex-mailer-master export
+	parameter
+		mailer-master.*					global
+
+procedure m8kpi_ex-mailer-forecasts export
+	parameter
+		mailer-forecasts.*				global
+
+procedure m8kpi_ex-crm-central-lead-opportunity export
+	parameter
+		crm-central-lead-opportunity.*	global
+
+procedure m8kpi_ex-crm-central-sales-history export
+	parameter
+		crm-central-sales-history.*	global
+
+procedure m8kpi_ex-payroll-employee-master export
+	parameter
+		payroll-employee-master.*		global
+
+procedure m8kpi_ex-plant-master export
+	parameter
+		plant-master.*					global
+
+procedure m8kpi_ex-rep-master export
+	parameter
+		rep-master.*					global
+
+procedure m8kpi_ex-resource-master export
+	parameter
+		resource-master.*				global
+
+procedure m8kpi_ex-purchase-order export
+	parameter
+		purchase-order.*				global
+
+procedure m8kpi_ex-purchase-order-archive export
+	parameter
+		purchase-order-archive.*		global
+
+procedure m8kpi_ex-sales-order export
+	parameter
+		sales-order.*					global
+
+procedure m8kpi_ex-sales-order-archive export
+	parameter
+		sales-order-archive.*			global
+
+procedure m8kpi_ex-service-call-history export
+	parameter
+		service-call-history.*			global
+
+procedure m8kpi_ex-service-call-master export
+	parameter
+		service-call-master.*			global
+
+procedure m8kpi_ex-service-engineer-master export
+	parameter
+		service-engineer-master.*		global
+
+procedure m8kpi_ex-service-travel-zones export
+	parameter
+		service-travel-zones.*			global
+
+procedure m8kpi_ex-stock-hierarchy-tree export
+	parameter
+		stock-hierarchy-tree.*			global
+
+procedure m8kpi_ex-stock-master export
+	parameter
+		stock-master.*					global
+
+procedure m8kpi_ex-stock-movements export
+	parameter
+		stock-movements.*				global
+
+procedure m8kpi_ex-stock-product-group-mirror export
+	parameter
+		stock-product-group-mirror.*	global
+
+procedure m8kpi_ex-stock-serial-number export
+	parameter
+		stock-serial-number.*			global
+
+procedure m8kpi_ex-stock-warehouse-detail export
+	parameter
+		stock-warehouse-detail.*			global
+
+procedure m8kpi_ex-system-table export
+	parameter
+		system-table.*					global
+
+procedure m8kpi_ex-territory-master-mirror export
+	parameter
+		territory-master-mirror.*		global
+
+procedure m8kpi_ex-warehouse-master-mirror export
+	parameter
+		warehouse-master-mirror.*		global
+
+procedure m8kpi_ex-whse-extra-details export
+	parameter
+		whse-extra-details.*			global
+
+procedure m8kpi_ex-warehouse-transactions export
+	parameter
+		warehouse-transactions.*			global
+
+procedure m8kpi_ex-master-data export
+	parameter
+		master-data.*			global
+
+procedure m8kpi_ex-master-data-id export
+	parameter
+		master-data-id.*			global
+
+
+// CUSTOM PROCEDURE START
+procedure m8kpi_ex-set-custom-exclusion-value export
+	parameter
+		lp-type 						like kpie-atm-id
+		lp-field-id 					like kpie-field-id
+		lp-value 						pic x(250) type var-char
+		lp-num 							type numeric
+	//

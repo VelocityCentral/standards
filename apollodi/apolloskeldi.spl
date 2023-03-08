@@ -1,0 +1,534 @@
+////////////////////////////////////////////////////////////////////////////////
+** Header 
+//=========================================================================//
+// Copyright (C) Velocity Global Ltd 2020
+//
+// PRONTO is a registered trademark of Pronto Software P/L.
+//
+// All Rights Reserved. Unauthorised copying is prohibited.
+//=========================================================================//
+//
+// Modification History
+// Date		Who	SDR		What
+////////////////////////////////////////////////////////////////////////////////
+
+// The SQL statement goes in here because we it occurs in three places and we
+// want to be able to maintain it one location
+
+** define
+
+** include
+#include "../include/i8proglog.spl"
+#include "../include/i8secabt.spl"
+#include "../include/rbtchproc.spl"
+
+link 'clib/clibvpdf'
+#include "../include/i8ods.spl"
+link 'clib/clibvods'
+
+field 
+	ws-function-title					pic x(80) type string
+	ws-excel-flag						pic x
+	ws-exec-start						type datetime
+	ws-exec-end							type datetime
+	ws-mail-recipients					pic x(1024) type string
+	ws-spreadsheet-file-name			pic x(1024) type string
+	ws-spool-id							pic x(20) type string
+	ws-return							pic x(1024) type string // Return for app services
+** field
+
+procedure main
+returning
+	lr-return							pic x(1024) type string
+local
+	lf-para-no							type number
+	get system-control first
+	get system-user-control	
+		on index user-id											
+		key is login-id()
+	on error														
+	endon															
+	do i8secabt-check-abort parameters
+** secabt
+			returning ws-function-title
+	set ws-report-started = FALSE
+	do i8proglog-write-log
+	// if the program is on the batch queue then the first if statement will
+	// handle the parameters
+	if get-param(1) = '-b' and get-param(3) = '-sequence'
+		RBTCHPROC_RUN_PROGRAM(REPORT_NAME)
+	elseif param-count() > 0
+		// If parameters were passed AND it is not on the batch queue, then
+		// the parameters will be the selection parameters followed by the
+		// default parameters
+		// Note that ALL parameters MUST be specified
+		set lf-para-no = 1
+** appserv para
+		// remaining  - use offsets from total no of parameters
+		set ws-mail-recipients = get-param(lf-para-no + 1)
+		set ws-excel-flag = get-param(lf-para-no + 2)
+		//
+		if ws-excel-flag not in (NO, "D", "S")
+			set ws-excel-flag = NO
+		endif
+		set ws-spreadsheet-file-name = get-param(lf-para-no + 3)
+		do rbtchproc-report-detail
+		set lr-return = "Program Completed Successfully"
+	else
+		RBTCHPROC_RUN_PROGRAM(REPORT_NAME)
+	endif
+	if ws-return =  spaces
+		set lr-return =  "Program completed successfully"
+	else
+		set lr-return  = ws-return
+	endif
+endprocedure //main ------------------------------------------------------------
+
+#if BMS_DICT_VER > 7600
+
+screen rbtchproc-report-parameters
+local 
+	i 						type number
+	allow entry
+	window 
+		title ws-function-title
+	responsive
+before
+** select
+detail
+	screen-group // ---- Parameters ----------------------------
+		title "Parameters"
+** select accept
+	end-screen-group // ---- Parameters --------------------------------------
+	screen-group // ---- Output Options ----------------------------
+		title "Output Options"
+		field-group // ---- Export ----------------------------
+			title "Export"
+			radio-button ws-excel-flag 
+				NO title "No Export"
+				"D" title "View Datagrid"
+				"S" title "Create Spreadsheet file"
+				default "NO"
+				help "N)o export D)isplay data as a datagrid"
+			on change
+				refresh ws-mail-recipients
+			endon
+		end-field-group // ---- Export --------------------------------------
+		accept ws-mail-recipients 
+			title "Email:"
+			help "Enter space, comma or semi-colon separated list of email recipients"
+			when ws-excel-flag in (NO "S")
+			no-warning
+			optional
+		accept ws-spreadsheet-file-name
+			title "SpreadSheet File"
+			// file will be emailed if email address specified
+			when ws-excel-flag in ( "S" ) and ws-mail-recipients = spaces
+			help "Enter name for the file.  Default location will be data directory"
+			default ws-spreadsheet-file-name
+			no-warning
+			before-accept
+				if ws-spreadsheet-file-name = spaces
+					set ws-spreadsheet-file-name = str-concat("/tmp/" REPORT_NAME ".ods")
+					for i = 1 to str-len(ws-spreadsheet-file-name)
+						if substring(ws-spreadsheet-file-name,i,i) = space
+							string ws-spreadsheet-file-name replacing "_" at i
+						endif
+					endfor
+				endif
+			end-before-accept
+	end-screen-group // ---- Output Options --------------------------------------
+	confirm auto
+	confirmed
+		if ws-excel-flag = "D"
+			do display-datagrid
+		else
+			RBTCHPROC_EXECUTION
+			exit 0
+		endif
+	endconfirm
+endscreen //rbtchproc-report-parameters --------------------------------------
+
+#else 
+
+screen rbtchproc-report-parameters
+local 
+	i 						type number
+	allow entry
+	window 
+		title ws-function-title
+	form-entry
+before
+** select_pre760
+	box @1,1 to @19,80
+		title "Parameters"
+	box @20,1 to @24,80
+		title "Output Options"
+detail
+** select accept_pre760
+	radio-button ws-excel-flag 
+		@21,10 NO title "No Export"
+		@21,20 "D" title "View Datagrid"
+		@21,33 "S" title "Create Spreadsheet file"
+		default "NO"
+		help "N)o export D)isplay data as a datagrid"
+	on change
+		refresh ws-mail-recipients
+	endon
+	accept ws-mail-recipients @22,15 pic x(60)
+		title "Email:"
+		help "Enter space, comma or semi-colon separated list of email recipients"
+		when ws-excel-flag in (NO "S")
+		no-warning
+		optional
+	accept ws-spreadsheet-file-name @23,15 pic x(60)
+		title "SpreadSheet File:"
+		// file will be emailed if email address specified
+		when ws-excel-flag in ( "S" ) and ws-mail-recipients = spaces
+		help "Enter name for the file.  Default location will be data directory"
+		default ws-spreadsheet-file-name
+		no-warning
+		before-accept
+			if ws-spreadsheet-file-name = spaces
+				set ws-spreadsheet-file-name = str-concat("/tmp/" REPORT_NAME ".ods")
+				for i = 1 to str-len(ws-spreadsheet-file-name)
+					if substring(ws-spreadsheet-file-name,i,i) = space
+						string ws-spreadsheet-file-name replacing "_" at i
+					endif
+				endfor
+			endif
+		end-before-accept
+	confirm auto
+	confirmed
+		if ws-excel-flag = "D"
+			do display-datagrid
+		else
+			RBTCHPROC_EXECUTION
+			exit 0
+		endif
+	endconfirm
+endscreen //rbtchproc-report-parameters --------------------------------------
+
+#endif
+
+procedure rbtchproc-set-parameters
+** Parameter
+	RBTCHPROC_LOAD_SET_ALPHA(ws-mail-recipients)
+	RBTCHPROC_LOAD_SET_ALPHA(ws-spreadsheet-file-name)
+	RBTCHPROC_LOAD_SET_ALPHA(ws-excel-flag)
+endprocedure //rbtchproc-set-parameters --------------------------------------
+
+procedure start-report
+	set rbtchproc-report-name = REPORT_NAME 
+	report rbtchproc-report-name		
+		header is skeleton-report-header
+		no-message
+** Report
+	set ws-report-started = TRUE
+	if rbtchproc-in-background
+		RBTCHPROC_MESSAGE_REPORT_STARTED
+	else
+		display 'Report :' @20,59 background right bold
+		display spool-file-name() @20,68 pic x(12) foreground prompts
+		display "Accessing Database" @21,59 background left bold 
+	endif
+	set ws-exec-start = sys-time()
+	set ws-spool-id = spool-file-name()
+endprocedure //start-report ----------------------------------------------------
+
+procedure skeleton-report-header
+	if report-is-xml()
+		report section "headings_section"
+	endif
+	print company-name col 1
+		rbtchproc-report-name col 51 bold
+		"Date:" col 85
+		tod() col 110
+		today() col 91
+		"Time:" col 104
+		'Page:' col 120
+		left-justify(str(page-no)) col 126 pic x(4)
+	skip
+	print
+** Column
+	if report-is-xml()
+		report section finished
+	endif
+endprocedure //skeleton-report-header ------------------------------------------
+
+// Your main processing routine must be named as follows
+procedure rbtchproc-report-detail
+local
+	lf-rec-counter				type number
+** detail print local
+	window @19,44 to @24,80
+	    title is "Report Progress"
+	    color white
+	    no-hide
+	if not rbtchproc-in-background
+		display bitmap concat(getenv('BMS')'/images/repedge.gif') @19,44
+	endif
+	// 
+	// PIC clauses are set in the print statement to enable
+	// later use of the pronto report layout tool
+	//
+	if ws-excel-flag = "S"
+		do create-spreadsheet
+		exit 0
+	endif
+	do start-report
+	page
+** detail print select - no longer needed.  This line can be deleted
+	//  The sql statement is a # define because it used in three places
+	SQLSTMT
+** detail print before
+	detail
+** detail print
+		set lf-rec-counter += 1
+		if not rbtchproc-in-background
+		and time-elapsed(1000,1)
+			display "Printing Report" @21,59 background left bold
+			display "Now at :" @23,45 background prompts left
+** pass 2 monitor
+		endif
+** detail print after
+	end-select
+** detail print grand total
+	do finish-report
+	set ws-return = concat(str(lf-rec-counter) " Records Read")
+endprocedure //rbtchproc-report-detail ---------------------------------------
+
+
+procedure finish-report
+	set ws-exec-end = sys-time()
+	if report-is-xml()
+		page
+		report section "options_page"
+	endif
+	if ws-report-started
+		skip 2
+		print 'Options selected : ' col 2 no-newline
+** selection print
+		print 'Execution Time Start           = : ' in col 22
+			 tag is 'prompt_ws_start_time'
+			ws-exec-start                 tag is 'ws_start_time'
+		print 'Execution Time End             = : ' in col 22
+			 tag is 'prompt_ws_end_time'
+			ws-exec-end                   tag is 'ws_end_time'
+		skip
+	endif
+	if report-is-xml()
+		report section finished
+	endif
+** Selection Notes
+	RBTCHPROC_SCREEN_FINISH_MESSAGE(ws-report-started,23,45)
+	if ws-mail-recipients <> spaces
+		do mail-spool-file
+	endif
+endprocedure //finish-report ---------------------------------------------------
+
+screen display-datagrid
+** dg local
+	window @1,1 to @24,80
+	title REPORT_NAME
+	datagrid occurs 22
+** dg select - no longer needed - this line can be deleted
+	//  The sql statement is a # define because it used in three places
+	SQLSTMT
+	allowed search
+detail
+** dg rows
+end-screen
+
+procedure mail-spool-file
+local
+	lf-address							pic x(256) type string
+	lf-pdf-filename						pic x(256) type string
+	i 									type number
+	lf-pdf-failed						type boolean
+	set ws-return = concat("Report mailed to " ws-mail-recipients)
+	report finished
+	//
+	// convert file to pdf
+	//
+	set lf-pdf-filename = concat("/tmp/" REPORT_NAME ".pdf")
+	for i = 1 to str-len(lf-pdf-filename)
+		if substring(lf-pdf-filename,i,i) = " "
+			string lf-pdf-filename replacing "_" at i
+		endif
+	endfor
+	do clibvpdf-create parameters are ws-spool-id  lf-pdf-filename
+	if exit-status <= 0
+		set lf-pdf-failed = FALSE
+	else
+		set lf-pdf-failed = TRUE
+	endif
+	//
+	if mail-start(REPORT_NAME) endif
+	if mail-add-line("Here is the content of the report") endif
+	if lf-pdf-failed
+#if BMS_DICT_VER < 7600
+		if mail-attach(ws-spool-id,str-concat(REPORT_NAME,".html"),0,1,1) endif
+#else
+		if mail-attach(ws-spool-id,spaces,0,1,1) endif
+#endif
+	else
+		if mail-attach(lf-pdf-filename,spaces,0,1,1) endif
+	endif
+	while ws-mail-recipients <> spaces
+		if lf-address <> spaces and substring(ws-mail-recipients,1,1) in { space "," ";" }
+			// someone to email
+			if mail-send(lf-address,FALSE,FALSE) endif
+			set lf-address = spaces
+		else
+			string lf-address appending substring(ws-mail-recipients,1,1)
+		endif
+		string ws-mail-recipients deleting 1 
+	end-while
+	// at the end there may be one more address left over
+	if lf-address <> spaces 
+		// someone to email
+		if mail-send(lf-address,FALSE,FALSE) endif
+	endif
+	if mail-cancel() endif
+end-procedure
+
+procedure create-spreadsheet
+local
+	lf-row								type number
+	lf-address							pic x(256) type string
+	lf-data-start-for-totals			type number
+//
+//	Define the styles to be used.   Provided here.  Generator uses lf- values
+//	so that only the skeleton needs changing to make a change to the output.
+//
+	lf-header-style					type string
+	lf-total-style						type string
+	lf-detail-style						type string
+	//
+** SS LOCAL
+	//
+	do clibvods-start-export parameters "/tmp"
+	do clibvods-add-sheet parameters REPORT_NAME True
+	do create-spreadsheet-styles
+	//
+	// Change here to use a different style
+	//
+	set lf-header-style = I8ODS_CELL_STYLE_HEADER
+	set lf-detail-style = I8ODS_CELL_STYLE_DETAIL
+	set lf-total-style = I8ODS_CELL_STYLE_TOTAL_NUMERIC
+	// This is the best guess at column widths.  May need reviewing
+** SS COLUMNS
+	//
+	do clibvods-add-sheet-row
+	set lf-row += 1
+** SS MAINHEADING
+	do clibvods-add-sheet-row
+	set lf-row += 1
+	do clibvods-add-sheet-row
+	set lf-row += 1
+** SS HEADINGS
+//	SQL
+	set lf-data-start-for-totals = lf-row + 1 // This enables changing in the skeleton rather than changing the generator.
+** SS SQL - no longer needed - this line can be deleted
+	//  The sql statement is a # define because it used in three places
+	SQLSTMT
+	detail
+		do clibvods-add-sheet-row
+		set lf-row += 1
+** SS DATA
+	end-select
+	// totals
+	do clibvods-add-sheet-row
+** SS TOTALS
+	if ws-spreadsheet-file-name = spaces
+		set ws-spreadsheet-file-name = str-concat("/tmp/report_spreadsheet_" str(pid) ".ods")
+		set ws-spreadsheet-file-name = str-concat("/tmp/" REPORT_NAME ".ods")
+	endif
+	do clibvods-finish-export parameters are ws-spreadsheet-file-name
+	if ws-mail-recipients != spaces
+		set ws-return = concat("Spreadsheet mailed to " ws-mail-recipients)
+		if mail-start(REPORT_NAME) endif
+		if mail-add-line("Spreadsheet as attached") endif
+		if mail-attach(ws-spreadsheet-file-name, spaces,0,0,1) endif
+		while ws-mail-recipients <> spaces
+			if lf-address <> spaces and substring(ws-mail-recipients,1,1) in { space "," ";" }
+				// someone to email
+				if mail-send(lf-address,FALSE,FALSE) endif
+				set lf-address = spaces
+			else
+				string lf-address appending substring(ws-mail-recipients,1,1)
+			endif
+			string ws-mail-recipients deleting 1
+		end-while
+		// at the end there may be one more address left over
+		if lf-address <> spaces
+			// someone to email
+			if mail-send(lf-address,FALSE,FALSE) endif
+		endif
+		if mail-cancel() endif	
+	elseif not batched()
+		do clibvods-transfer-file-to-pc-web-client parameters are ws-spreadsheet-file-name
+	else
+		set ws-return = concat("Spreadsheet Created: " ws-spreadsheet-file-name)
+	endif
+end-procedure
+
+procedure create-spreadsheet-styles
+	do clibvods-create-column-style parameters "8cm" "8cm"
+	do clibvods-create-cell-style parameters
+		"MAINHEAD" //cell-name				
+			"thick" //border-thickness			
+			"#DD5044" //border-colour			
+			"#72F0FE" //background-color			
+			"#305496"//text-colour				
+			"center" //text-align
+			"Bold" //font-weight				
+			"Letter Gothic" //font-name				
+			"20pt" //font-size				
+			space //data-style	
+			TRUE //Top Border	
+			TRUE //Bottom Border
+			TRUE //Left Border
+			TRUE //Right Border
+			FALSE // Wrap text
+			"middle" // vertical align
+			FALSE // italic
+			FALSE // underline
+	//
+	// The following two are not used in the generated program but
+	// are provided to enable further customisation that might require
+	// 2dp currency numbers
+	//
+	// Your program should simply use the "mycurrency" style when
+	// writing a cell.  You chould not need to access the
+	// "curr2dp".
+	//
+	do clibvods-create-currency-style parameters
+		"curr2dp"
+		spaces
+		spaces
+		spaces
+		True
+		2
+		TRUE // red when below zero
+	do clibvods-create-cell-style parameters
+		"mycurrency" //cell-name				
+			"thin" //border-thickness			
+			I8ODS_DEFAULT_DETAIL_BORDER_COLOUR //border-colour			
+			I8ODS_DEFAULT_DETAIL_BACK_COLOUR //background-color			
+			I8ODS_DEFAULT_DETAIL_TEXT_COLOUR //text-colour				
+			spaces //text-align
+			spaces //font-weight				
+			spaces //font-name				
+			spaces //font-size				
+			"curr2dp" //data-style	
+			TRUE //Top Border	
+			TRUE //Bottom Border
+			TRUE //Left Border
+			TRUE //Right Border
+			FALSE // Wrap text
+			spaces // vertical align
+			FALSE // italic
+			FALSE // underline
+end-procedure
