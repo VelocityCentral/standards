@@ -162,6 +162,21 @@ clibvfile-pathlist-to-array
 	|  Out      | String Arr| Array of strings (max 100)                             |
 	+-----------+-----------+--------------------------------------------------------+
 
+clibvfile-full-path-to-op7
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	The path to the op7 that is currently active is not always obvious.  get-param(0)
+	may return the full path or it may return a partial path, relying on PROPATH
+	to find the precise location.  This routine will return the full path irrespective
+	of how the program is called.  If the program occurs more than once in PROPATH
+	only the first one is returned.
+
+	+-----------+-----------+--------------------------------------------------------+
+	| Direction | Data Type | Description                                            |
+	+===========+===========+========================================================+
+	|   Out     | String    | Full path to op7                                       |
+	+-----------+-----------+--------------------------------------------------------+
+
 */
 #define RGB(R,G,B) \
      RGB_TO_PRONTO(R,G,B)
@@ -207,6 +222,8 @@ mode clibvfile-down
 	prompt "D&rill"
 	help "Drill down into this folder"
 
+field
+	ws-last-error						pic x(256) type string
 
 procedure library-init
 	get system-control first
@@ -220,6 +237,12 @@ procedure main
 	on error
 	endon
 	do testrig
+end-procedure
+
+procedure clibvfile-get-last-error export
+returning
+	lr-last-error						like ws-last-error
+	set lr-last-error = ws-last-error
 end-procedure
 
 procedure clibvfile-display-text-file export
@@ -868,7 +891,7 @@ parameters
 	lp-path-list						pic x(1024) type string
 	lp-separator						pic x // usually ":"
 returning
-	lr-paths							pic x(256) occurs 100
+	lr-paths							pic x(256) type string occurs 100
 local
 	lf-offset							type number
 //
@@ -885,6 +908,45 @@ local
 	end-while
 end-procedure
 
+procedure clibvfile-full-path-to-op7 export
+returning
+	lr-op7-path							pic x(500) type string
+local
+	lf-propath							pic x(256) type string occurs 100
+	i 									type number
+	lf-unc								pic x(20) type string
+	lf-path								pic x(256) type string
+	lf-filename							pic x(100) type string
+	lf-ext								pic x(20) type string
+	set lr-op7-path = get-param(0)
+	// if we can see it then it must be the full path.
+	if file-exists(lr-op7-path,FALSE) 
+		exit
+	endif
+	// see what elements we have....
+	do clibvfile-get-parts parameters are lr-op7-path
+		returning lf-unc lf-path lf-filename lf-ext
+	if lf-ext  = spaces
+		string lr-op7-path appending ".op7"
+	endif
+	// search the propath
+	do clibvfile-pathlist-to-array
+		parameters get-env("PROPATH") ":"
+		returning lf-propath
+	set i = 1
+	while lf-propath[i] != spaces
+		message "checking " concat(lf-propath[i],"/",lr-op7-path)
+		if file-exists(concat(lf-propath[i],"/",lr-op7-path),FALSE)
+			message "found " lf-propath[i]
+			set lr-op7-path = concat(lf-propath[i],"/",lr-op7-path)
+			exit 0
+		endif
+		set i += 1
+	end-while
+	set lr-op7-path = spaces
+	set ws-last-error = "load code not found in path"
+	exit 1
+end-procedure
 
 procedure testrig
 local
