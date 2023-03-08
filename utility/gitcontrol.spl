@@ -219,7 +219,8 @@ Putting an existing folder into GIT
 
 	* Ensure SSH has been setup correctly using the menu option.
 	* Setup a repository in Github to mirror a folder tree on the local machine (i.e. this one) 
-	* Use this program to select a folder and initialise it
+	* Use this program to select a folder and initialise it.  You will be prompted for a branch name.
+	  Set this to the latest Pronto Version number that the code could be used with.
 	* Register the key from the local machine on Github
 	* Find the SSH path in Github and define a remote repository in this program
 	* Do an initial Push of all code to the remote
@@ -232,7 +233,7 @@ Establishing a local copy of an already existing GIT repository
 	* Check the repo on github and determine the address from the "Code" option at the top of the repo. 
 	  (Use the SSH option)
 	* Check the branches from the branch dropdown on the LHS of the repo on the github website
-	* Select the CLONE option from the main menu,
+	* Select the CLONE option from the main menu.
 
 
 Reference Section
