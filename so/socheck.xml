@@ -1,0 +1,6 @@
+<?xml version="1.0"?>
+<configuration>
+  <ws-config-scan-like-stock-codes>FALSE</ws-config-scan-like-stock-codes>
+  <ws-config-allow-call-to-m5delfifo>TRUE</ws-config-allow-call-to-m5delfifo>
+  <ws-config-qty-to-use>S</ws-config-qty-to-use>
+</configuration>
