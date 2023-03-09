@@ -1,5 +1,5 @@
 ////////////////////////////////////////////////////////////////////////////////
-// Program : 
+// Program : Po Import
 //=========================================================================//
 // Copyright (C) Velocity Global Ltd 2013
 //
@@ -14,6 +14,80 @@
 // Date		Who	SDR		What
 // 3Sep13	rayb		written
 ////////////////////////////////////////////////////////////////////////////////
+/*
+========
+vglpoimp
+========
+
+This program reads a text file to import a purchase order.
+
+
+File Layout
+~~~~~~~~~~~
+
+The import file is a comma separated text file with multiple 
+record types.
+
+Record Types
+------------
+
+There are four record types:
+
+	======= ================================
+	Col 1   Description
+	======= ================================
+	   H    Header
+	   L    Normal (Stock) Lines
+	   S    Special Lines
+	   C    Charge lines
+	======= ================================
+
+Header lines
+-----------------
+
+	* PO Number (spaces for new po)
+	* Backorder Flag  (spaces for new po)
+	* Creditor Code
+	* Warehouse Code
+	* ETA (Any format supported by date2julian)
+	  If not supplied then the default lead time from cre-profile-details is used.
+	* Short Notes for PO Header
+
+Normal lines
+-----------------
+	
+	* Item code
+	* Qty
+	* Price
+	* Supplier Stock code
+	* Uom
+
+Special lines
+-----------------
+
+	* Desc 
+	* GL Account / Job Cost cat
+	* Supplier Stock Code
+	* Qty
+	* Rate
+
+
+Charge lines
+-----------------
+
+	* Desc 
+	* Amount
+
+Sample File
+~~~~~~~~~~~
+
+Sample file::
+
+	H|||S0007|W02||TEST Import
+	L|EQ100|30
+	L|eq130|120
+
+*/
  
 #include "../include/i8secabt.spl" 
 #include "../include/i8proglog.spl" 
@@ -39,6 +113,7 @@
  
 link "clib/clibvcvt"
 link "clib/clibjobcat"
+link "clib/clibvfile"
 
 object po-text
 	type is text
@@ -55,6 +130,7 @@ field
 	ws-current-record-no					type number
 	ws-current-po-order-no					like po-order-no
 	ws-current-po-backorder-flag			like po-backorder-flag
+	ws-quiet-mode							type boolean
  
 procedure main 
 local
@@ -73,6 +149,7 @@ local
 		set ws-separator = "|"
 	endif
 	I8GPARAM_FLAG("-comma",FALSE,lf-flag-set)
+	I8GPARAM_FLAG("-quiet",FALSE,ws-quiet-mode)
 	if lf-flag-set 
 		set ws-separator = ","
 	endif
@@ -88,46 +165,118 @@ local
 	do open-report
 	do read-file
 	if ws-transaction-ok = FALSE
+		if not ws-quiet-mode
+			message-box param-text("<<P1>><<BR>><<p2>>"
+				,"There was an error during this import.  "
+				,"Use F5 to review the error report")
+				title is ws-function-title
+				message-buttons  MSG_BOX_CANCEL
+				icon MSG_BOX_STOP
+		endif
 		exit 1
+	endif
+	if not ws-quiet-mode
+		message-box "Purchase Orders imported successfully"
+			title is ws-function-title
+			message-buttons  MSG_BOX_OK
+			icon MSG_BOX_INFORMATION
 	endif
 end-procedure
 
 screen get-params
+local
+	lf-local-file						pic x(1024) type string
+	lf-unc								pic x(20) type string
+	lf-path								pic x(512) type string
+	lf-filename							pic x(128) type string
+	lf-ext								pic x(10) type string
 	window @1,1 to @8,70
 		title "Purchase Order Import"
-	form-entry
+	responsive
 before
 	if login-id() = "rayb"
 		set ws-filename = "/tmp/po.txt"
 		set ws-separator = ","
 	endif
 detail
-	accept ws-filename @2,5 pic x(60)
-		title "File:"
-		default ws-filename
-		help concat("Full path to file relative to current directory (" dir() ")")
-	box @4,10 to @6,50
-		title "Separator"
-	radio-button ws-separator
-		@5,20 "," title  "Comma (,)"
-		@5,35 "|" title  "Pipe (|)"
-//		right-coordinate
-		default ws-separator
-		before-radio-button
-			if ws-separator not in { ',' '|' }
-				set ws-separator = "|"
+	screen-group // ---- Parameters ----------------------------
+		title "Parameters"  // The title is optional
+		accept ws-filename pic x(60)
+			title "File:"
+			default ws-filename
+			help concat("Full path to file relative to current directory (" dir() ")")
+		on help-key
+			set lf-local-file = client-file-browse(spaces,spaces,"CSV Files|*.csv","Select PO File",0)
+			if lf-local-file = "*CANCELLED*"
+				set ws-filename = spaces
+			else
+				do clibvfile-get-parts parameters are lf-local-file
+					returning lf-unc lf-path lf-filename lf-ext
+				set ws-filename = str-concat("/tmp/" lf-filename "." lf-ext)
+				command "proclientft" parameters
+					"-r"
+					lf-local-file
+					ws-filename
 			endif
-		end-before-radio-button
-		/*
-		validations
-			//
-		end-validations
+			if file-exists(ws-filename,false)
+				do guess-separator-from-file parameters ws-filename returning ws-separator
+				refresh ws-separator
+			endif
+			re-enter ws-filename
+		endon	
 		on change
-			//
-		end-on-change
-		*/
-	end-radio-button 
+			if file-exists(ws-filename,false)
+				do guess-separator-from-file parameters ws-filename returning ws-separator
+			endif
+			refresh ws-separator
+		endon 
+		field-group // ---- Separator ----------------------------
+			title "Separator"  // Title is optional
+			radio-button ws-separator
+				"," title  "Comma (,)"
+				"|" title  "Pipe (|)"
+				default ws-separator
+				before-radio-button
+					if ws-separator not in { ',' '|' }
+						set ws-separator = "|"
+					endif
+				end-before-radio-button
+			end-radio-button 
+		end-field-group // ---- Separator --------------------------------------
+	end-screen-group // ---- Parameters --------------------------------------
 end-screen
+
+procedure guess-separator-from-file
+parameters
+	lf-filename							like ws-filename
+returning 
+	lr-separator						pic x
+local
+	lf-comma-count						type number
+	lf-pipe-count						type number
+	// try and guess the separator from the first record of
+	// the file
+	open po-text
+		file is ws-filename
+	on error
+		// do nothing
+	else
+		get  po-text first
+		while pt-record != spaces
+			if substring(pt-record,1,1) = "|"
+				set lf-pipe-count += 1
+			elseif substring(pt-record,1,1) = ","
+				set lf-comma-count += 1
+			endif
+			string pt-record deleting 1 to 1
+		endwhile
+		if lf-pipe-count > lf-comma-count 
+			set lr-separator = "|"
+		else
+			set lr-separator = ","
+		endif
+	endon
+end-procedure
 
 procedure report-header
 	print company-name in col 1
@@ -279,6 +428,18 @@ local
 	do clibvcvt-extract-via-delimiter 
 		parameters lp-line lp-sep
 		returning lf-work lp-line 
+	if lf-work = spaces
+		// if not specified use the normal lead time from the
+		// cre-profile-details
+		get cre-profile-details
+			on index cre-accountcode
+			key is lf-cre-accountcode
+		on error
+			initialise cre-profile-details
+				leaving cre-accountcode
+		endon
+		set lf-work = format-picture(today() + cre-normal-lead-time,"ddmmmyyyy")
+	endif
 	do clibvcvt-date parameters are lf-work '4'
 		returning lf-eta-date
 	// don't really care whether the ETA date is valid or not.
