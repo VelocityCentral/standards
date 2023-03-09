@@ -3,20 +3,10 @@
 This is the program that Sonja wrote for image holdings to paste
 their stock take from a spreadsheet.
 
-It holds everything in a temp table, validates and then posts as 
-necessary.
-
-Some work before use:
-	tidy
-	remove t-line-error.  This is an array that contains a boolean
-	for every input data field.  the purpose is purely to colour
-		the field on the screen so the user can see which FIELD is in error.
-		At the very least - change the name to f-field-in-error.
+It has been updated to add the bin location but not thoroughly tested.
+Please test before use.
 
 */
-
-
-
 ////////////////////////////////////////////////////////////////////////////////
 // Program : Stock Take count loader 
 //=========================================================================//
@@ -36,7 +26,6 @@ Some work before use:
 #include '../include/i8secabt.spl'
 #include '../include/i85codes.spl'      // system table code maint
 #include '../include/i8proglog.spl'
-#include '../include/i85whse.spl'
 #include '../include/m4enqstk.spl'
 //#define DO_NOT_PRINT_STOCK_TAKE_CONTROL_PARAMS			
 #include "../stk/i4stktctrl.spl"	
@@ -47,79 +36,53 @@ link 'clib/clibusertable'
 #define DG_FIELDS	99
 
 #define UPDATE_RECORD(x) \
-			set t-line-error[x] = TRUE \
-			set lr-valid = FALSE \
-			insert tmp-error
+	set t-fld-in-error[x] = TRUE \
+	set lr-valid = FALSE \
+	insert tmp-error
 
 #define COLOUR_FIELD(x) \
-	COLOUR is BLACK on if-then-else(sumarray(t-line-error,1,DG_FIELDS) = 0,WHITE, \
-			if-then-else(t-line-error[x],RED,YELLOW))
+	COLOUR is BLACK on if-then-else(sumarray(t-fld-in-error,1,DG_FIELDS) = 0,WHITE, \
+			if-then-else(t-fld-in-error[x],RED,YELLOW))
 
 
 object tmp-object
 	type is memory
 	record is
-		t-line-seq					type number pic 99
-		t-stock-code				like stock-code
-		t-whse-code					like whse-code
-		t-stv-lot-batch-no			like stv-lot-batch-no
-		t-stv-shelf-life			like stv-shelf-life-date
-		t-stv-count-qty				like stv-count-qty
-// rjb - let's talk about arrays.  Temp objects are better.
-		t-line-error				type boolean occurs DG_FIELDS
-		t-line-error-col-disp		type number pic 9
+		t-line-seq						type number pic 99
+		t-stock-code					like stock-code
+		t-whse-code						like whse-code
+		t-stv-bin-location				like stv-bin-location
+		t-stv-lot-batch-no				like stv-lot-batch-no
+		t-stv-shelf-life				like stv-shelf-life-date
+		t-stv-count-qty					like stv-count-qty
+		t-fld-in-error					type boolean occurs DG_FIELDS
+		t-line-error-count				type number pic 9
 	endrecord
 	key is t-line-seq
 
-//RJBCR- INDENTING
 object tmp-error
-		type is memory
-		record is
-			tmp-line-seq			like t-line-seq
-			tmp-error-txt			type string pic x(300)
-		endrecord
-		key is tmp-line-seq
+	type is memory
+	record is
+		tmp-line-seq			like t-line-seq
+		tmp-error-txt			type string pic x(300)
+	endrecord
+	key is tmp-line-seq
 
 object tmp-duplicates
-		type is memory
-		record is
-			t-dup-line-seq			like t-line-seq
-			t-dup-stock-code		like stock-code
-			t-dup-whse-code			like whse-code
-			t-dup-batch-no			like stv-lot-batch-no
-			t-dup-shelf-life		like stv-shelf-life-date
-			t-dup-count-qty			like stv-count-qty
-		endrecord
-		key is t-dup-stock-code t-dup-whse-code t-dup-batch-no t-dup-shelf-life
+	type is memory
+	record is
+		t-dup-line-seq			like t-line-seq
+		t-dup-stock-code		like stock-code
+		t-dup-whse-code			like whse-code
+		t-dup-batch-no			like stv-lot-batch-no
+		t-dup-shelf-life		like stv-shelf-life-date
+		t-dup-location			like stv-bin-location
+		t-dup-count-qty			like stv-count-qty
+	endrecord
+	key is t-dup-stock-code t-dup-whse-code t-dup-batch-no t-dup-shelf-life t-dup-location
 
 field
-//RJBCR- INDENTING prefer 1 tab
-		ws-function-title			type string
-
-mode md-validate
-		prompt "Validate"
-		help "Validate all data in grid, remove zero counts and combine duplicates"
-		when t-stock-code <> spaces
-		always-show
-
-mode md-update
-		prompt "Update"
-		help "Validate, Load and Update all grid data into stocktake records"
-		when t-stock-code <> spaces
-		always-show
-
-mode md-error
-		prompt "Err&ors"
-		help "Show Errors for the line"
-		when sum-array(t-line-error,1,DG_FIELDS) > 0
-		always-show
-
-// separate normal entry mode from a paste entry mode
-// but use process entry to make it work like entry mode.
-mode md-paste
-		prompt "Paste"
-		help "Enter records via Paste"
-		process entry
+	ws-function-title			type string
 
 procedure main
 	get system-control first
@@ -127,10 +90,9 @@ procedure main
 		abort 'No Control Record'
 	endon
 	do i8secabt-check-abort
-		parameters are sys-consolidation-division login-id() 'ZUSR' 'M026'
+		parameters are sys-consolidation-division login-id() 'ZVG' 'M021'
 		returning ws-function-title 
 	do i8proglog-write-log
- // 	set ws-function-title = 'Stock Take Loader'
 	do accept-validation-parameters
 end-procedure
 
@@ -140,173 +102,186 @@ local
 	lf-count-date					type date
 	//
 	allowed entry
-	window @1,1 to @18,80												
+	responsive
 	title is ws-function-title
-before
-	box @4,1 to @15,80 title is "Stocktake Details"
 detail
-	accept lf-control-code @2,20
-		title "Stocktake Control:"
-		default lf-control-code
-		help 'Enter the stocktake control code you wish to preload [HELP]'
-	on help-key
-		do enquire-on-stk-take-ctrl
-		if stc-control-code > spaces
-			set lf-control-code = stc-control-code
-		endif
-		reenter
-		endon
-	validation
-		if lf-control-code = spaces
-			message "A valid Stocktake control code is required"
-			re-enter optional
-		else
+	screen-group // ---- Parameters ----------------------------
+		title "Parameters"  
+		accept lf-control-code 
+			title "Stocktake Control:"
+			default lf-control-code
+			help 'Enter the stocktake control code you wish to preload [HELP]'
+			drop-down
+				width 38
+				concat-title
+				select stc-control-code, concat("Freeze Date:", format-picture(stc-freeze-date,"ddmmmyy"))
+					from stock-take-control 
+					where stc-status = 'F'
+				local-sql
+			end-drop-down
+		on change
 			get stock-take-control
 				on index stc-control-code
 				key is lf-control-code
 			on error
-				message "Invalid Stocktake control code"
-				re-enter optional
-			else
-				if stc-status <> 'F'
-					message "Only Stocktakes with a status of F(rozen) can be loaded"
-					re-enter optional
-				endif
+				// unlikley
 			endon
-		endif
-	endvalidation
-	display stc-cyclic-code @6,20 title "Stocktake Cyclic Code:"
-//RJBCR- INDENTING prefer :
-	display stc-stock-code-from @8,20 
-		title "Start Item Code:"
-	display stc-stock-code-to @9,20 title "End Item Code:"
-	display stc-whse-from @11,20 title "Start Warehouse:"
-	display stc-whse-to @12,20 title "End Warehouse:"
-	display stc-class-from @8,55 title "Start ABC Class:"
-	display stc-class-to @9,55 title "End ABC Class:"
-	display stc-group-from @11,55 title "Start Item Group:"
-	display stc-group-to @12,55 title "End Item Group:"
-	accept lf-count-date @2,55
-		title 'Count date:'
-		help 'Enter date of count'
-		default today()
+			refresh whens
+		endon
+		accept lf-count-date 
+			title 'Count date:'
+			help 'Enter date of count'
+			default today()
+	end-screen-group // ---- Parameters --------------------------------------
+	screen-group // ---- Stock Take Details ----------------------------
+		title "Sock Take Details"  
+		when lf-control-code != spaces
+		display stc-cyclic-code 
+			title "Stocktake Cyclic Code:"
+		field-group // ---- Item code Range ----------------------------
+			title "Item code Range"  
+			display stc-stock-code-from pic x(25)
+				title "From"
+			display stc-stock-code-to pic x(25)
+				title "To"
+		end-field-group // ---- Item code Range --------------------------------------
+		field-group // ---- Warehouse Range ----------------------------
+			title "Warehouse Range"  
+			display stc-whse-from 
+				title "From"
+			display stc-whse-to 
+				title "To"
+		end-field-group // ---- Warehouse Range --------------------------------------
+		field-group // ---- ABC Range ----------------------------
+			title "ABC Range"  
+			display stc-class-from 
+				title "From"
+			display stc-class-to 
+				title "To"
+		end-field-group // ---- ABC Range --------------------------------------
+		field-group // ---- Item Group Range ----------------------------
+			title "Item Group Range"  
+			display stc-group-from 
+				title "From"
+			display stc-group-to 
+				title "To"
+		end-field-group // ---- Item Group Range --------------------------------------
+	end-screen-group // ---- ock Take Details --------------------------------------
 	confirm auto
 	confirmed
 		open tmp-object temporary truncate
 		do display-load-datagrid 
-			initial-mode md-paste
+			initial-mode entry
 			parameters lf-count-date
 	endconfirm
 endscreen
 
 screen display-load-datagrid
-// rjb - prefer parameter then returning then local
+parameter
+	lp-count-date						type date
 local
 	lf-description						pic x(117)
 	lf-seq								like t-line-seq
 	lf-valid							type boolean
-parameter
-	lp-count-date						type date
+local mode 
+	lm-validate
+		prompt "Validate"
+		help "Validate all data in grid, remove zero counts and combine duplicates"
+		when t-stock-code <> spaces
+		always-show
+	lm-update
+		prompt "Update"
+		help "Validate, Load and Update all grid data into stocktake records"
+		when t-stock-code <> spaces
+		always-show
 	//
-	allowed search entry md-paste remove correct md-validate md-error md-update 
+	allowed search entry remove correct 
 	primary tmp-object
-	datagrid occurs 18
-	window @1,1 to @24,80
+	datagrid 
+	responsive
 	title ws-function-title
+screen-section
+	title "Errors"
+//	section-when t-line-error-count != 0
+	do display-errors no-wait
+end-screen-section
 before
-	box @1,1 to @3,90
-// rjb indenting
-	title 'Warning'
-	set lf-description = "Data will be lost if you exit without updating. Export data to Excel and reload if correction process is interrupted."
-	display lf-description @2,10 foreground data
-	set lf-seq = 0
+	set lf-description = str-concat("Data will be lost if you exit without updating."
+						"  Export data to Excel and reload if correction process is interrupted.")
+	screen-group // ---- Warning ----------------------------
+		title "Warning"  // The title is optional
+		display lf-description 
+	end-screen-group // ---- Warning --------------------------------------
+	set lf-seq = 1
 detail
 	// need to 0 t-line-seq in paste mode to ensure it increments.
-	if screenmode = md-paste
-		set t-line-seq = 0
-	elseif screenmode = entry
-		set t-line-seq += 1
-	elseif screenmode = md-error
-		do display-errors
+	if screenmode = entry
+		set t-line-seq = lf-seq
 	endif
-	accept t-line-seq @4,1 pic zzz9
-		default t-line-seq
-		title "Seq"
-		optional
-		when screenmode in (search entry)
-		show-value
-	accept t-whse-code  @4,2 pic x(11)
-		Title "Warehouse  "
-		uppercase
-		COLOUR_FIELD(1)
-		optional
-		when screenmode in (md-paste entry correct)
-		show-value
-//	set t-whse-code = ltrim(t-whse-code)
-	set t-whse-code = sub-string(t-whse-code,pattern(t-whse-code,'[A-Z0-9]'),str-len(t-whse-code))
-	accept t-stock-code @4,3 pic x(27)
-		Title "Item Code  "
-		uppercase
-		COLOUR_FIELD(2)
-		optional
-		when screenmode in (md-paste entry correct)
-		show-value
-//	set t-stock-code = ltrim(t-stock-code)
-	set t-stock-code = sub-string(t-stock-code,pattern(t-stock-code,'[A-Z0-9]'),str-len(t-stock-code))
-	accept t-stv-lot-batch-no  @4,5 pic x(16)
-		Title "Batch  "
-		uppercase
-		left
-		COLOUR_FIELD(3)
-		optional
-		when screenmode in (md-paste entry correct)
-		show-value
-//	set t-stv-lot-batch-no = ltrim(t-stv-lot-batch-no)
-	set t-stv-lot-batch-no = sub-string(t-stv-lot-batch-no,pattern(t-stv-lot-batch-no,'[A-Z0-9]'),str-len(t-stv-lot-batch-no))
-	accept t-stv-shelf-life @4,6 
-		Title "Shelf life"
-		COLOUR_FIELD(4)
-		optional
-		when screenmode in (md-paste entry correct)
-		show-value
-	accept t-stv-count-qty  @4,7
-		Title "Count Qty " 
-		COLOUR_FIELD(5)
-		optional
-		when screenmode in (md-paste entry correct)
-		show-value
- 	display t-line-error-col-disp @ 4,8 pic z(6)9
-		Title "Errors "
+	screen-group // ---- Datagrid ----------------------------
+		title "Stock Take"  // The title is optional
+		next row
+		accept t-line-seq col 1 pic zzz9
+			default t-line-seq
+			title "Seq"
+			optional
+			when screenmode in (search)
+			show-value
+		accept t-whse-code  col 2 pic x(11)
+			Title "Warehouse  "
+			uppercase
+			COLOUR_FIELD(1)
+			optional
+			when screenmode in (entry correct)
+			show-value
+		accept t-stock-code col 3 pic x(27)
+			Title "Item Code  "
+			uppercase
+			COLOUR_FIELD(2)
+			optional
+			when screenmode in (entry correct)
+			show-value
+		accept t-stv-bin-location col 4
+			title "Location"
+			uppercase
+			COLOUR_FIELD(3)
+			optional
+			when screenmode in (entry correct)
+			show-value
+		accept t-stv-lot-batch-no  col 5 pic x(16)
+			Title "Batch  "
+			uppercase
+			left
+			COLOUR_FIELD(4)
+			optional
+			when screenmode in (entry correct)
+			show-value
+		accept t-stv-shelf-life col 6 
+			Title "Shelf life"
+			COLOUR_FIELD(5)
+			optional
+			when screenmode in (entry correct)
+			show-value
+		accept t-stv-count-qty  col 7
+			Title "Count Qty " 
+			COLOUR_FIELD(6)
+			optional
+			when screenmode in (entry correct)
+			show-value
+		display t-line-error-count col 8 pic z(6)9
+			Title "Errors "
+		end-screen-group // ---- Datagrid --------------------------------------
 	confirm 
 		when screenmode = remove
 		default is no
 	before
-		// remember this section occurs immediately BEFORE update of the
-		// primary file, so this is a good place to set default values
-		// for fields that have not been "accept"ed. Just be careful when
-		// refreshing.
-		if screenmode = md-paste
-			set lf-seq += 1
-			set t-line-seq = lf-seq
-		elseif screenmode = entry
-			save tmp-object
-			get tmp-object
-				on index t-line-seq
-				last
-			on error
-				set t-line-seq = 99
-				set lf-seq = 99
-			else
-				set t-line-seq += 1
-				set lf-seq += 1
-			endon
-			restore tmp-object leaving t-line-seq
-			message t-line-seq
-		endif
+		set t-line-seq = lf-seq
 	confirmed
-		if screenmode = md-validate
+		set lf-seq += 1
+		if screenmode = lm-validate
 			do validate-record parameter lf-seq returning lf-valid
-		elseif screenmode = md-update
+			refresh whens
+		elseif screenmode = lm-update
 			do validate-record parameter lf-seq returning lf-valid
 			if lf-valid
 				do update-data parameter lp-count-date returning lf-valid
@@ -319,16 +294,22 @@ end-screen
 
 screen display-errors
 	allowed search
-	primary tmp-error
-	where t-line-seq = tmp-line-seq
-	data-grid occurs 16
-	window
+	select * from  tmp-error
+		where t-line-seq = tmp-line-seq
+	data-grid 
+	responsive
 	title "Line Errors"
-	review-from-start
 before
+	// make sure error file is present
+	open tmp-error
+	on error ENOENT
+		open tmp-error temporary
+	endon
 detail
-	accept tmp-error-txt @4,2
-		title "Line Error"
+	screen-group // ---- Errors ----------------------------
+		title "Errors"  // The title is optional
+		accept tmp-error-txt @4,2
+	end-screen-group // ---- rrors --------------------------------------
 	confirm
 	end-confirm
 endscreen
@@ -340,6 +321,7 @@ returning
 	lr-valid							type boolean
 local
 	lf-seq								type number
+	lf-whse-type						pic 99
 	//
 	set lr-valid = TRUE
 	open tmp-error temporary truncate
@@ -352,8 +334,8 @@ local
 	//rjb - indenting
 		detail
 			get tmp-duplicates
-				on index t-dup-stock-code t-dup-whse-code t-dup-batch-no t-dup-shelf-life
-				key is t-stock-code t-whse-code t-stv-lot-batch-no t-stv-shelf-life
+				on index t-dup-stock-code t-dup-whse-code t-dup-batch-no t-dup-shelf-life t-dup-location
+				key is t-stock-code t-whse-code t-stv-lot-batch-no t-stv-shelf-life t-stv-bin-location
 			on error
 				//insert first occurance of (stock code,whse,batch,shelflife)
 				set t-dup-line-seq = t-line-seq
@@ -362,6 +344,7 @@ local
 				set t-dup-batch-no = t-stv-lot-batch-no
 				set t-dup-shelf-life = t-stv-shelf-life
 				set t-dup-count-qty = t-stv-count-qty
+				set t-dup-location = t-stv-bin-location
 				insert tmp-duplicates
 			else
 				set t-dup-count-qty += t-stv-count-qty
@@ -382,6 +365,7 @@ local
 		set t-stv-lot-batch-no = t-dup-batch-no
 		set t-stv-shelf-life = t-dup-shelf-life
 		set t-stv-count-qty = t-dup-count-qty
+		set t-stv-bin-location = t-dup-location
 		insert tmp-object
 	endselect
 	if lf-seq <> lp-seq
@@ -392,7 +376,7 @@ local
 		from tmp-object
 	detail
 		initialise tmp-error
-		set t-line-error[*] = FALSE
+		set t-fld-in-error[*] = FALSE
 		get system-table
 			on index sys-tbl-type sys-tbl-code
 			key is "WH" t-whse-code
@@ -401,6 +385,7 @@ local
 			set tmp-error-txt = concat("Warehouse not valid")
 			UPDATE_RECORD(1)
 		end-on
+		set lf-whse-type = sys-tbl-sales-mtd
 		if t-whse-code < stc-whse-from or t-whse-code > stc-whse-to
 			set tmp-line-seq = t-line-seq
 			set tmp-error-txt = concat("Stock Item: ", str-concat(t-stock-code)," not within whse range")
@@ -448,32 +433,53 @@ local
 			set tmp-error-txt = concat("Stock Item: ", str-concat(t-stock-code)," not within stock group range")
 			UPDATE_RECORD(2)
 		endif
+		// locations
+		if lf-whse-type = 2 and t-stv-bin-location = spaces
+			set tmp-line-seq = t-line-seq
+			set tmp-error-txt = "Bin Locations must be specified for this warehouse"
+			UPDATE_RECORD(3)
+		endif
+		if lf-whse-type = 3 
+			get warehouse-valid-locations
+				on index whse-code sl-location-code
+				key is t-whse-code t-stv-bin-location
+			on error ENOREC
+				set tmp-line-seq = t-line-seq
+				set tmp-error-txt = "Bin Locations must be valid (pre-defined) for this warehouse"
+				UPDATE_RECORD(3)
+			endon
+		endif
 		if stk-serialized-flag = "L" and t-stv-lot-batch-no = spaces
 			set tmp-line-seq = t-line-seq
 			set tmp-error-txt = concat("Lot tracked item MUST have lot number entered")
-			UPDATE_RECORD(3)
+			UPDATE_RECORD(4)
+		endif
+		if stk-serialized-flag != "L" and t-stv-lot-batch-no != spaces
+			set tmp-line-seq = t-line-seq
+			set tmp-error-txt = concat("Lot code entred for item that is not lot controlled")
+			UPDATE_RECORD(4)
 		endif
 		if stk-shelf-life-days <> ZERO and stk-serialized-flag = "L"
 			if t-stv-shelf-life = ZERO
 				set tmp-line-seq = t-line-seq
 				set tmp-error-txt = concat("Lot tracked items MUST have shelf life date entered")
-				UPDATE_RECORD(4)
+				UPDATE_RECORD(5)
 			endif
 		endif
 		if t-stv-shelf-life <> ZERO
 			if t-stv-shelf-life not between DATE-TO-JULIAN("01-Jan-2005") and DATE-TO-JULIAN("31-Dec-2050")
 				set tmp-line-seq = t-line-seq
 				set tmp-error-txt = concat("Shelf life must be between 01-Jan-2005 and 31-Dec-2050")
-				UPDATE_RECORD(4)
+				UPDATE_RECORD(5)
 			endif
 		endif
 		if t-stv-count-qty < ZERO
 			set tmp-line-seq = t-line-seq
 			set tmp-error-txt = concat("Counted quantity CANNOT be negative")
-			UPDATE_RECORD(5)
+			UPDATE_RECORD(6)
 		endif
-		if sum-array(t-line-error,1,DG_FIELDS) > ZERO
-			set t-line-error-col-disp = sum-array(t-line-error,1,DG_FIELDS) 
+		if sum-array(t-fld-in-error,1,DG_FIELDS) > ZERO
+			set t-line-error-count = sum-array(t-fld-in-error,1,DG_FIELDS) 
 		endif
 		update tmp-object
 	endselect
@@ -509,7 +515,7 @@ parameter
 			where whse-code = t-whse-code
 				and stock-code = t-stock-code
 				and stv-lot-batch-no = t-stv-lot-batch-no
-				and stv-bin-location = spaces
+				and stv-bin-location = t-stv-bin-location
 				for update
 		detail
 			set lf-exists = TRUE
@@ -529,6 +535,7 @@ parameter
 			set stv-freeze-date-time = date-time(stc-freeze-date,0,gmt)
 			set stock-code = t-stock-code
 			set whse-code = t-whse-code
+			set stv-bin-location = t-stv-bin-location
 			set stv-freeze-whse-cost = lf-freeze-whse-cost
 			set stv-lot-batch-no = t-stv-lot-batch-no
 			set stv-shelf-life-date = t-stv-shelf-life
