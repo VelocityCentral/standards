@@ -32,8 +32,8 @@ order for the differences so no GL update is required).
 BEFORE posting the stock take (but after the counts have been entered and confirmed)
 run this program.  
 
-It will create an XML file of all the variances in format that looks like a 
-customer sales order ready for importing via EDI. 
+It will create either an XML file (for external use or EDI import) or a csv file in m50loadso format
+of all the variances in format that looks like a customer sales order ready for importing via EDI. 
 
 It will also flag the stock take as complete.  
 
@@ -42,15 +42,11 @@ It will also flag the stock take as complete.
  
 #include "../include/i8secabt.spl"
 #include "../include/i8proglog.spl"
-#include "../include/m1enqdeb.spl"
+#include "../so/i50loadso.spl"
  
 field
 	ws-function-title						type string
 
-mode md-select
-	prompt "Create Order"
-mode md-lines
-	prompt "View Lines"
 
 procedure main
 	get system-control first
@@ -67,43 +63,52 @@ end-procedure
 
 
 screen select-stock-take
-	window
+local mode
+	lm-select
+		prompt "Create Order"
+	responsive
 	title ws-function-title
 	select * 
 		from stock-take-control
 		where stc-status = "F"
 		and stc-whse-from = stc-whse-to // can't do range of warehouses
 		order by stc-update-batch-ref desc
-	data-grid occurs 20
-	allowed search md-select md-lines
+	data-grid  occurs 10
+	allowed search
+screen-section
+	title "Review"
+	do view-order parameters stc-control-code no-wait
+end-screen-section
 detail
-	if screenmode = md-select
-		do select-customer entry once parameters are stc-control-code
+	if screenmode = lm-select
+		do create-order-prompt entry once parameters are stc-control-code
 	endif
-	if screenmode = md-lines
-		do view-order parameter are stc-control-code
-	endif
-	accept stc-control-code @2,2
-		title "Code"
-		when screenmode = md-select
-		show-value
-	display stc-whse-from @2,4
-		title "Whse"
-	display stc-freeze-date @2,6
-		title "Date"
-	display stc-login-id @2,12
-		title "User"
+	screen-group // ---- Datagrid ----------------------------
+		accept stc-control-code col 1
+			title "Code"
+			when screenmode = lm-select
+			show-value
+		display stc-whse-from col 2
+			title "Whse"
+		display stc-freeze-date col 3
+			title "Date"
+		display stc-login-id col 4
+			title "User"
+	end-screen-group // ---- Datagrid --------------------------------------
 end-screen
 
-screen select-customer
+screen create-order-prompt
 parameters
 	lp-control-code						like stc-control-code
 local
 	lf-customer							like accountcode
-	window  @1,1 to @5,30
-		relative to @10,10
-		window-position 4
-	title "Enter Customer"
+	lf-type								pic x
+	lf-filename							pic x(128) type string
+	lf-post-to-pronto					type boolean
+	lf-close-stock-take					type boolean
+	responsive
+		window-position 5
+		title "Enter Customer"
 	no-ok-cancel
 before
 	get stock-take-control
@@ -117,41 +122,98 @@ before
 		end-select
 	endon
 detail
-	accept lf-customer @2,10
-		title 'Customer'
-		uppercase
-		default lf-customer
-	on help-key
-		do m1enqdeb-enquire-on-debtors
-			parameter lf-customer
-			returning lf-customer
-		re-enter optional
-	endon
-	validations
-		get deb-master
-			on index accountcode
-			key is lf-customer 
-		on error
-			message-box param-text("<<P1>><<BR>><<p2>>"
-				,"Invalid Customer Code"
-				,"Try Help")
-				title is ws-function-title
-				message-buttons MSG_BOX_CANCEL
-				icon MSG_BOX_STOP
-			re-enter
-		end-on
-	end-validations
+	screen-group // ---- Customer Select ----------------------------
+		title "Customer Select"  // The title is optional
+		accept lf-customer 
+			title 'Customer'
+			uppercase
+			default lf-customer
+			drop-down
+				width 38
+				concat-title
+				select accountcode,shortname, 0 , 
+							,if-then-else(deb-status = spaces,TRUE,FALSE)
+					from deb-master 
+					where warehouse = :stc-whse-from
+			end-drop-down
+		field-group // ---- Type ----------------------------
+			title "Type"  // Title is optional
+			radio-button lf-type
+				"P" title  "Pronto Ready"
+				"X" title  "XML (for external use)"
+				default lf-type
+				before-radio-button
+					if screenmode = form-entry-defaults
+						set lf-type = "P"
+					endif
+				end-before-radio-button
+				on change
+					if lf-type = "X"
+						set lf-filename = str-concat("/tmp/" lf-customer "_consign_" format-picture(today(),"yymmdd") ".xml")
+					else
+						set lf-filename = str-concat("/tmp/consign_" stc-control-code ".csv")
+					endif
+					refresh lf-filename
+					refresh lf-post-to-pronto
+					refresh whens
+				end-on
+			end-radio-button 
+		end-field-group // ---- Type --------------------------------------
+		accept lf-filename pic x(40)
+			title "Filename"
+			help "This is the name of the external file"
+			default lf-filename
+		check-box lf-post-to-pronto 
+			values True False
+			title "Post to Sales Orders"
+			default is lf-post-to-pronto
+			when lf-type = "P"
+			help "Automatically create order in Pronto"
+			before-check-box
+				if screenmode = form-entry-defaults
+					set lf-post-to-pronto = false
+				endif
+			end-before-check-box
+		end-check-box 
+		check-box lf-close-stock-take
+			values True False
+			title "Close Stock Take"
+			default is lf-close-stock-take
+			help "Select this box to close out the stock take"
+			before-check-box
+				if screenmode = form-entry-defaults
+					set lf-close-stock-take = False
+				endif
+			end-before-check-box
+		end-check-box 
+	end-screen-group // ---- Customer Select --------------------------------------
 	confirm 
 		prompt "Ok to Create Order?"
 	confirmed
-		do create-order parameters are lp-control-code lf-customer
+		if lf-type = "X"
+			do create-xml-order parameters are lp-control-code lf-customer lf-filename 
+		else
+			do create-stdcsv-order parameters are lp-control-code lf-customer lf-filename lf-post-to-pronto
+		endif
+	//
+		if lf-close-stock-take
+			do close-stock-take parameters are lp-control-code
+			if exit-status > 0
+				message-box 
+					"The stock take did not close successfully.  Please discuss with the system administrator."
+					title is ws-function-title
+					message-buttons  MSG_BOX_OK
+					icon MSG_BOX_INFORMATION
+			endif
+		endif
 	end-confirm
 end-screen
 
-procedure create-order
+procedure create-xml-order
 parameters
 	lp-control-code						like stc-control-code
 	lp-customer							like accountcode
+	lp-filename							pic x(128) type string
 local
 	lf-doc								type xml-handle
 	lf-root								type xml-handle
@@ -160,6 +222,7 @@ local
 	lf-line								type xml-handle
 	lf-counter							type number
 	lf-error-counter					type number
+	lf-local-filename					pic x(128) type string
 	//
 	// Validate parameters
 	//
@@ -237,26 +300,110 @@ local
 	//
 	// save
 	//
-	do close-stock-take parameters are lp-control-code
-	if exit-status = 0
-		set lf-filename = concat("/tmp/consord_",lp-control-code,"_",str(pid),".xml")
-		if not xml-save-as-file(lf-doc,lf-filename,spaces,2)
-			message-box param-text("<<P1>><<BR>><<p2>>"
-				,"File failed to save"
-				,error-description(file-status))
-				title is ws-function-title
-				message-buttons MSG_BOX_CANCEL
-				icon MSG_BOX_STOP
-		else
-			message-box param-text("<<P1>><<BR>><<p2>><<BR>><<p3>>"
-				,lf-filename
-				,"Successfully Created"
-				,concat(str(lf-counter), " lines added")
-				)
-				title is ws-function-title
-				message-buttons MSG_BOX_OK
-				icon MSG_BOX_INFORMATION
+	if not xml-save-as-file(lf-doc,lp-filename,spaces,2)
+		message-box param-text("<<P1>><<BR>><<p2>>"
+			,"File failed to save"
+			,error-description(file-status))
+			title is ws-function-title
+			message-buttons MSG_BOX_CANCEL
+			icon MSG_BOX_STOP
+	else
+		message-box param-text("<<P1>><<BR>><<p2>><<BR>><<p3>>"
+			,lf-filename
+			,"Successfully Created"
+			,concat(str(lf-counter), " lines added")
+			)
+			title is ws-function-title
+			message-buttons MSG_BOX_OK
+			icon MSG_BOX_INFORMATION
+	endif
+	if file-exists(lp-filename,false)
+		if get-system-metrics(7) =  2
+			set lf-local-filename = client-file-browse(spaces,spaces,"XML Files|*.xml","XML Save File",2)
+			if pattern(lf-local-filename,"?*.xml$") = 0
+				string lf-local-filename appending ".xml"
+			endif
+			// open the file
+			command "proclientft"
+				parameters
+					"-cq"
+					lp-filename
+					lf-local-filename
 		endif
+	endif
+end-procedure
+
+procedure create-stdcsv-order
+parameters
+	lp-control-code						like stc-control-code
+	lp-customer							like accountcode
+	lp-filename							pic x(128) type string
+	lp-post-to-pronto					type boolean
+local
+	lf-first-time						type boolean
+	lf-qty								type number
+	//
+	open std-sales-order-and-lines create permanent
+		file is lp-filename
+	on error
+		message-box param-text("<<P1>><<BR>>File: <<p2>><<BR>>Error:<<p3>>"
+			,"Unable to open file for output."
+			,lp-filename
+			,error-description(file-status())
+			)
+			title is ws-function-title
+			message-buttons  MSG_BOX_CANCEL
+			icon MSG_BOX_STOP
+		exit 1
+	endon
+	get deb-master
+		on index accountcode
+		key is lp-customer
+	on error ENOREC
+		message-box param-text("Invalid Customer Code<<BR>>Customer Code :<<p1>>"
+			,lp-customer)
+			title is ws-function-title
+			message-buttons  MSG_BOX_CANCEL
+			icon MSG_BOX_STOP
+		exit 1
+	endon
+	select 
+		t0.stock-code
+		t1.stk-description
+		lf-qty = stv-whse-qty - stv-count-qty
+		from stock-take-variance as t0
+		left join stock-master as t1 on t0.stock-code = t1.stock-code
+		where stv-control-code = :lp-control-code
+		and (stv-whse-qty - stv-count-qty) != 0
+		order by t0.stock-code
+	before
+		set lf-first-time = TRUE
+	detail
+		initialise std-sales-order-and-lines
+		if lf-first-time
+			set std-record-type = "H"
+			set std-so-cust-code = accountcode
+			set std-so-whse-code = warehouse // from deb-master
+			set std-so-cust-reference = str-concat("Consigned Stock:" stv-control-code)
+			set std-so-order-date = format-picture(today(),"YYMMDDD")
+			set std-so-rep-code = rep-code
+			set std-so-delivery-date = format-picture(today(),"YYMMDDD")
+			//
+			set lf-first-time = FALSE
+		else
+			set std-record-type = "L"
+		endif
+		// Now add the line details
+		set std-stock-code = stock-code
+		set std-sol-ordered-qty = str(lf-qty)
+		//
+		insert std-sales-order-and-lines
+	end-select
+	if lp-post-to-pronto
+		spl 'so/m50loadso' parameters
+			'-std'
+			lp-filename
+			NO
 	endif
 end-procedure
 
