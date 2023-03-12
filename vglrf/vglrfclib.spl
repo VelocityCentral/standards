@@ -22,7 +22,7 @@ field
 //#include "include/i5sostatii.spl"
 #include "include/i8ologdesc.spl"
 
-link "clib/clibcvt"
+link "clib/clibvcvt"
 
 procedure library-init 
 	get system-control first 
@@ -552,7 +552,7 @@ local
 		// then there was at least one and we are positioned on the last
 		set lr-ok = TRUE
 		set lr-pick-date = order-log-date
-		do clibcvt-time parameters are ordlog-new-info 
+		do clibvcvt-time parameters are ordlog-new-info 
 			returning lr-pick-complete-time
 		set lr-pick-duration-secs = ordlog-change-value
 		set lr-picker = ordlog-login-id
